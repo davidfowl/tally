@@ -981,8 +981,8 @@ def load_merchant_rules(csv_path):
 
     rules = []
     with open(csv_path, 'r', encoding='utf-8') as f:
-        # Filter out comment lines before passing to DictReader
-        lines = [line for line in f if not line.strip().startswith('#')]
+        # Filter out comment and empty lines before passing to DictReader
+        lines = [line for line in f if line.strip() and not line.strip().startswith('#')]
         reader = csv.DictReader(lines)
         for row in reader:
             # Skip empty patterns
@@ -1013,6 +1013,110 @@ def get_all_rules(csv_path=None):
 
     # User rules first (checked first, can override baseline)
     return user_rules + list(BASELINE_RULES)
+
+
+def diagnose_rules(csv_path=None):
+    """Get detailed diagnostic information about rule loading.
+
+    Returns a dict with:
+        - baseline_count: Number of built-in baseline rules
+        - user_rules_path: Path to user rules file (or None)
+        - user_rules_exists: Whether the user rules file exists
+        - user_rules_count: Number of user rules loaded
+        - user_rules: List of user rules (pattern, merchant, category, subcategory)
+        - user_rules_errors: List of any errors encountered while loading
+        - total_rules: Total combined rules count
+        - sample_baseline: First few baseline rules for reference
+    """
+    import re
+
+    result = {
+        'baseline_count': len(BASELINE_RULES),
+        'user_rules_path': csv_path,
+        'user_rules_exists': False,
+        'user_rules_count': 0,
+        'user_rules': [],
+        'user_rules_errors': [],
+        'total_rules': len(BASELINE_RULES),
+        'sample_baseline': list(BASELINE_RULES[:5]),
+    }
+
+    if not csv_path:
+        return result
+
+    result['user_rules_exists'] = os.path.exists(csv_path)
+
+    if not result['user_rules_exists']:
+        return result
+
+    # Load user rules with detailed error tracking
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            raw_content = f.read()
+            result['file_size_bytes'] = len(raw_content)
+            result['file_lines'] = raw_content.count('\n') + 1
+
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            non_comment_lines = [line for line in lines if not line.strip().startswith('#') and line.strip()]
+            result['non_comment_lines'] = len(non_comment_lines)
+
+            # Check for header
+            if non_comment_lines:
+                first_line = non_comment_lines[0].strip()
+                if 'Pattern' in first_line and 'Merchant' in first_line:
+                    result['has_header'] = True
+                else:
+                    result['has_header'] = False
+                    result['user_rules_errors'].append(
+                        f"Missing or invalid header. Expected 'Pattern,Merchant,Category,Subcategory', got: {first_line[:50]}"
+                    )
+
+        # Now load rules with validation
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            # Filter out comments AND empty lines
+            lines = [line for line in f if line.strip() and not line.strip().startswith('#')]
+            reader = csv.DictReader(lines)
+
+            row_num = 1  # Start after header
+            for row in reader:
+                row_num += 1
+                pattern = row.get('Pattern', '').strip()
+
+                if not pattern:
+                    continue  # Skip empty patterns silently
+
+                # Validate the regex pattern
+                try:
+                    re.compile(pattern, re.IGNORECASE)
+                except re.error as e:
+                    result['user_rules_errors'].append(
+                        f"Row {row_num}: Invalid regex pattern '{pattern}': {e}"
+                    )
+                    continue
+
+                merchant = row.get('Merchant', '').strip()
+                category = row.get('Category', '').strip()
+                subcategory = row.get('Subcategory', '').strip()
+
+                if not merchant:
+                    result['user_rules_errors'].append(
+                        f"Row {row_num}: Missing merchant name for pattern '{pattern}'"
+                    )
+                if not category:
+                    result['user_rules_errors'].append(
+                        f"Row {row_num}: Missing category for pattern '{pattern}'"
+                    )
+
+                result['user_rules'].append((pattern, merchant, category, subcategory))
+
+        result['user_rules_count'] = len(result['user_rules'])
+        result['total_rules'] = result['user_rules_count'] + result['baseline_count']
+
+    except Exception as e:
+        result['user_rules_errors'].append(f"Failed to read file: {e}")
+
+    return result
 
 
 def clean_description(description):

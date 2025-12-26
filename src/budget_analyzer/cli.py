@@ -13,7 +13,7 @@ import os
 import sys
 
 from .config_loader import load_config
-from .merchant_utils import get_all_rules
+from .merchant_utils import get_all_rules, diagnose_rules
 from .analyzer import (
     parse_amex,
     parse_boa,
@@ -1390,6 +1390,150 @@ def cmd_inspect(args):
     print()
 
 
+def cmd_diag(args):
+    """Handle the 'diag' subcommand - show diagnostic information about config and rules."""
+    import json as json_module
+
+    # Determine config directory
+    if args.config:
+        config_dir = os.path.abspath(args.config)
+    else:
+        config_dir = os.path.abspath('config')
+
+    print("BUDGET ANALYZER DIAGNOSTICS")
+    print("=" * 70)
+    print()
+
+    # Config directory info
+    print("CONFIGURATION")
+    print("-" * 70)
+    print(f"Config directory: {config_dir}")
+    print(f"  Exists: {os.path.isdir(config_dir)}")
+    print()
+
+    if not os.path.isdir(config_dir):
+        print("ERROR: Config directory not found!")
+        print("Run 'budget-analyze init' to create a new budget directory.")
+        sys.exit(1)
+
+    # Settings file
+    settings_path = os.path.join(config_dir, args.settings)
+    print(f"Settings file: {settings_path}")
+    print(f"  Exists: {os.path.exists(settings_path)}")
+
+    config = None
+    if os.path.exists(settings_path):
+        try:
+            config = load_config(config_dir, args.settings)
+            print(f"  Loaded successfully: Yes")
+            print(f"  Year: {config.get('year', 'not set')}")
+            print(f"  Output dir: {config.get('output_dir', 'not set')}")
+            home_locs = config.get('home_locations', set())
+            print(f"  Home locations: {', '.join(sorted(home_locs)) if home_locs else 'auto-detect'}")
+        except Exception as e:
+            print(f"  Loaded successfully: No")
+            print(f"  Error: {e}")
+    print()
+
+    # Data sources
+    if config and config.get('data_sources'):
+        print("DATA SOURCES")
+        print("-" * 70)
+        for i, source in enumerate(config['data_sources'], 1):
+            filepath = os.path.join(config_dir, '..', source['file'])
+            filepath = os.path.normpath(filepath)
+            if not os.path.exists(filepath):
+                filepath = os.path.join(os.path.dirname(config_dir), source['file'])
+
+            print(f"  {i}. {source.get('name', 'unnamed')}")
+            print(f"     File: {source['file']}")
+            print(f"     Exists: {os.path.exists(filepath)}")
+            if source.get('type'):
+                print(f"     Type: {source['type']}")
+            if source.get('format'):
+                print(f"     Format: {source['format']}")
+            print()
+
+    # Merchant rules diagnostics
+    print("MERCHANT RULES")
+    print("-" * 70)
+
+    rules_path = os.path.join(config_dir, 'merchant_categories.csv')
+    diag = diagnose_rules(rules_path)
+
+    print(f"Baseline rules (built-in): {diag['baseline_count']}")
+    print()
+
+    print(f"User rules file: {diag['user_rules_path']}")
+    print(f"  Exists: {diag['user_rules_exists']}")
+
+    if diag['user_rules_exists']:
+        print(f"  File size: {diag.get('file_size_bytes', 0)} bytes")
+        print(f"  Total lines: {diag.get('file_lines', 0)}")
+        print(f"  Non-comment lines: {diag.get('non_comment_lines', 0)}")
+        print(f"  Has valid header: {diag.get('has_header', 'unknown')}")
+        print(f"  Rules loaded: {diag['user_rules_count']}")
+
+        if diag['user_rules_errors']:
+            print()
+            print("  ERRORS/WARNINGS:")
+            for err in diag['user_rules_errors']:
+                print(f"    - {err}")
+
+        if diag['user_rules']:
+            print()
+            print("  USER RULES (all):")
+            for pattern, merchant, category, subcategory in diag['user_rules']:
+                print(f"    {pattern}")
+                print(f"      -> {merchant} | {category} > {subcategory}")
+    print()
+
+    print(f"Total rules (user + baseline): {diag['total_rules']}")
+    print()
+
+    # Sample baseline rules
+    print("SAMPLE BASELINE RULES (first 5)")
+    print("-" * 70)
+    for pattern, merchant, category, subcategory in diag['sample_baseline']:
+        print(f"  {pattern[:40]:<40} -> {merchant} | {category} > {subcategory}")
+    print()
+
+    # JSON output option
+    if args.format == 'json':
+        print("JSON OUTPUT")
+        print("-" * 70)
+        output = {
+            'config_dir': config_dir,
+            'config_dir_exists': os.path.isdir(config_dir),
+            'settings_file': settings_path,
+            'settings_exists': os.path.exists(settings_path),
+            'data_sources': [],
+            'rules': {
+                'baseline_count': diag['baseline_count'],
+                'user_rules_path': diag['user_rules_path'],
+                'user_rules_exists': diag['user_rules_exists'],
+                'user_rules_count': diag['user_rules_count'],
+                'user_rules': [
+                    {'pattern': p, 'merchant': m, 'category': c, 'subcategory': s}
+                    for p, m, c, s in diag['user_rules']
+                ],
+                'errors': diag['user_rules_errors'],
+                'total_rules': diag['total_rules'],
+            }
+        }
+        if config and config.get('data_sources'):
+            for source in config['data_sources']:
+                filepath = os.path.join(os.path.dirname(config_dir), source['file'])
+                output['data_sources'].append({
+                    'name': source.get('name'),
+                    'file': source['file'],
+                    'exists': os.path.exists(filepath),
+                    'type': source.get('type'),
+                    'format': source.get('format'),
+                })
+        print(json_module.dumps(output, indent=2))
+
+
 def main():
     """Main entry point for budget-analyze CLI."""
     parser = argparse.ArgumentParser(
@@ -1402,6 +1546,7 @@ Commands:
   run [config]     Analyze transactions and generate spending report
   inspect <file>   Show CSV structure and suggest format string
   discover [config]  Find unknown merchants and suggest rules
+  diag [config]    Show diagnostic info about config and rules
 
 Examples:
   budget-analyze init                 Initialize in current directory
@@ -1412,6 +1557,8 @@ Examples:
   budget-analyze inspect data/bank.csv  Inspect CSV to determine format
   budget-analyze discover             Find unknown merchants, suggest rules
   budget-analyze discover --format json  JSON output for agents
+  budget-analyze diag                  Show diagnostic info about rules
+  budget-analyze diag --format json    JSON output for agents
 '''
     )
 
@@ -1508,6 +1655,29 @@ Examples:
         help='Output format: text (human readable), csv (for import), json (for agents)'
     )
 
+    # diag subcommand
+    diag_parser = subparsers.add_parser(
+        'diag',
+        help='Show diagnostic information about configuration and rules',
+        description='Display detailed diagnostic info to help troubleshoot rule loading issues.'
+    )
+    diag_parser.add_argument(
+        'config',
+        nargs='?',
+        help='Path to config directory (default: ./config)'
+    )
+    diag_parser.add_argument(
+        '--settings', '-s',
+        default='settings.yaml',
+        help='Settings file name (default: settings.yaml)'
+    )
+    diag_parser.add_argument(
+        '--format', '-f',
+        choices=['text', 'json'],
+        default='text',
+        help='Output format: text (human readable), json (for agents)'
+    )
+
     args = parser.parse_args()
 
     # If no command specified, show help
@@ -1524,6 +1694,8 @@ Examples:
         cmd_inspect(args)
     elif args.command == 'discover':
         cmd_discover(args)
+    elif args.command == 'diag':
+        cmd_diag(args)
 
 
 if __name__ == '__main__':

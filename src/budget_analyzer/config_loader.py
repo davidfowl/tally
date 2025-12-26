@@ -161,11 +161,13 @@ def load_config(config_dir, settings_file='settings.yaml'):
     config = load_settings(config_dir, settings_file)
 
     # Process data sources to resolve format specs
-    if 'data_sources' in config:
+    if config.get('data_sources'):
         config['data_sources'] = [
             resolve_source_format(source)
             for source in config['data_sources']
         ]
+    else:
+        config['data_sources'] = []
 
     # Normalize home_locations to a set of uppercase location codes
     # Support legacy home_state for backward compatibility
