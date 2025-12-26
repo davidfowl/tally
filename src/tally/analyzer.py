@@ -1534,6 +1534,75 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None):
         .clickable:hover {{ text-decoration: underline; color: #60a5fa; }}
         .clickable .chevron {{ text-decoration: none !important; display: inline-block; }}
         .location-badge.clickable:hover {{ background: #3b82f6; }}
+
+        /* Legend/Help section */
+        .legend {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }}
+        .legend-header {{
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255,255,255,0.02);
+        }}
+        .legend-header:hover {{
+            background: rgba(255,255,255,0.05);
+        }}
+        .legend-header h3 {{
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #888;
+            margin: 0;
+        }}
+        .legend-header .toggle {{
+            color: #666;
+            font-size: 0.8rem;
+            transition: transform 0.2s;
+        }}
+        .legend.collapsed .legend-header .toggle {{
+            transform: rotate(-90deg);
+        }}
+        .legend-content {{
+            padding: 1rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }}
+        .legend.collapsed .legend-content {{
+            display: none;
+        }}
+        .legend-section h4 {{
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.5px;
+        }}
+        .legend-item {{
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            margin-bottom: 0.4rem;
+            font-size: 0.8rem;
+            color: #aaa;
+        }}
+        .legend-item .badge {{
+            flex-shrink: 0;
+        }}
+        .legend-item code {{
+            background: rgba(255,255,255,0.1);
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            color: #4facfe;
+        }}
     </style>
 </head>
 <body>
@@ -1548,6 +1617,56 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None):
                 <div id="autocompleteList" class="autocomplete-list"></div>
             </div>
             <div id="filterChips" class="filter-chips"></div>
+        </div>
+
+        <div class="legend collapsed" id="legend">
+            <div class="legend-header" onclick="document.getElementById('legend').classList.toggle('collapsed')">
+                <h3>📊 How to Read This Report</h3>
+                <span class="toggle">▼</span>
+            </div>
+            <div class="legend-content">
+                <div class="legend-section">
+                    <h4>Monthly Calculation</h4>
+                    <div class="legend-item">
+                        <span class="badge avg">avg</span>
+                        <span>Average when active — for consistent payments (e.g., Netflix every month)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="badge div">/12</span>
+                        <span>YTD ÷ 12 — for irregular payments (e.g., tuition varies each semester)</span>
+                    </div>
+                </div>
+                <div class="legend-section">
+                    <h4>Spending Categories</h4>
+                    <div class="legend-item">
+                        <span><strong>Monthly Recurring</strong> — Appears 6+ months with consistent amounts</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><strong>Annual Bills</strong> — Once-a-year expenses (insurance, subscriptions)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><strong>Periodic Recurring</strong> — Regular but not monthly (quarterly, bi-annual)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><strong>Travel/Trips</strong> — Spending outside your home location(s)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><strong>Variable</strong> — Discretionary spending that doesn't fit other patterns</span>
+                    </div>
+                </div>
+                <div class="legend-section">
+                    <h4>Terms</h4>
+                    <div class="legend-item">
+                        <span><code>YTD</code> Year-to-date total spending</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><code>/mo</code> Monthly equivalent for budgeting</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><code>Months</code> Number of months with at least one transaction</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="summary-grid">
