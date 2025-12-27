@@ -7,7 +7,7 @@
 ## Install
 
 ```bash
-# Linux/macOS (installs to ~/.local/bin)
+# Linux/macOS (installs to ~/.tally)
 curl -fsSL https://raw.githubusercontent.com/davidfowl/tally/main/install.sh | bash
 
 # Windows PowerShell (installs to %LOCALAPPDATA%\tally)

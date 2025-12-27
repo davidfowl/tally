@@ -5,7 +5,7 @@ set -e
 # Usage: curl -fsSL https://raw.githubusercontent.com/davidfowl/tally/main/install.sh | bash
 
 REPO="davidfowl/tally"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.tally/bin}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 # Colors
@@ -83,14 +83,17 @@ main() {
     # Cleanup
     rm -rf "$DOWNLOAD_PATH"
 
-    # Verify
-    if command -v tally &> /dev/null; then
-        info "Successfully installed tally!"
-        tally version
-    else
-        warn "Installed to ${INSTALL_DIR}/tally but it's not in your PATH"
-        echo "Add this to your shell profile:"
-        echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+    # Verify and show PATH instructions
+    info "Successfully installed tally to ${INSTALL_DIR}/tally"
+    "${INSTALL_DIR}/tally" version
+
+    if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
+        echo ""
+        warn "Add tally to your PATH by adding this to your shell profile:"
+        echo ""
+        echo "  export PATH=\"\$HOME/.tally/bin:\$PATH\""
+        echo ""
+        echo "Then restart your terminal or run: source ~/.bashrc (or ~/.zshrc)"
     fi
 }
 
