@@ -33,9 +33,10 @@ jobs:
       - name: Inject version info
         run: |
           COMMIT_COUNT=$(git rev-list --count HEAD)
-          echo "VERSION = \"0.1.${COMMIT_COUNT}\"" > src/tally/_version.py
-          echo "GIT_SHA = \"${{ github.sha }}\"" >> src/tally/_version.py
-          echo "REPO_URL = \"https://github.com/${{ github.repository }}/tree/${{ github.sha }}\"" >> src/tally/_version.py
+          sed -i.bak "s/^VERSION = .*/VERSION = \"0.1.${COMMIT_COUNT}\"/" src/tally/_version.py
+          sed -i.bak "s/^GIT_SHA = .*/GIT_SHA = \"${{ github.sha }}\"/" src/tally/_version.py
+          sed -i.bak "s|^REPO_URL = .*|REPO_URL = \"https://github.com/${{ github.repository }}\"|" src/tally/_version.py
+          rm -f src/tally/_version.py.bak
           cat src/tally/_version.py
         shell: bash
 
@@ -98,27 +99,18 @@ jobs:
             artifacts/tally-macos-amd64/tally-macos-amd64.zip
             artifacts/tally-windows-amd64/tally-windows-amd64.zip
           body: |
-            ## Tally v${{ steps.version.outputs.version }}
+            ### Install
 
-            Standalone executables for budget transaction analysis.
-
-            ### Downloads
-            | Platform | File |
-            |----------|------|
-            | Linux | `tally-linux-amd64.zip` |
-            | macOS | `tally-macos-amd64.zip` |
-            | Windows | `tally-windows-amd64.zip` |
-
-            ### Usage
+            **Linux / macOS:**
             ```bash
-            # Extract
-            unzip tally-linux-amd64.zip
-
-            # Make executable (Linux/macOS)
-            chmod +x tally
-
-            # Run
-            ./tally version
-            ./tally init ./my-budget
-            ./tally run
+            curl -fsSL https://raw.githubusercontent.com/davidfowl/tally/main/install.sh | bash
             ```
+
+            **Windows PowerShell:**
+            ```powershell
+            irm https://raw.githubusercontent.com/davidfowl/tally/main/install.ps1 | iex
+            ```
+
+            Or download the zip for your platform from the assets below.
+
+            See https://davidfowl.github.io/tally/ for more info.
