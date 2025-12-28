@@ -15,6 +15,10 @@ uv run tally explain -c monthly /path/to/config    # Explain all monthly merchan
 uv run tally diag /path/to/config # Debug config issues
 uv run tally discover /path/to/config # Find unknown merchants
 uv run tally inspect file.csv    # Analyze CSV structure
+uv run tally mcp                 # Start MCP server (stdio)
+uv run tally mcp init            # Auto-configure MCP client
+uv run tally mcp init --client claude-code  # Configure for Claude Code
+uv run tally mcp init --json     # Output JSON config
 uv run pytest tests/             # Run all tests
 uv run pytest tests/test_analyzer.py -v # Run analyzer tests
 ```
@@ -47,7 +51,10 @@ Netflix → Monthly
 - `src/tally/config_loader.py` - Settings loading, migration logic
 - `src/tally/format_parser.py` - CSV format string parsing
 - `src/tally/merchant_utils.py` - Merchant normalization, rule matching
+- `src/tally/mcp_server.py` - MCP server with 8 tools for AI integration
+- `src/tally/mcp_init.py` - MCP client setup for various AI tools
 - `tests/test_analyzer.py` - Main test file for new features
+- `tests/test_mcp.py` - Tests for MCP server tools
 - `docs/` - Marketing website (GitHub Pages)
 - `config/` - Example configuration files
 

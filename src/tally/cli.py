@@ -2438,6 +2438,31 @@ Examples:
         help='Skip confirmation prompts for asset updates'
     )
 
+    # mcp subcommand
+    mcp_parser = subparsers.add_parser(
+        'mcp',
+        help='Start MCP server or configure MCP clients',
+        description='Run tally as an MCP (Model Context Protocol) server for integration with Claude Desktop, VS Code, and other AI tools.'
+    )
+    mcp_subparsers = mcp_parser.add_subparsers(dest='mcp_command')
+
+    # mcp init subcommand
+    mcp_init_parser = mcp_subparsers.add_parser(
+        'init',
+        help='Configure MCP client to use tally',
+        description='Set up tally MCP server on Claude Desktop, VS Code, Cursor, or other clients.'
+    )
+    mcp_init_parser.add_argument(
+        '--client',
+        choices=['claude-desktop', 'vscode', 'cursor', 'claude-code', 'opencode', 'gemini'],
+        help='Specific client to configure (default: auto-detect)'
+    )
+    mcp_init_parser.add_argument(
+        '--json',
+        action='store_true',
+        help='Output JSON config for manual setup'
+    )
+
     args = parser.parse_args()
 
     # If no command specified, show help with banner
@@ -2480,6 +2505,14 @@ Examples:
             print(f"  Run 'tally update' to install")
     elif args.command == 'update':
         cmd_update(args)
+    elif args.command == 'mcp':
+        if args.mcp_command == 'init':
+            from .mcp_init import run_mcp_init
+            run_mcp_init(client=args.client, output_json=args.json)
+        else:
+            # No subcommand - run MCP server
+            from .mcp_server import run_server
+            run_server()
 
 
 if __name__ == '__main__':
