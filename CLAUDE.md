@@ -22,6 +22,8 @@ uv run pytest tests/test_analyzer.py -v # Run analyzer tests
 - `src/tally/format_parser.py` - CSV format string parsing
 - `src/tally/merchant_utils.py` - Merchant normalization, rule matching
 - `tests/test_analyzer.py` - Main test file for new features
+- `docs/` - Marketing website (GitHub Pages)
+- `config/` - Example configuration files
 
 ## IMPORTANT: Requirements
 
@@ -30,18 +32,34 @@ uv run pytest tests/test_analyzer.py -v # Run analyzer tests
 - YOU MUST use Playwright MCP to verify HTML report changes before committing
 
 **Development:**
-- YOU MUST use `uv run` to run tally (not `python -m tally`)
-- YOU MUST reference issues with `Fixes #N` or `Closes #N` in commits
+- YOU MUST use `uv run` to run tally during development
+- YOU MUST NOT use `python -m tally` or direct Python invocation
 
 **Releases:**
-- YOU MUST use GitHub workflow for releases (never manual)
+- YOU MUST use GitHub workflow for releases
+- YOU MUST NOT create releases manually or tag commits directly
+
+**Commits:**
+- YOU MUST use `Fixes #<issue>` or `Closes #<issue>` syntax to auto-close issues:
+  ```
+  Fix tooltip display on mobile
+
+  Fixes #42
+  ```
+- YOU MUST NOT commit without referencing the issue when working on a tracked issue
 
 **Configuration:**
 - YOU MUST maintain backwards compatibility for `settings.yaml`
+- YOU MUST implement automatic migration in `config_loader.py` if breaking changes are unavoidable
 - YOU MUST document new options in `config/settings.yaml.example`
 - YOU MUST update AGENTS.md in `cli.py` for new user-facing features
 
-## Code Style
+## Error Messages & Diagnostics
 
-- Error messages MUST be self-descriptive with actionable suggestions
+- Error messages MUST be self-descriptive and guide users on what to do next
+- SHOULD include specific suggestions (e.g., `Add: columns:\n  description: "{field} ..."`)
+- Use `tally diag` to debug - it shows:
+  - Config directory and settings file status
+  - Data sources with parsed format details (columns, custom captures, templates)
+  - Merchant rules (baseline + user rules)
 - The tool MUST be usable without external documentation
