@@ -16,96 +16,100 @@
             background: linear-gradient(135deg, #0a1f0a 0%, #0d2818 50%, #061a12 100%);
             color: #fff;
             min-height: 100vh;
-            line-height: 1.7;
+            line-height: 1.6;
         }
 
         .container {
-            max-width: 960px;
+            max-width: 1100px;
             margin: 0 auto;
-            padding: 4rem 2rem;
+            padding: 5rem 2rem;
         }
 
         .hero {
             text-align: center;
-            margin-bottom: 3rem;
+            margin-bottom: 5rem;
         }
 
         .logo {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 3rem;
+            font-size: 3.5rem;
             font-weight: 600;
             background: linear-gradient(135deg, #4ade80 0%, #22c55e 50%, #16a34a 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.75rem;
         }
 
         .logo-icon {
-            width: 2.5rem;
-            height: 2.5rem;
+            width: 3rem;
+            height: 3rem;
         }
 
         .callout {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            padding: 1rem 1.5rem;
-            margin-bottom: 2rem;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 1.25rem 2rem;
+            margin-bottom: 4rem;
             text-align: center;
-            color: rgba(255,255,255,0.8);
-            font-size: 0.95rem;
+            color: rgba(255,255,255,0.7);
+            font-size: 1rem;
         }
 
         .tagline {
-            font-size: 1.25rem;
-            color: rgba(255,255,255,0.8);
-            max-width: 500px;
-            margin: 0 auto 1.5rem;
+            font-size: 1.5rem;
+            color: rgba(255,255,255,0.9);
+            max-width: 700px;
+            margin: 0 auto 2rem;
+            font-weight: 400;
+            line-height: 1.5;
         }
 
         .badge {
             display: inline-block;
-            background: rgba(34, 197, 94, 0.15);
-            border: 1px solid rgba(34, 197, 94, 0.3);
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.2);
             color: #4ade80;
-            font-size: 0.8rem;
+            font-size: 0.875rem;
             font-weight: 500;
-            padding: 0.4rem 1rem;
+            padding: 0.5rem 1.25rem;
             border-radius: 20px;
         }
 
         .story-section {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-            margin-bottom: 3rem;
+            gap: 2.5rem;
+            margin-bottom: 5rem;
         }
 
         .story-section .problem,
         .story-section .solution {
             background: rgba(255,255,255,0.02);
             border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 12px;
-            padding: 1.5rem;
+            border-radius: 16px;
+            padding: 2rem;
         }
 
         .story-section .solution {
-            background: rgba(74, 222, 128, 0.05);
-            border-color: rgba(74, 222, 128, 0.2);
+            background: rgba(74, 222, 128, 0.03);
+            border-color: rgba(74, 222, 128, 0.15);
         }
 
         .story-section h2 {
-            margin-bottom: 0.75rem;
+            margin-bottom: 1.25rem;
+            font-size: 1rem;
         }
 
         .story-section p {
-            color: rgba(255,255,255,0.7);
-            font-size: 0.9rem;
-            margin-bottom: 0.75rem;
+            color: rgba(255,255,255,0.8);
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            line-height: 1.7;
         }
 
         .story-section p:last-child {
@@ -115,28 +119,29 @@
         .story-section em {
             color: #4ade80;
             font-style: normal;
+            font-weight: 500;
         }
 
         .transaction-examples,
         .example-rules {
             background: #0d0d0d;
-            border-radius: 6px;
-            padding: 0.75rem 1rem;
-            margin-bottom: 0.75rem;
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.25rem;
         }
 
         .transaction-examples code,
         .example-rules code {
             display: block;
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.7rem;
-            color: rgba(255,255,255,0.6);
-            padding: 0.2rem 0;
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.65);
+            padding: 0.3rem 0;
         }
 
         .example-rules code {
             color: #4ade80;
-            font-size: 0.75rem;
+            font-size: 0.8rem;
         }
 
         .agent-callout {
@@ -160,16 +165,16 @@
         }
 
         .install-section {
-            margin-bottom: 3rem;
+            margin-bottom: 4rem;
         }
 
         h2 {
-            font-size: 0.875rem;
-            font-weight: 500;
+            font-size: 0.8rem;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.1em;
+            letter-spacing: 0.15em;
             color: #4ade80;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
         }
 
         .install-card {
@@ -253,27 +258,27 @@
         }
 
         .workflow {
-            margin-bottom: 3rem;
+            margin-bottom: 4rem;
         }
 
         .workflow-step {
             display: flex;
-            gap: 1rem;
-            padding: 1.25rem;
+            gap: 1.25rem;
+            padding: 1.75rem;
             background: rgba(255,255,255,0.02);
             border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 12px;
+            border-radius: 16px;
         }
 
         .workflow-step.ai-step {
-            background: rgba(74, 222, 128, 0.05);
-            border-color: rgba(74, 222, 128, 0.2);
+            background: rgba(74, 222, 128, 0.03);
+            border-color: rgba(74, 222, 128, 0.15);
         }
 
         .step-number {
-            width: 36px;
-            height: 36px;
-            background: rgba(74, 222, 128, 0.2);
+            width: 42px;
+            height: 42px;
+            background: rgba(74, 222, 128, 0.15);
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -281,7 +286,7 @@
             font-weight: 600;
             color: #4ade80;
             flex-shrink: 0;
-            font-size: 1rem;
+            font-size: 1.1rem;
         }
 
         .step-content {
@@ -290,39 +295,40 @@
 
         .step-cmd {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 1rem;
+            font-size: 0.95rem;
             color: #4ade80;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
         }
 
         .step-title {
-            font-size: 1rem;
+            font-size: 1.1rem;
             font-weight: 600;
-            color: #4ade80;
-            margin-bottom: 0.25rem;
+            color: rgba(255,255,255,0.95);
+            margin-bottom: 0.5rem;
         }
 
         .step-desc {
-            color: rgba(255,255,255,0.6);
-            font-size: 0.9rem;
+            color: rgba(255,255,255,0.7);
+            font-size: 0.95rem;
+            line-height: 1.6;
         }
 
         .ai-loop {
-            margin-top: 0.75rem;
-            padding-left: 1rem;
-            border-left: 2px solid rgba(74, 222, 128, 0.3);
+            margin-top: 1rem;
+            padding-left: 1.25rem;
+            border-left: 2px solid rgba(74, 222, 128, 0.25);
         }
 
         .loop-item {
             color: rgba(255,255,255,0.7);
-            font-size: 0.85rem;
-            padding: 0.35rem 0;
+            font-size: 0.9rem;
+            padding: 0.4rem 0;
         }
 
         .loop-cmd {
             font-family: 'JetBrains Mono', monospace;
             color: #4ade80;
-            font-size: 0.8rem;
+            font-size: 0.85rem;
         }
 
         .workflow-arrow {
@@ -385,14 +391,29 @@
             color: #4ade80;
         }
 
-        @media (max-width: 600px) {
-            .container { padding: 2rem 1.5rem; }
-            .logo { font-size: 2rem; }
-            .tagline { font-size: 1rem; }
-            .story-section { grid-template-columns: 1fr; }
-            .features { grid-template-columns: 1fr; }
-            .command { flex-direction: column; gap: 0.25rem; }
-            .command-name { min-width: auto; }
+        @media (max-width: 768px) {
+            .container { padding: 3rem 1.5rem; }
+            .logo { font-size: 2.5rem; }
+            .logo-icon { width: 2rem; height: 2rem; }
+            .tagline { font-size: 1.15rem; }
+            .hero { margin-bottom: 3rem; }
+            .story-section {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+                margin-bottom: 3rem;
+            }
+            .story-section .problem,
+            .story-section .solution {
+                padding: 1.5rem;
+            }
+            .workflow-step {
+                padding: 1.25rem;
+            }
+            .step-number {
+                width: 36px;
+                height: 36px;
+                font-size: 1rem;
+            }
         }
     </style>
 </head>
@@ -400,12 +421,12 @@
     <div class="container">
         <div class="hero">
             <div class="logo"><img src="logo.svg" alt="Tally logo" class="logo-icon">tally</div>
-            <p class="tagline">A local rule engine for transaction classification. Pair it with an LLM to eliminate the manual work.</p>
-            <span class="badge">Works with Claude Code, Codex, Copilot, Cursor, or a local model</span>
+            <p class="tagline">Beautiful, customizable spending analysis powered by AI. Tally runs locally—no uploads, no cloud service.</p>
+            <span class="badge">Works with Claude Code, Codex, and other command-line based AI assistants</span>
         </div>
 
         <div class="callout">
-            Tally has no AI built in. It's a CLI you can pair with an agent to categorize your transactions.
+            Tally works with your favorite AI coding assistant to automatically categorize transactions. Your files stay on your computer—nothing gets uploaded.
         </div>
 
         <div class="story-section">
@@ -416,16 +437,16 @@
                     <code>AMZN MKTP US*2K7X9</code>
                     <code>SQ *JOES COFFEE SEATTLE</code>
                 </div>
-                <p>Bank transactions are cryptic. Bank categories say "Shopping" when you want "Kids > Clothing" vs "Home > Furniture". They lump restaurants together but you need "Coffee" separate from "Fast Food".</p>
+                <p>Bank transactions look like gibberish. Your bank's categories are too broad—"Shopping" when you need "Kids > Clothing" vs "Home > Furniture". Restaurants get lumped together when you want "Coffee" tracked separately from "Fast Food".</p>
             </div>
             <div class="solution">
                 <h2>The Solution</h2>
-                <p>LLMs have read the internet. They <em>know</em> what "WHOLEFDS MKT" is. They understand "SQ *" means Square. Tell them your rules in plain English:</p>
+                <p>AI assistants <em>know</em> what "WHOLEFDS MKT" is. They understand "SQ *" means Square. Just tell Tally your categorization rules in plain English:</p>
                 <div class="example-rules">
                     <code>"ZELLE to Sarah is babysitting → Childcare"</code>
                     <code>"COSTCO with GAS is fuel, otherwise groceries"</code>
                 </div>
-                <p>The AI writes pattern-matching rules to a CSV. No database. No CMS. Just a text file you control.</p>
+                <p>Tally works with your AI to write the rules to a simple file. No database, no cloud service. Just a file on your computer that you control.</p>
             </div>
         </div>
 
@@ -482,7 +503,7 @@
                 <div class="step-number">2</div>
                 <div class="step-content">
                     <div class="step-cmd">tally init</div>
-                    <div class="step-desc">Creates config folder with AGENTS.md instructions</div>
+                    <div class="step-desc">Tally creates a configuration folder with instructions for your AI</div>
                 </div>
             </div>
 
@@ -491,12 +512,12 @@
             <div class="workflow-step ai-step">
                 <div class="step-number">🤖</div>
                 <div class="step-content">
-                    <div class="step-title">AI Agent Loop</div>
-                    <div class="step-desc">Your AI reads AGENTS.md then:</div>
+                    <div class="step-title">Tally + AI Work Together</div>
+                    <div class="step-desc">Tally guides your AI assistant through the process:</div>
                     <div class="ai-loop">
-                        <div class="loop-item"><span class="loop-cmd">tally discover --format json</span> → finds unknown merchants</div>
-                        <div class="loop-item">AI identifies merchants, writes rules to CSV</div>
-                        <div class="loop-item">Repeat until unknowns are minimal</div>
+                        <div class="loop-item">Tally finds transactions that aren't categorized yet</div>
+                        <div class="loop-item">Your AI identifies merchants and writes categorization rules</div>
+                        <div class="loop-item">Tally repeats until everything is categorized</div>
                     </div>
                 </div>
             </div>
@@ -507,7 +528,7 @@
                 <div class="step-number">3</div>
                 <div class="step-content">
                     <div class="step-cmd">tally run</div>
-                    <div class="step-desc">Generates HTML spending report with all transactions categorized</div>
+                    <div class="step-desc">Tally generates a beautiful spending report with all your transactions categorized</div>
                 </div>
             </div>
 
