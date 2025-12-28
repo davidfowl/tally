@@ -16,8 +16,10 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-amd64
-          - os: macos-latest
+          - os: macos-15-intel
             platform: macos-amd64
+          - os: macos-latest
+            platform: macos-arm64
           - os: windows-latest
             platform: windows-amd64
     runs-on: ${{ matrix.os }}
@@ -137,5 +139,6 @@ jobs:
           files: |
             artifacts/tally-linux-amd64/tally-linux-amd64.zip
             artifacts/tally-macos-amd64/tally-macos-amd64.zip
+            artifacts/tally-macos-amd64/tally-macos-arm64.zip
             artifacts/tally-windows-amd64/tally-windows-amd64.zip
           body: ${{ steps.body.outputs.content }}
