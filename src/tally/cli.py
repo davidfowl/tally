@@ -2212,7 +2212,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  tally init                 Initialize in current directory
+  tally init                 Initialize in ./tally directory
   tally init ./my-budget     Initialize in specified directory
   tally run                  Run analysis (uses ./config)
   tally run ./my-budget/config   Run with specific config
@@ -2239,8 +2239,8 @@ Examples:
     init_parser.add_argument(
         'dir',
         nargs='?',
-        default='.',
-        help='Directory to initialize (default: current directory)'
+        default='tally',
+        help='Directory to initialize (default: ./tally)'
     )
 
     # run subcommand
