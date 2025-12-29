@@ -99,7 +99,7 @@ Use the discover command to find uncategorized transactions:
 
 CUSTOM MERCHANT RULES
 ---------------------
-~900 merchants are built-in. Add overrides in merchant_categories.csv:
+Define custom merchant patterns in merchant_categories.csv:
 
 Pattern,Merchant,Category,Subcategory
 MY LOCAL CAFE,Local Cafe,Food,Coffee
@@ -147,7 +147,7 @@ html_filename: spending_summary.html
 
 STARTER_MERCHANT_CATEGORIES = '''# Custom Merchant Categorization Rules
 #
-# Add your custom rules here. These override the ~700 built-in rules.
+# Define your merchant categorization rules here.
 # Format: Pattern,Merchant,Category,Subcategory
 #
 # - Pattern: Python regex (case-insensitive) matched against transaction descriptions
@@ -155,7 +155,7 @@ STARTER_MERCHANT_CATEGORIES = '''# Custom Merchant Categorization Rules
 # - Use (?!...) for negative lookahead: UBER\\s(?!EATS) excludes Uber Eats
 # - Test patterns at regex101.com (Python flavor)
 #
-# First match wins - your rules are checked before built-in rules.
+# First match wins.
 # Run: tally inspect <file> to see your transaction descriptions.
 #
 # Examples:
@@ -263,14 +263,14 @@ Netflix → Monthly
 
 The `Rule:` line shows:
 - The pattern that matched (e.g., `NETFLIX.*`)
-- The source: `user` (from merchant_categories.csv) or `baseline` (built-in rules)
+- The source: `user` (from merchant_categories.csv) or `built-in` (special transformations)
 
 ## Troubleshooting
 
 When something isn't working, use `tally diag` to inspect:
 - Configuration file location and status
 - Data source format parsing (columns, custom captures, templates)
-- Merchant rules (baseline + user-defined)
+- Merchant rules (user-defined)
 
 ## Your Tasks
 
@@ -1298,16 +1298,16 @@ def cmd_run(args):
         print(f"Config: {config_dir}/{args.settings}")
         print()
 
-    # Load merchant rules (user rules override built-in baseline)
+    # Load merchant rules
     rules_file = os.path.join(config_dir, 'merchant_categories.csv')
     if os.path.exists(rules_file):
         rules = get_all_rules(rules_file)
         if not args.quiet:
-            print(f"Loaded {len(rules)} categorization rules (user + baseline)")
+            print(f"Loaded {len(rules)} categorization rules from {rules_file}")
     else:
-        rules = get_all_rules()  # Use baseline only
+        rules = get_all_rules()  # No rules file
         if not args.quiet:
-            print(f"Using {len(rules)} built-in categorization rules")
+            print(f"No merchant_categories.csv found - transactions will be categorized as Unknown")
 
     # Parse transactions from configured data sources
     all_txns = []
@@ -1877,9 +1877,6 @@ def cmd_diag(args):
     rules_path = os.path.join(config_dir, 'merchant_categories.csv')
     diag = diagnose_rules(rules_path)
 
-    print(f"Baseline rules (built-in): {diag['baseline_count']}")
-    print()
-
     print(f"User rules file: {diag['user_rules_path']}")
     print(f"  Exists: {diag['user_rules_exists']}")
 
@@ -1902,16 +1899,13 @@ def cmd_diag(args):
             for pattern, merchant, category, subcategory in diag['user_rules']:
                 print(f"    {pattern}")
                 print(f"      -> {merchant} | {category} > {subcategory}")
+    else:
+        print()
+        print("  No merchant_categories.csv found.")
+        print("  Transactions will be categorized as 'Unknown'.")
     print()
 
-    print(f"Total rules (user + baseline): {diag['total_rules']}")
-    print()
-
-    # Sample baseline rules
-    print("SAMPLE BASELINE RULES (first 5)")
-    print("-" * 70)
-    for pattern, merchant, category, subcategory in diag['sample_baseline']:
-        print(f"  {pattern[:40]:<40} -> {merchant} | {category} > {subcategory}")
+    print(f"Total rules: {diag['total_rules']}")
     print()
 
     # JSON output option
@@ -1925,7 +1919,6 @@ def cmd_diag(args):
             'settings_exists': os.path.exists(settings_path),
             'data_sources': [],
             'rules': {
-                'baseline_count': diag['baseline_count'],
                 'user_rules_path': diag['user_rules_path'],
                 'user_rules_exists': diag['user_rules_exists'],
                 'user_rules_count': diag['user_rules_count'],
