@@ -929,6 +929,44 @@ Use `tally inspect <file>` to see the CSV structure before creating a format str
 '''
 
 
+def find_config_dir(warn_old_layout=True):
+    """Find the config directory, checking environment and both layouts.
+
+    Resolution order:
+    1. TALLY_CONFIG environment variable (if set and exists)
+    2. ./config (old layout - config in current directory)
+    3. ./tally/config (new layout - config in tally subdirectory)
+
+    If warn_old_layout is True and the old layout is detected, prints a
+    deprecation warning suggesting migration to the new layout.
+
+    Returns None if no config directory is found.
+    """
+    # Check environment variable first
+    env_config = os.environ.get('TALLY_CONFIG')
+    if env_config:
+        env_path = os.path.abspath(env_config)
+        if os.path.isdir(env_path):
+            return env_path
+
+    # Check old layout (backwards compatibility)
+    old_layout = os.path.abspath('config')
+    if os.path.isdir(old_layout):
+        if warn_old_layout:
+            print("Note: Using legacy layout (./config).", file=sys.stderr)
+            print("      Consider migrating to: tally init ./tally", file=sys.stderr)
+            print("      Then move your files to ./tally/config and ./tally/data", file=sys.stderr)
+            print(file=sys.stderr)
+        return old_layout
+
+    # Check new layout
+    new_layout = os.path.abspath(os.path.join('tally', 'config'))
+    if os.path.isdir(new_layout):
+        return new_layout
+
+    return None
+
+
 def init_config(target_dir):
     """Initialize a new config directory with starter files."""
     import datetime
@@ -1116,11 +1154,12 @@ def cmd_run(args):
     if args.config:
         config_dir = os.path.abspath(args.config)
     else:
-        # Default to ./config in current directory
-        config_dir = os.path.abspath('config')
+        # Auto-detect config directory (supports both old and new layouts)
+        config_dir = find_config_dir()
 
-    if not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found: {config_dir}", file=sys.stderr)
+    if not config_dir or not os.path.isdir(config_dir):
+        print(f"Error: Config directory not found.", file=sys.stderr)
+        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
         print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
         sys.exit(1)
 
@@ -1306,10 +1345,11 @@ def cmd_discover(args):
     if args.config:
         config_dir = os.path.abspath(args.config)
     else:
-        config_dir = os.path.abspath('config')
+        config_dir = find_config_dir()
 
-    if not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found: {config_dir}", file=sys.stderr)
+    if not config_dir or not os.path.isdir(config_dir):
+        print(f"Error: Config directory not found.", file=sys.stderr)
+        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
         print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
         sys.exit(1)
 
@@ -1640,7 +1680,7 @@ def cmd_diag(args):
     if args.config:
         config_dir = os.path.abspath(args.config)
     else:
-        config_dir = os.path.abspath('config')
+        config_dir = find_config_dir(warn_old_layout=False) or os.path.abspath('config')
 
     print("BUDGET ANALYZER DIAGNOSTICS")
     print("=" * 70)
@@ -1905,10 +1945,11 @@ def cmd_explain(args):
     elif args.config:
         config_dir = os.path.abspath(args.config)
     else:
-        config_dir = os.path.abspath('config')
+        config_dir = find_config_dir()
 
-    if not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found: {config_dir}", file=sys.stderr)
+    if not config_dir or not os.path.isdir(config_dir):
+        print(f"Error: Config directory not found.", file=sys.stderr)
+        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
         print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
         sys.exit(1)
 
