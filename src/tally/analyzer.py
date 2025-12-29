@@ -1282,6 +1282,9 @@ def write_summary_file_vue(stats, filepath, year=2025, home_locations=None, curr
     one_off_merchants = stats['one_off_merchants']
     variable_merchants = stats['variable_merchants']
 
+    # Get number of months for averaging
+    num_months = stats['num_months']
+
     # Helper function to create merchant IDs
     def make_merchant_id(name):
         return name.replace("'", "").replace('"', '').replace(' ', '_')
@@ -1311,12 +1314,15 @@ def write_summary_file_vue(stats, filepath, year=2025, home_locations=None, curr
                 'category': data.get('category', 'Other'),
                 'subcategory': data.get('subcategory', 'Uncategorized'),
                 'categoryPath': f"{data.get('category', 'Other')}/{data.get('subcategory', 'Uncategorized')}".lower(),
+                'calcType': data.get('calc_type', '/12'),
+                'monthsActive': data.get('months_active', 0),
+                'isConsistent': data.get('is_consistent', False),
+                'ytd': data.get('total', 0),
+                'monthly': data.get('avg_when_active') or (data.get('total', 0) / num_months if num_months > 0 else 0),
+                'count': data.get('count', len(txns)),
                 'transactions': txns
             }
         return merchants
-
-    # Build spending data structure for Vue
-    num_months = stats['num_months']
 
     # Section configurations: (id, merchant_dict, title, has_monthly_column, description)
     section_configs = [

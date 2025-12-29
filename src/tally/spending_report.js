@@ -604,7 +604,18 @@ createApp({
                         plugins: {
                             legend: {
                                 position: 'top',
-                                labels: { boxWidth: 12, padding: 8 }
+                                labels: { boxWidth: 12, padding: 8 },
+                                onClick: (e, legendItem, legend) => {
+                                    // Add category filter when clicking legend
+                                    const category = legendItem.text;
+                                    if (category) addFilter(category, 'category');
+                                    // Also toggle visibility (default behavior)
+                                    const index = legendItem.datasetIndex;
+                                    const ci = legend.chart;
+                                    const meta = ci.getDatasetMeta(index);
+                                    meta.hidden = meta.hidden === null ? !ci.data.datasets[index].hidden : null;
+                                    ci.update();
+                                }
                             }
                         },
                         scales: {
@@ -615,6 +626,24 @@ createApp({
                                 ticks: {
                                     callback: v => '$' + (v/1000).toFixed(0) + 'k'
                                 }
+                            }
+                        },
+                        onClick: (e, elements) => {
+                            if (elements.length > 0) {
+                                const el = elements[0];
+                                const monthIndex = el.index;
+                                const datasetIndex = el.datasetIndex;
+
+                                // Get month from filtered months
+                                const monthsToShow = filteredMonthsForCharts.value;
+                                const month = monthsToShow[monthIndex];
+
+                                // Get category from dataset
+                                const category = categoryMonthChartInstance.data.datasets[datasetIndex]?.label;
+
+                                // Add both filters
+                                if (month) addFilter(month.key, 'month', month.label);
+                                if (category) addFilter(category, 'category');
                             }
                         }
                     }

@@ -167,14 +167,13 @@
                             {{ section.title }}
                             <span class="info-icon" v-if="section.description">ⓘ</span>
                         </h2>
-                        <div>
-                            <span class="section-total">
-                                <template v-if="section.hasMonthlyColumn">
-                                    {{ formatCurrency(sectionTotals[sectionId] / numFilteredMonths) }}/mo &middot;
-                                </template>
-                                {{ formatCurrency(sectionTotals[sectionId]) }}
-                            </span>
-                        </div>
+                        <span class="section-total">
+                            <template v-if="section.hasMonthlyColumn">
+                                <span class="section-monthly">{{ formatCurrency(sectionTotals[sectionId] / numFilteredMonths) }}/mo</span> ·
+                            </template>
+                            <span class="section-ytd">{{ formatCurrency(sectionTotals[sectionId]) }}</span>
+                            <span class="section-pct">({{ formatPct(sectionTotals[sectionId], grandTotal) }})</span>
+                        </span>
                     </div>
                     <div class="section-content" :class="{ collapsed: collapsedSections.has(sectionId) }">
                         <div class="table-wrapper">
@@ -185,6 +184,7 @@
                                         <th v-if="section.hasMonthlyColumn">Months</th>
                                         <th>Count</th>
                                         <th>Category</th>
+                                        <th v-if="section.hasMonthlyColumn" title="avg = average when active, /12 = YTD divided by 12">Type</th>
                                         <th v-if="section.hasMonthlyColumn">Monthly</th>
                                         <th>Total</th>
                                         <th>%</th>
@@ -207,8 +207,13 @@
                                             <td class="category clickable" @click.stop="addFilter(merchant.subcategory, 'category')">
                                                 {{ merchant.subcategory }}
                                             </td>
+                                            <td v-if="section.hasMonthlyColumn">
+                                                <span class="badge" :class="merchant.calcType === 'avg' ? 'avg' : 'div'" :title="merchant.calcType === 'avg' ? 'Average when active — consistent monthly payments' : 'YTD ÷ 12 — irregular payment amounts'">
+                                                    {{ merchant.calcType || '/12' }}
+                                                </span>
+                                            </td>
                                             <td v-if="section.hasMonthlyColumn" class="money">
-                                                {{ formatCurrency(merchant.filteredTotal / numFilteredMonths) }}<span style="font-size: 0.8em">/mo</span>
+                                                {{ formatCurrency(merchant.filteredTotal / numFilteredMonths) }}<span class="per-month">/mo</span>
                                             </td>
                                             <td class="money">{{ formatCurrency(merchant.filteredTotal) }}</td>
                                             <td class="pct">{{ formatPct(merchant.filteredTotal, sectionTotals[sectionId]) }}</td>
@@ -218,31 +223,27 @@
                                             :key="txn.id"
                                             class="txn-row"
                                             :class="{ hidden: !expandedMerchants.has(merchantId) }">
-                                            <td :colspan="section.hasMonthlyColumn ? 2 : 1">
+                                            <td :colspan="section.hasMonthlyColumn ? 8 : 5">
                                                 <div class="txn-detail">
                                                     <span class="txn-date">{{ formatDate(txn.date) }}</span>
                                                     <span class="txn-desc">{{ txn.description }}</span>
+                                                    <span class="txn-amount">{{ formatCurrency(txn.amount) }}</span>
+                                                    <span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
+                                                    <span v-if="txn.location"
+                                                          class="txn-location clickable"
+                                                          :class="getLocationClass(txn.location)"
+                                                          @click.stop="addFilter(txn.location, 'location')">
+                                                        {{ txn.location }}
+                                                    </span>
                                                 </div>
                                             </td>
-                                            <td class="txn-amount">{{ formatCurrency(txn.amount) }}</td>
-                                            <td>
-                                                <span v-if="txn.location"
-                                                      class="txn-location clickable"
-                                                      :class="getLocationClass(txn.location)"
-                                                      @click.stop="addFilter(txn.location, 'location')">
-                                                    {{ txn.location }}
-                                                </span>
-                                            </td>
-                                            <td v-if="section.hasMonthlyColumn"></td>
-                                            <td></td>
-                                            <td></td>
                                         </tr>
                                     </template>
                                     <!-- Total Row -->
                                     <tr class="total-row">
-                                        <td :colspan="section.hasMonthlyColumn ? 4 : 3">Total</td>
+                                        <td :colspan="section.hasMonthlyColumn ? 5 : 3">Total</td>
                                         <td v-if="section.hasMonthlyColumn" class="money">
-                                            {{ formatCurrency(sectionTotals[sectionId] / numFilteredMonths) }}<span style="font-size: 0.8em">/mo</span>
+                                            {{ formatCurrency(sectionTotals[sectionId] / numFilteredMonths) }}<span class="per-month">/mo</span>
                                         </td>
                                         <td class="money">{{ formatCurrency(sectionTotals[sectionId]) }}</td>
                                         <td class="pct">100%</td>

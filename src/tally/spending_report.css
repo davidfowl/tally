@@ -481,6 +481,13 @@ section {
 .section-header .section-pct {
     font-size: 0.9rem;
     color: var(--text-muted);
+    margin-left: 0.5rem;
+}
+.section-header .section-monthly {
+    color: var(--accent-blue);
+}
+.section-header .section-ytd {
+    color: var(--text-primary);
 }
 section.monthly-section .section-header h2 { color: var(--accent-blue); }
 section.annual-section .section-header h2 { color: var(--accent-yellow); }
@@ -673,6 +680,31 @@ th[data-tooltip] { cursor: pointer; }
 }
 .txn-source.boa {
     background: var(--bg-boa);
+    color: white;
+}
+.txn-source.chase {
+    background: #117aca;
+    color: white;
+}
+.txn-source.capitalone, .txn-source.capital {
+    background: #d03027;
+    color: white;
+}
+.txn-source.discover {
+    background: #ff6000;
+    color: white;
+}
+.txn-source.citi {
+    background: #003b70;
+    color: white;
+}
+.txn-source.wells, .txn-source.wellsfargo {
+    background: #d71e28;
+    color: white;
+}
+/* Default source badge style */
+.txn-source:not(.amex):not(.boa):not(.chase):not(.capitalone):not(.capital):not(.discover):not(.citi):not(.wells):not(.wellsfargo) {
+    background: var(--text-muted);
     color: white;
 }
 .txn-location {
