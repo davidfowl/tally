@@ -2506,7 +2506,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['date'][:7]}" data-category="{data.get('category', 'Unknown')}">
                         <td colspan="7"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2564,7 +2564,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['date'][:7]}" data-category="{data.get('category', 'Unknown')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2620,7 +2620,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['date'][:7]}" data-category="{data.get('category', 'Unknown')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2677,7 +2677,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['date'][:7]}" data-category="{data.get('category', 'Unknown')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2733,7 +2733,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['date'][:7]}" data-category="{data.get('category', 'Unknown')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2795,7 +2795,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['date'][:7]}" data-category="{data.get('category', 'Unknown')}">
                         <td colspan="7"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -4086,6 +4086,110 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         toggleTheme = function() {{
             originalToggleTheme();
             setTimeout(updateChartsForTheme, 50);
+        }};
+
+        // Update charts based on filtered transactions
+        function updateChartsFromFilters() {{
+            // Collect data from visible transaction rows
+            const visibleTxns = [];
+            document.querySelectorAll('.txn-row').forEach(row => {{
+                // Check if parent merchant row is visible
+                const merchantId = row.dataset.merchant;
+                const merchantRow = document.querySelector(`.merchant-row[data-merchant="${{merchantId}}"]`);
+                if (merchantRow && merchantRow.style.display !== 'none') {{
+                    visibleTxns.push({{
+                        amount: parseFloat(row.dataset.amount) || 0,
+                        month: row.dataset.month,
+                        category: row.dataset.category
+                    }});
+                }}
+            }});
+
+            // If no filters active, use original data
+            if (visibleTxns.length === 0 || activeFilters.length === 0) {{
+                // Reset to original data
+                if (window.monthlyTrendChart) {{
+                    window.monthlyTrendChart.data.labels = chartData.monthly.labels;
+                    window.monthlyTrendChart.data.datasets[0].data = chartData.monthly.data;
+                    window.monthlyTrendChart.update();
+                }}
+                if (window.categoryPieChart) {{
+                    window.categoryPieChart.data.labels = chartData.categoryPie.labels;
+                    window.categoryPieChart.data.datasets[0].data = chartData.categoryPie.data;
+                    window.categoryPieChart.update();
+                }}
+                if (window.categoryByMonthChart) {{
+                    window.categoryByMonthChart.data.datasets = chartData.categoryByMonth.datasets.map((ds, i) => ({{
+                        ...window.categoryByMonthChart.data.datasets[i],
+                        data: ds.data
+                    }}));
+                    window.categoryByMonthChart.update();
+                }}
+                return;
+            }}
+
+            // Calculate monthly totals
+            const monthlyTotals = {{}};
+            const categoryTotals = {{}};
+            const categoryMonthly = {{}};
+
+            visibleTxns.forEach(txn => {{
+                // Monthly totals
+                monthlyTotals[txn.month] = (monthlyTotals[txn.month] || 0) + txn.amount;
+
+                // Category totals
+                categoryTotals[txn.category] = (categoryTotals[txn.category] || 0) + txn.amount;
+
+                // Category by month
+                if (!categoryMonthly[txn.category]) categoryMonthly[txn.category] = {{}};
+                categoryMonthly[txn.category][txn.month] = (categoryMonthly[txn.category][txn.month] || 0) + txn.amount;
+            }});
+
+            // Update monthly trend chart
+            if (window.monthlyTrendChart) {{
+                const sortedMonths = Object.keys(monthlyTotals).sort();
+                const labels = sortedMonths.map(m => {{
+                    const [year, month] = m.split('-');
+                    return new Date(year, month - 1).toLocaleDateString('en-US', {{ month: 'short', year: 'numeric' }});
+                }});
+                window.monthlyTrendChart.data.labels = labels;
+                window.monthlyTrendChart.data.datasets[0].data = sortedMonths.map(m => monthlyTotals[m]);
+                window.monthlyTrendChart.update();
+            }}
+
+            // Update category pie chart
+            if (window.categoryPieChart) {{
+                const sortedCats = Object.entries(categoryTotals)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 8);
+                window.categoryPieChart.data.labels = sortedCats.map(c => c[0]);
+                window.categoryPieChart.data.datasets[0].data = sortedCats.map(c => c[1]);
+                window.categoryPieChart.update();
+            }}
+
+            // Update category by month chart
+            if (window.categoryByMonthChart) {{
+                const sortedMonths = Object.keys(monthlyTotals).sort();
+                const labels = sortedMonths.map(m => {{
+                    const [year, month] = m.split('-');
+                    return new Date(year, month - 1).toLocaleDateString('en-US', {{ month: 'short', year: 'numeric' }});
+                }});
+                window.categoryByMonthChart.data.labels = labels;
+
+                // Update each dataset
+                window.categoryByMonthChart.data.datasets.forEach(ds => {{
+                    const catData = categoryMonthly[ds.label] || {{}};
+                    ds.data = sortedMonths.map(m => catData[m] || 0);
+                }});
+                window.categoryByMonthChart.update();
+            }}
+        }}
+
+        // Hook into applyFilters to update charts
+        const originalApplyFiltersForCharts = applyFilters;
+        applyFilters = function() {{
+            originalApplyFiltersForCharts();
+            setTimeout(updateChartsFromFilters, 100);
         }};
     </script>
 
