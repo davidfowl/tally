@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import os
+import shutil
 import sys
 
 from ._version import (
@@ -929,7 +930,7 @@ Use `tally inspect <file>` to see the CSV structure before creating a format str
 '''
 
 
-def find_config_dir(warn_old_layout=True):
+def find_config_dir():
     """Find the config directory, checking environment and both layouts.
 
     Resolution order:
@@ -937,8 +938,8 @@ def find_config_dir(warn_old_layout=True):
     2. ./config (old layout - config in current directory)
     3. ./tally/config (new layout - config in tally subdirectory)
 
-    If warn_old_layout is True and the old layout is detected, prints a
-    deprecation warning suggesting migration to the new layout.
+    Note: Migration prompts are handled separately by run_migrations()
+    during 'tally update', not here.
 
     Returns None if no config directory is found.
     """
@@ -950,13 +951,9 @@ def find_config_dir(warn_old_layout=True):
             return env_path
 
     # Check old layout (backwards compatibility)
+    # Note: Migration prompts are handled by run_migrations() during 'tally update'
     old_layout = os.path.abspath('config')
     if os.path.isdir(old_layout):
-        if warn_old_layout:
-            print("Note: Using legacy layout (./config).", file=sys.stderr)
-            print("      Consider migrating to: tally init ./tally", file=sys.stderr)
-            print("      Then move your files to ./tally/config and ./tally/data", file=sys.stderr)
-            print(file=sys.stderr)
         return old_layout
 
     # Check new layout
@@ -965,6 +962,116 @@ def find_config_dir(warn_old_layout=True):
         return new_layout
 
     return None
+
+
+# Schema version for asset migrations
+SCHEMA_VERSION = 1
+
+
+def get_schema_version(config_dir):
+    """Get current schema version from config directory.
+
+    Returns:
+        int: Schema version (0 if no marker file exists - legacy layout)
+    """
+    schema_file = os.path.join(config_dir, '.tally-schema')
+    if os.path.exists(schema_file):
+        try:
+            with open(schema_file) as f:
+                return int(f.read().strip())
+        except (ValueError, IOError):
+            return 0
+    return 0
+
+
+def run_migrations(config_dir, skip_confirm=False):
+    """Run any pending migrations on the config directory.
+
+    Args:
+        config_dir: Path to current config directory
+        skip_confirm: If True, skip confirmation prompts (--yes flag)
+
+    Returns:
+        str: Path to config directory (may change if layout migrated)
+    """
+    current = get_schema_version(config_dir)
+
+    if current >= SCHEMA_VERSION:
+        return config_dir  # Already up to date
+
+    # Run migrations in order
+    if current < 1:
+        result = migrate_v0_to_v1(config_dir, skip_confirm)
+        if result:
+            config_dir = result
+
+    return config_dir
+
+
+def migrate_v0_to_v1(old_config_dir, skip_confirm=False):
+    """Migrate from legacy layout (./config) to new layout (./tally/config).
+
+    Args:
+        old_config_dir: Path to the old config directory
+        skip_confirm: If True, skip confirmation prompt
+
+    Returns:
+        str: Path to new config directory, or None if user declined
+    """
+    # Only migrate if we're in the old layout (./config at working directory root)
+    if os.path.basename(old_config_dir) != 'config':
+        return None
+    if os.path.dirname(old_config_dir) != os.getcwd():
+        return None
+
+    # Prompt user (skip if non-interactive or --yes flag)
+    if not skip_confirm:
+        # In non-interactive mode (e.g., LLM/CI), skip migration silently
+        if not sys.stdin.isatty():
+            return None
+
+        print()
+        print("Migration available: Layout update")
+        print("  Current: ./config (legacy layout)")
+        print("  New: ./tally/config")
+        print()
+        try:
+            response = input("Migrate to new layout? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nSkipped.")
+            return None
+        if response == 'n':
+            return None
+
+    # Perform migration
+    tally_dir = os.path.abspath('tally')
+    try:
+        os.makedirs(tally_dir, exist_ok=True)
+
+        # Move config directory
+        new_config = os.path.join(tally_dir, 'config')
+        print(f"  Moving config/ → tally/config/")
+        shutil.move(old_config_dir, new_config)
+
+        # Move data and output directories if they exist
+        for subdir in ['data', 'output']:
+            old_path = os.path.abspath(subdir)
+            if os.path.isdir(old_path):
+                new_path = os.path.join(tally_dir, subdir)
+                print(f"  Moving {subdir}/ → tally/{subdir}/")
+                shutil.move(old_path, new_path)
+
+        # Write schema version marker
+        schema_file = os.path.join(new_config, '.tally-schema')
+        with open(schema_file, 'w') as f:
+            f.write('1\n')
+
+        print("✓ Migrated to ./tally/")
+        return new_config
+
+    except (OSError, shutil.Error) as e:
+        print(f"Error during migration: {e}", file=sys.stderr)
+        return None
 
 
 def init_config(target_dir):
@@ -1680,7 +1787,7 @@ def cmd_diag(args):
     if args.config:
         config_dir = os.path.abspath(args.config)
     else:
-        config_dir = find_config_dir(warn_old_layout=False) or os.path.abspath('config')
+        config_dir = find_config_dir() or os.path.abspath('config')
 
     print("BUDGET ANALYZER DIAGNOSTICS")
     print("=" * 70)
@@ -1842,23 +1949,24 @@ def cmd_update(args):
     """Handle the update command."""
     print("Checking for updates...")
 
-    # Get release info
+    # Get release info (may fail if offline or rate-limited)
     release_info = get_latest_release_info()
-    if not release_info:
-        print("Error: Could not fetch release information from GitHub.")
-        sys.exit(1)
+    has_update = False
 
-    latest = release_info['version']
-    current = VERSION
+    if release_info:
+        latest = release_info['version']
+        current = VERSION
 
-    # Show version comparison
-    from ._version import _version_greater
-    has_update = _version_greater(latest, current)
+        # Show version comparison
+        from ._version import _version_greater
+        has_update = _version_greater(latest, current)
 
-    if has_update:
-        print(f"New version available: v{latest} (current: v{current})")
+        if has_update:
+            print(f"New version available: v{latest} (current: v{current})")
+        else:
+            print(f"Already on latest version: v{current}")
     else:
-        print(f"Already on latest version: v{current}")
+        print("Could not check for version updates (network issue?)")
 
     # If --check only, just show status and exit
     if args.check:
@@ -1866,13 +1974,23 @@ def cmd_update(args):
             print(f"\nRun 'tally update' to install the update.")
         sys.exit(0)
 
+    # Check for migrations (layout updates, etc.)
+    # This runs even if version check failed
+    config_dir = find_config_dir()
+    did_migrate = False
+    if config_dir:
+        old_config = config_dir
+        new_config = run_migrations(config_dir, skip_confirm=args.yes)
+        if new_config and new_config != old_config:
+            did_migrate = True
+
     # Handle --assets flag (update AGENTS.md and CLAUDE.md)
     if args.assets:
         update_assets(args.yes)
 
     # Skip binary update if no update available
     if not has_update:
-        if not args.assets:
+        if not args.assets and not did_migrate:
             print("\nNothing to update.")
         sys.exit(0)
 
