@@ -2,7 +2,7 @@
 
 **A local rule engine for transaction classification.** Pair it with an LLM to eliminate the manual work.
 
-Works with Claude Code, Codex, Copilot, Cursor, or a local model.
+Works with Claude Code, Codex, Copilot, Cursor, or a local model. Also available as an [MCP server](#mcp-server) for Claude Desktop, VS Code, and other AI tools.
 
 👉 **[Website](https://tallyai.money)** · **[Releases](https://github.com/davidfowl/tally/releases)**
 
@@ -46,6 +46,8 @@ tally run                    # Generate spending report
 | `tally diag` | Debug config issues |
 | `tally version` | Show version and check for updates |
 | `tally update` | Update to latest version |
+| `tally mcp` | Start MCP server for AI tool integration |
+| `tally mcp init` | Configure MCP client (Claude Desktop, VS Code, etc.) |
 
 ### Output Formats
 
@@ -68,6 +70,60 @@ tally run --format json --only monthly,variable   # Just these classifications
 tally run --format json --category Food           # Just Food category
 tally explain --classification monthly            # Explain all monthly merchants
 tally explain --category Subscriptions            # Explain all subscriptions
+```
+
+## MCP Server
+
+Tally includes an MCP (Model Context Protocol) server for direct integration with AI tools like Claude Desktop, VS Code, Cursor, and more.
+
+### Quick Setup
+
+```bash
+tally mcp init                    # Auto-detect and configure your AI tool
+tally mcp init --client claude-desktop  # Or specify a client
+tally mcp init --json             # Output config JSON for manual setup
+```
+
+### Supported Clients
+
+| Client | Setup Command |
+|--------|--------------|
+| Claude Desktop | `tally mcp init --client claude-desktop` |
+| VS Code | `tally mcp init --client vscode` |
+| Cursor | `tally mcp init --client cursor` |
+| Claude Code | `tally mcp init --client claude-code` |
+| OpenCode | `tally mcp init --client opencode` |
+| Gemini CLI | `tally mcp init --client gemini` |
+
+### Available Tools
+
+Once configured, your AI assistant can use these tools:
+
+| Tool | Description |
+|------|-------------|
+| `run_analysis` | Analyze spending and generate reports (JSON/markdown) |
+| `explain_merchant` | Explain why a merchant is classified a certain way |
+| `explain_summary` | Get classification summary for all merchants |
+| `discover_unknown` | Find uncategorized merchants with suggested rules |
+| `inspect_csv` | Analyze CSV structure for format string creation |
+| `diagnose_config` | Debug configuration issues |
+| `list_rules` | List all merchant categorization rules |
+| `add_rule` | Add a new merchant categorization rule |
+| `get_version` | Get tally version information |
+
+### Manual Configuration
+
+If auto-setup doesn't work, add this to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "tally": {
+      "command": "tally",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
 ## Configuration
