@@ -97,9 +97,9 @@ Use the discover command to find uncategorized transactions:
   tally discover --format csv  # CSV output to copy-paste
   tally discover --format json # JSON for programmatic use
 
-CUSTOM MERCHANT RULES
----------------------
-Define custom merchant patterns in merchant_categories.csv:
+MERCHANT RULES
+--------------
+Define merchant patterns in merchant_categories.csv:
 
 Pattern,Merchant,Category,Subcategory
 MY LOCAL CAFE,Local Cafe,Food,Coffee
@@ -145,7 +145,7 @@ html_filename: spending_summary.html
 #   GB: United Kingdom
 '''
 
-STARTER_MERCHANT_CATEGORIES = '''# Custom Merchant Categorization Rules
+STARTER_MERCHANT_CATEGORIES = '''# Merchant Categorization Rules
 #
 # Define your merchant categorization rules here.
 # Format: Pattern,Merchant,Category,Subcategory
@@ -263,7 +263,7 @@ Netflix → Monthly
 
 The `Rule:` line shows:
 - The pattern that matched (e.g., `NETFLIX.*`)
-- The source: `user` (from merchant_categories.csv) or `built-in` (special transformations)
+- The source: `user` (from merchant_categories.csv) or `special` (special transformations)
 
 ## Troubleshooting
 
@@ -1131,7 +1131,7 @@ Budget analysis for {current_year}.
 
 1. Export your bank/credit card statements to `data/`
 2. Update `config/settings.yaml` with your data sources
-3. Add custom merchant rules to `config/merchant_categories.csv`
+3. Add merchant rules to `config/merchant_categories.csv`
 4. Run: `tally ./config`
 
 ## Documentation

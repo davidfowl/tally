@@ -346,13 +346,13 @@ def normalize_merchant(
 
     Returns:
         Tuple of (merchant_name, category, subcategory, match_info)
-        match_info is a dict with 'pattern', 'source' (user/built-in/special), or None if no match
+        match_info is a dict with 'pattern', 'source' (user/special), or None if no match
     """
     # First, try special transformations
     special = apply_special_transformations(description)
     if special:
         merchant, category, subcategory, pattern = special
-        return (merchant, category, subcategory, {'pattern': pattern, 'source': 'built-in'})
+        return (merchant, category, subcategory, {'pattern': pattern, 'source': 'special'})
 
     # Clean the description for better matching
     cleaned = clean_description(description)
