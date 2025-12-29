@@ -248,87 +248,6 @@ def extract_merchant_name(description):
     return 'Unknown'
 
 
-def apply_special_transformations(description):
-    """Apply special merchant transformations that can't be expressed as simple patterns.
-
-    Args:
-        description: Raw transaction description
-
-    Returns (merchant_name, category, subcategory) if a special rule matches,
-    or None if no special rule applies.
-    """
-    desc_upper = description.upper()
-
-    # =========================================================================
-    # LOCATION-BASED FIXES
-    # Handle merchants that might be confused with location names
-    # =========================================================================
-
-    # "KAHULUI" (Maui city) should NOT match "HULU"
-    if 'KAHULUI' in desc_upper and 'HULU' not in desc_upper.replace('KAHULUI', ''):
-        # This is Hawaii travel, not Hulu streaming
-        return None  # Let it fall through to other patterns
-
-    # "SEATTLE" contains "ATT" but is not AT&T
-    if 'SEATTLE' in desc_upper and not desc_upper.startswith('AT&T') and not desc_upper.startswith('ATT*'):
-        # Check if this is actually AT&T
-        if not re.search(r'^AT&T|^ATT\s|ATT\*BILL', desc_upper):
-            return None  # Not AT&T, let other patterns handle it
-
-    # =========================================================================
-    # MERCHANT NAME CONSOLIDATION
-    # Combine variations of the same merchant
-    # =========================================================================
-
-    # Metropolitan Market has multiple formats
-    if 'METROPOLITAN' in desc_upper and ('MARKET' in desc_upper or 'KIRKLAND' in desc_upper):
-        return ('Metropolitan Market', 'Food', 'Grocery', 'METROPOLITAN + MARKET/KIRKLAND')
-
-    # Din Tai Fung variations
-    if 'DIN TAI' in desc_upper or 'DINTAI' in desc_upper:
-        return ('Din Tai Fung', 'Food', 'Restaurant', 'DIN TAI or DINTAI')
-
-    # Gap family of brands
-    if re.search(r'GAP\s*(US|ONLINE|\d)|OLDNAVY|OLD NAVY|BANANA\s*REPUBLIC', desc_upper):
-        return ('Gap/Old Navy/BR', 'Shopping', 'Clothing', r'GAP\s*(US|ONLINE|\d)|OLDNAVY|OLD NAVY|BANANA\s*REPUBLIC')
-
-    # Barnes & Noble variations
-    if 'BARNES' in desc_upper and 'NOBLE' in desc_upper:
-        return ('Barnes & Noble', 'Shopping', 'Books', 'BARNES + NOBLE')
-
-    # =========================================================================
-    # DESCRIPTION CLEANUP FOR SPECIFIC MERCHANTS
-    # =========================================================================
-
-    # DoorDash has many variations
-    if re.search(r'DOORDASH|DD\s*\*|DOORDASAN', desc_upper):
-        return ('DoorDash', 'Food', 'Delivery', r'DOORDASH|DD\s*\*|DOORDASAN')
-
-    # Uber Eats vs Uber rideshare
-    if 'UBER' in desc_upper:
-        if 'EATS' in desc_upper:
-            return ('Uber Eats', 'Food', 'Delivery', 'UBER + EATS')
-        elif 'TRIP' in desc_upper or 'RIDE' in desc_upper:
-            return ('Uber', 'Transport', 'Rideshare', 'UBER + TRIP/RIDE')
-        # Ambiguous - check for food-related context
-        if any(word in desc_upper for word in ['RESTAURANT', 'FOOD', 'DELIVERY']):
-            return ('Uber Eats', 'Food', 'Delivery', 'UBER + RESTAURANT/FOOD/DELIVERY')
-
-    # =========================================================================
-    # CHECK HANDLING
-    # =========================================================================
-
-    # Check numbers
-    if re.match(r'^CHECK\s*\d+', desc_upper):
-        return ('Check', 'Cash', 'Check', r'^CHECK\s*\d+')
-
-    # Check order fee
-    if 'CHECK ORDER' in desc_upper:
-        return ('Check Order', 'Bills', 'Fee', 'CHECK ORDER')
-
-    return None  # No special transformation applies
-
-
 def normalize_merchant(
     description: str,
     rules: list,
@@ -346,14 +265,8 @@ def normalize_merchant(
 
     Returns:
         Tuple of (merchant_name, category, subcategory, match_info)
-        match_info is a dict with 'pattern', 'source' (user/special), or None if no match
+        match_info is a dict with 'pattern', 'source', or None if no match
     """
-    # First, try special transformations
-    special = apply_special_transformations(description)
-    if special:
-        merchant, category, subcategory, pattern = special
-        return (merchant, category, subcategory, {'pattern': pattern, 'source': 'special'})
-
     # Clean the description for better matching
     cleaned = clean_description(description)
     desc_upper = description.upper()
