@@ -82,9 +82,10 @@ class TestParseGenericCsvDecimalSeparator:
 01/16/2025,COFFEE SHOP,5.99
 01/17/2025,BIG PURCHASE,"1,234.56"
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules()
             format_spec = parse_format_string('{date:%m/%d/%Y},{description},{amount}')
@@ -98,7 +99,7 @@ class TestParseGenericCsvDecimalSeparator:
             assert txns[0]['amount'] == 123.45
             assert txns[1]['amount'] == 5.99
             assert txns[2]['amount'] == 1234.56
-
+        finally:
             os.unlink(f.name)
 
     def test_european_format_csv(self):
@@ -109,9 +110,10 @@ class TestParseGenericCsvDecimalSeparator:
 16.01.2025,COFFEE SHOP,"5,99"
 17.01.2025,BIG PURCHASE,"1.234,56"
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules()
             format_spec = parse_format_string('{date:%d.%m.%Y},{description},{amount}')
@@ -126,7 +128,7 @@ class TestParseGenericCsvDecimalSeparator:
             assert txns[0]['amount'] == 123.45
             assert txns[1]['amount'] == 5.99
             assert txns[2]['amount'] == 1234.56
-
+        finally:
             os.unlink(f.name)
 
     def test_european_format_with_negative(self):
@@ -135,9 +137,10 @@ class TestParseGenericCsvDecimalSeparator:
 15.01.2025,REFUND,"-500,00"
 16.01.2025,PURCHASE,"250,00"
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules()
             format_spec = parse_format_string('{date:%d.%m.%Y},{description},{amount}')
@@ -155,7 +158,7 @@ class TestParseGenericCsvDecimalSeparator:
             # Positive amounts are expenses
             assert txns[1]['amount'] == 250.0
             assert txns[1]['is_credit'] == False
-
+        finally:
             os.unlink(f.name)
 
     def test_mixed_sources_different_separators(self):
@@ -168,40 +171,40 @@ class TestParseGenericCsvDecimalSeparator:
         eu_csv = """Date,Description,Amount
 15.01.2025,EU STORE,"100,50"
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as us_f:
+        us_f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        eu_f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             us_f.write(us_csv)
-            us_f.flush()
+            us_f.close()
+            eu_f.write(eu_csv)
+            eu_f.close()
 
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as eu_f:
-                eu_f.write(eu_csv)
-                eu_f.flush()
+            rules = get_all_rules()
 
-                rules = get_all_rules()
+            # Parse US format
+            us_format = parse_format_string('{date:%m/%d/%Y},{description},{amount}')
+            us_txns = parse_generic_csv(
+                us_f.name,
+                us_format,
+                rules,
+                decimal_separator='.'
+            )
 
-                # Parse US format
-                us_format = parse_format_string('{date:%m/%d/%Y},{description},{amount}')
-                us_txns = parse_generic_csv(
-                    us_f.name,
-                    us_format,
-                    rules,
-                    decimal_separator='.'
-                )
+            # Parse European format
+            eu_format = parse_format_string('{date:%d.%m.%Y},{description},{amount}')
+            eu_txns = parse_generic_csv(
+                eu_f.name,
+                eu_format,
+                rules,
+                decimal_separator=','
+            )
 
-                # Parse European format
-                eu_format = parse_format_string('{date:%d.%m.%Y},{description},{amount}')
-                eu_txns = parse_generic_csv(
-                    eu_f.name,
-                    eu_format,
-                    rules,
-                    decimal_separator=','
-                )
-
-                # Both should parse to same value
-                assert us_txns[0]['amount'] == 100.50
-                assert eu_txns[0]['amount'] == 100.50
-
-                os.unlink(us_f.name)
-                os.unlink(eu_f.name)
+            # Both should parse to same value
+            assert us_txns[0]['amount'] == 100.50
+            assert eu_txns[0]['amount'] == 100.50
+        finally:
+            os.unlink(us_f.name)
+            os.unlink(eu_f.name)
 
 
 class TestCustomCaptures:
@@ -213,9 +216,10 @@ class TestCustomCaptures:
 01/15/2025,Card payment,STARBUCKS COFFEE,25.50
 01/16/2025,Transfer,JOHN SMITH,500.00
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules()
             format_spec = parse_format_string(
@@ -228,7 +232,7 @@ class TestCustomCaptures:
             # Check raw_description contains combined value
             assert txns[0]['raw_description'] == 'STARBUCKS COFFEE (Card payment)'
             assert txns[1]['raw_description'] == 'JOHN SMITH (Transfer)'
-
+        finally:
             os.unlink(f.name)
 
     def test_template_ordering(self):
@@ -236,9 +240,10 @@ class TestCustomCaptures:
         csv_content = """Date,First,Second,Amount
 01/15/2025,AAA,BBB,10.00
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules()
             # Capture columns as 'first' and 'second', but template puts second first
@@ -250,7 +255,7 @@ class TestCustomCaptures:
 
             assert len(txns) == 1
             assert txns[0]['raw_description'] == 'BBB - AAA'
-
+        finally:
             os.unlink(f.name)
 
     def test_mixed_mode_error(self):
@@ -283,9 +288,10 @@ class TestCustomCaptures:
         csv_content = """Date,Description,Amount
 01/15/2025,STARBUCKS COFFEE,25.50
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules()
             format_spec = parse_format_string('{date:%m/%d/%Y},{description},{amount}')
@@ -293,7 +299,7 @@ class TestCustomCaptures:
 
             assert len(txns) == 1
             assert txns[0]['raw_description'] == 'STARBUCKS COFFEE'
-
+        finally:
             os.unlink(f.name)
 
 
