@@ -2047,7 +2047,7 @@ def update_assets(skip_confirm: bool = False):
                 print(f"Skipping {filename}")
                 continue
 
-        path.write_text(content)
+        path.write_text(content, encoding='utf-8')
         print(f"✓ Updated {filename}")
 
 

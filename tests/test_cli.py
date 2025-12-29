@@ -4,6 +4,7 @@ import pytest
 import subprocess
 import tempfile
 import os
+from pathlib import Path
 
 
 class TestCLIErrorHandling:
@@ -164,3 +165,39 @@ data_sources:
         assert 'invalid choice' in result.stderr
         assert 'monthly' in result.stderr
         assert 'variable' in result.stderr
+
+
+class TestUpdateAssets:
+    """Tests for the update_assets functionality."""
+
+    def test_update_assets_handles_unicode(self):
+        """Update assets should handle Unicode characters correctly (Issue: Windows encoding error)."""
+        from tally.cli import update_assets
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Change to temp directory
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                
+                # Run update_assets with skip_confirm to avoid interactive prompt
+                update_assets(skip_confirm=True)
+                
+                # Verify files were created
+                agents_path = Path(tmpdir) / 'AGENTS.md'
+                claude_path = Path(tmpdir) / 'CLAUDE.md'
+                
+                assert agents_path.exists(), "AGENTS.md should be created"
+                assert claude_path.exists(), "CLAUDE.md should be created"
+                
+                # Read files with UTF-8 encoding and verify Unicode characters
+                agents_content = agents_path.read_text(encoding='utf-8')
+                assert '≤' in agents_content, "AGENTS.md should contain Unicode character ≤"
+                
+                # Verify the files are valid UTF-8
+                assert len(agents_content) > 0, "AGENTS.md should not be empty"
+                assert len(claude_path.read_text(encoding='utf-8')) > 0, "CLAUDE.md should not be empty"
+                
+            finally:
+                os.chdir(original_cwd)
+
