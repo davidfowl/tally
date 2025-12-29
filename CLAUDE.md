@@ -37,7 +37,7 @@ Netflix → Monthly
     Formula: avg_when_active = 95.94 / 6 months = 15.99
     CV: 0.00
 
-  Rule: NETFLIX.* (user)   # Shows which pattern matched and source (user/special)
+  Rule: NETFLIX.* (user)   # Shows which pattern matched
 ```
 
 ## Core Files

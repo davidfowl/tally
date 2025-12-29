@@ -263,7 +263,7 @@ Netflix → Monthly
 
 The `Rule:` line shows:
 - The pattern that matched (e.g., `NETFLIX.*`)
-- The source: `user` (from merchant_categories.csv) or `special` (special transformations)
+- The source: `user` (from merchant_categories.csv)
 
 ## Troubleshooting
 
