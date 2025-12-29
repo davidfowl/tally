@@ -99,16 +99,14 @@ function normalizeMerchantId(name) {
     return name.replace(/['"]/g, '').replace(/ /g, '_');
 }
 
-// Look up display name for a merchant ID from sectionData (case-insensitive)
-function getMerchantDisplayName(merchantId) {
-    if (!window.sectionData) return null;
-    const normalizedId = normalizeMerchantId(merchantId).toLowerCase();
-    for (const section of Object.values(window.sectionData.sections)) {
-        for (const [key, merchant] of Object.entries(section.merchants)) {
-            if (key.toLowerCase() === normalizedId && merchant.displayName) {
-                return merchant.displayName;
-            }
-        }
+// Look up display name from window.displayNames (id → display name mapping)
+function getDisplayName(type, id) {
+    if (!window.displayNames || !window.displayNames[type]) return null;
+    // Try exact match first, then case-insensitive
+    if (window.displayNames[type][id]) return window.displayNames[type][id];
+    const lowerId = id.toLowerCase();
+    for (const [key, value] of Object.entries(window.displayNames[type])) {
+        if (key.toLowerCase() === lowerId) return value;
     }
     return null;
 }
@@ -169,9 +167,9 @@ function renderFilters() {
         let displayText = f.displayText || f.text;
         if (f.type === 'month') {
             displayText = monthKeyToLabel(f.text);
-        } else if (f.type === 'merchant' && !f.displayText) {
-            // Look up display name from ID
-            const lookupName = getMerchantDisplayName(f.text);
+        } else if (!f.displayText) {
+            // Look up display name from ID for merchant, category, location
+            const lookupName = getDisplayName(f.type, f.text);
             if (lookupName) displayText = lookupName;
         }
         const typeChar = f.type === 'month' ? 'd' : f.type.charAt(0);
@@ -578,16 +576,10 @@ function resetToOriginalState() {
         section.classList.remove('hidden');
     });
 
-    // Reset totals to original values
-    // This would need the original values stored - for now, reload from originalTotals
-    // Or we could just re-run filterSectionData with empty filters
+    // Compute state with no filters (all transactions) and update everything
     const state = filterSectionData([]);
     renderTotals(state);
-
-    // Reset charts
-    if (typeof resetCharts === 'function') {
-        resetCharts();
-    }
+    updateChartsFromFilters(state);
 }
 
 // ============================================================
@@ -666,7 +658,7 @@ let selectedIndex = -1;
 
 function setupAutocomplete() {
     const searchInput = document.getElementById('searchInput');
-    const autocompleteList = document.getElementById('autocomplete-list');
+    const autocompleteList = document.getElementById('autocompleteList');
 
     if (!searchInput || !autocompleteList) return;
 
@@ -807,6 +799,65 @@ function setupTableClickHandlers() {
         });
     });
 }
+
+// ============================================================
+// CHART UPDATES
+// ============================================================
+
+/**
+ * Update charts based on filtered state.
+ * Uses aggregations from filterSectionData().
+ */
+function updateChartsFromFilters(state) {
+    const agg = state.aggregations;
+
+    // 1. Update Monthly Trend Chart
+    if (window.monthlyTrendChart && window.chartData) {
+        const monthlyLabels = window.chartData.monthly.labels;
+        const monthlyData = monthlyLabels.map(label => {
+            const key = monthLabelToKey(label);
+            return agg.byMonth[key] || 0;
+        });
+        window.monthlyTrendChart.data.datasets[0].data = monthlyData;
+        window.monthlyTrendChart.update();
+    }
+
+    // 2. Update Category Pie Chart
+    if (window.categoryPieChart && window.chartData) {
+        // Map from categoryPath (e.g., "food/grocery") to main category totals
+        const categoryTotals = {};
+        for (const [catPath, amount] of Object.entries(agg.byCategory)) {
+            // Extract main category from path (e.g., "food" from "food/grocery")
+            const mainCat = catPath.split('/')[0];
+            // Capitalize first letter
+            const displayCat = mainCat.charAt(0).toUpperCase() + mainCat.slice(1);
+            categoryTotals[displayCat] = (categoryTotals[displayCat] || 0) + amount;
+        }
+
+        // Update pie chart data in the same order as original labels
+        const pieLabels = window.chartData.categoryPie.labels;
+        const pieData = pieLabels.map(label => categoryTotals[label] || 0);
+        window.categoryPieChart.data.datasets[0].data = pieData;
+        window.categoryPieChart.update();
+    }
+
+    // 3. Update Category by Month Chart
+    if (window.categoryByMonthChart && window.chartData) {
+        const datasets = window.categoryByMonthChart.data.datasets;
+        const monthLabels = window.categoryByMonthChart.data.labels;
+
+        datasets.forEach(dataset => {
+            const category = dataset.label;
+            const catData = agg.byCategoryByMonth[category] || {};
+            dataset.data = monthLabels.map(label => {
+                const key = monthLabelToKey(label);
+                return catData[key] || 0;
+            });
+        });
+        window.categoryByMonthChart.update();
+    }
+}
+
 
 // ============================================================
 // INITIALIZATION

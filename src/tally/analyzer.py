@@ -2210,6 +2210,11 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             variableYtd: {stats['variable_total']},
             totalYtd: {actual}
         }};
+        window.displayNames = {json.dumps({
+            'category': {make_category_id(cat): cat for cat in sorted_categories},
+            'merchant': {make_merchant_id(m): m for m in sorted_merchants},
+            'location': {make_location_id(loc): loc for loc in sorted_locations}
+        })};
         window.autocompleteData = [
             {','.join(f'{{"text": "{cat}", "type": "category", "id": "{make_category_id(cat)}"}}' for cat in sorted_categories)},
             {','.join(f'{{"text": "{merchant.replace(chr(34), chr(92)+chr(34))}", "type": "merchant", "id": "{make_merchant_id(merchant)}"}}' for merchant in sorted_merchants)},
@@ -2228,8 +2233,8 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
 
     <!-- Chart rendering -->
     <script>
-        // Chart data from Python
-        const chartData = {chart_data_json};
+        // Chart data from Python (global for filter updates)
+        window.chartData = {chart_data_json};
         const currencySymbol = '{currency_format}'.split('{{')[0] || '$';
         
         // Chart.js default configuration for theme support
@@ -2281,10 +2286,10 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             window.monthlyTrendChart = new Chart(ctx, {{
                 type: 'line',
                 data: {{
-                    labels: chartData.monthly.labels,
+                    labels: window.chartData.monthly.labels,
                     datasets: [{{
                         label: 'Total Spending',
-                        data: chartData.monthly.data,
+                        data: window.chartData.monthly.data,
                         borderColor: 'rgba(79, 172, 254, 1)',
                         backgroundColor: 'rgba(79, 172, 254, 0.1)',
                         borderWidth: 2,
@@ -2343,16 +2348,16 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             const ctx = document.getElementById('categoryPieChart');
             if (!ctx) return;
             
-            const colors = chartData.categoryPie.labels.map(label => 
+            const colors = window.chartData.categoryPie.labels.map(label => 
                 categoryColors[label] || 'rgba(156, 163, 175, 0.8)'
             );
             
             window.categoryPieChart = new Chart(ctx, {{
                 type: 'doughnut',
                 data: {{
-                    labels: chartData.categoryPie.labels,
+                    labels: window.chartData.categoryPie.labels,
                     datasets: [{{
-                        data: chartData.categoryPie.data,
+                        data: window.chartData.categoryPie.data,
                         backgroundColor: colors,
                         borderWidth: 2,
                         borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-table').trim()
@@ -2396,7 +2401,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             const ctx = document.getElementById('categoryByMonthChart');
             if (!ctx) return;
             
-            const datasets = chartData.categoryByMonth.datasets.map(ds => ({{
+            const datasets = window.chartData.categoryByMonth.datasets.map(ds => ({{
                 label: ds.label,
                 data: ds.data,
                 backgroundColor: categoryColors[ds.label] || 'rgba(156, 163, 175, 0.8)',
@@ -2406,7 +2411,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             window.categoryByMonthChart = new Chart(ctx, {{
                 type: 'bar',
                 data: {{
-                    labels: chartData.categoryByMonth.labels,
+                    labels: window.chartData.categoryByMonth.labels,
                     datasets: datasets
                 }},
                 options: {{
