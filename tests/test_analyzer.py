@@ -414,9 +414,7 @@ class TestTravelClassification:
             'is_travel': True,  # Location detection may have misinterpreted "AP"
         }
         classification, reasoning = classify_by_occurrence('APPLIANCE DEPOT AP', retailer_data, 12)
-        # Should be classified as one_off (shopping with <3 months and >$1000) or variable
-        # Actually with total=500, months_active=3, it won't be one_off (needs >$1000)
-        # Should be variable
+        # With total=$500 (under $1000), it won't meet one_off criteria, so should be variable
         assert classification == 'variable', f"Expected 'variable' but got '{classification}'"
 
     def test_travel_trace_no_longer_mentions_is_travel_flag(self):
