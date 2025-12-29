@@ -1265,6 +1265,16 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         currency_format: Format string for currency display, e.g. "${amount}" or "{amount} zł"
     """
     home_locations = home_locations or set()
+
+    # Load external CSS and JavaScript files for embedding
+    css_file_path = Path(__file__).parent / 'spending_report.css'
+    with open(css_file_path, 'r') as f:
+        spending_report_css = f.read()
+
+    js_file_path = Path(__file__).parent / 'spending_report.js'
+    with open(js_file_path, 'r') as f:
+        spending_report_js = f.read()
+
     # Local helpers for currency formatting
     def fmt(amount):
         return format_currency(amount, currency_format)
@@ -1344,9 +1354,18 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         all_merchants.add(merchant)
     sorted_merchants = sorted(all_merchants)
 
-    # Helper function to create merchant ID (same as used in HTML generation)
+    # Helper functions to create consistent IDs for filtering
     def make_merchant_id(name):
+        """Create a unique ID for merchant filtering (URL-safe, no quotes/spaces)."""
         return name.replace("'", "").replace('"', '').replace(' ', '_')
+
+    def make_category_id(name):
+        """Create a unique ID for category filtering (lowercase)."""
+        return name.lower() if name else ''
+
+    def make_location_id(code):
+        """Create a unique ID for location filtering (lowercase)."""
+        return code.lower() if code else ''
 
     # Collect all unique locations for autocomplete
     all_locations = set()
@@ -1533,6 +1552,88 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         }
     })
 
+    # Generate structured section data for JavaScript filtering
+    # This is the single source of truth - filtering operates on this, not DOM
+    def build_section_merchants(merchant_dict, section_type):
+        """Build merchants object for a section."""
+        merchants = {}
+        section_total = 0
+        for merchant_name, data in merchant_dict.items():
+            merchant_id = make_merchant_id(merchant_name)
+            section_total += data['total']
+
+            # Build transactions array
+            txns = []
+            for txn in data.get('transactions', []):
+                txns.append({
+                    'date': txn.get('date', ''),
+                    'month': txn.get('month', ''),
+                    'description': txn.get('description', ''),
+                    'amount': txn.get('amount', 0),
+                    'source': txn.get('source', ''),
+                    'location': txn.get('location')
+                })
+
+            merchants[merchant_id] = {
+                'id': merchant_id,
+                'displayName': merchant_name,
+                'category': data.get('category', ''),
+                'subcategory': data.get('subcategory', ''),
+                'categoryPath': f"{data.get('category', '')}/{data.get('subcategory', '')}".lower(),
+                'monthsActive': data.get('months_active'),
+                'isConsistent': data.get('is_consistent'),
+                'calcType': data.get('calc_type'),
+                'ytd': data.get('total', 0),
+                'monthly': data.get('avg_when_active') or (data.get('total', 0) / num_months if num_months > 0 else 0),
+                'count': data.get('count', 0),
+                'transactions': txns
+            }
+        return merchants, section_total
+
+    num_months = stats['num_months']
+    section_data = {
+        'year': year,
+        'numMonths': num_months,
+        'sections': {}
+    }
+
+    # Section configurations
+    section_configs = [
+        ('monthly-table', monthly_merchants, True, 'ytd'),
+        ('annual-table', annual_merchants, False, 'total'),
+        ('periodic-table', periodic_merchants, False, 'total'),
+        ('travel-table', travel_merchants, False, 'total'),
+        ('oneoff-table', one_off_merchants, False, 'total'),
+        ('variable-table', variable_merchants, True, 'ytd'),
+    ]
+
+    for section_id, merchant_dict, has_monthly, total_col in section_configs:
+        merchants, section_total = build_section_merchants(merchant_dict, section_id)
+        section_data['sections'][section_id] = {
+            'id': section_id,
+            'hasMonthlyColumn': has_monthly,
+            'totalColumn': total_col,
+            'merchants': merchants,
+            'totals': {
+                total_col: section_total
+            }
+        }
+
+    # Add original totals for percentage calculations
+    section_data['originalTotals'] = {
+        'monthlyYtd': stats['monthly_total'],
+        'monthlyAvg': stats['monthly_avg'],
+        'annualTotal': stats['annual_total'],
+        'periodicTotal': stats['periodic_total'],
+        'travelTotal': stats['travel_total'],
+        'oneoffTotal': stats['one_off_total'],
+        'variableYtd': stats['variable_total'],
+        'variableAvg': stats['variable_monthly'],
+        'totalYtd': actual
+    }
+
+    section_data_json = json.dumps(section_data)
+
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1598,880 +1699,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
     </script>
     <script>{chart_js_content}</script>
     <style>
-        /* Theme CSS Variables */
-        :root {{
-            /* Backgrounds */
-            --bg-gradient-start: #1a1a2e;
-            --bg-gradient-end: #16213e;
-            --bg-card: rgba(255,255,255,0.05);
-            --bg-card-hover: rgba(255,255,255,0.08);
-            --bg-input: rgba(255,255,255,0.05);
-            --bg-input-focus: rgba(255,255,255,0.08);
-            --bg-table: rgba(255,255,255,0.03);
-            --bg-table-header: rgba(255,255,255,0.05);
-            --bg-table-hover: rgba(255,255,255,0.03);
-            --bg-tooltip: rgba(0,0,0,0.9);
-            --bg-txn-row: rgba(0,0,0,0.2);
-            --bg-scrollbar-track: rgba(255,255,255,0.05);
-            --bg-scrollbar-thumb: rgba(255,255,255,0.2);
-            --bg-scrollbar-thumb-hover: rgba(255,255,255,0.3);
-            --bg-highlight: rgba(255, 230, 0, 0.3);
-            --bg-code: rgba(255,255,255,0.08);
-            --bg-help: rgba(255,255,255,0.02);
-            --bg-location: #444;
-
-            /* Text */
-            --text-primary: #e8e8e8;
-            --text-secondary: #888;
-            --text-muted: #666;
-            --text-dim: #555;
-            --text-light: #999;
-            --text-lighter: #aaa;
-            --text-tooltip: #fff;
-
-            /* Borders */
-            --border-light: rgba(255,255,255,0.1);
-            --border-medium: rgba(255,255,255,0.2);
-            --border-strong: rgba(255,255,255,0.3);
-            --border-scrolled: #333;
-            --border-help: rgba(255,255,255,0.08);
-            --border-table: rgba(255,255,255,0.05);
-
-            /* Shadows */
-            --shadow-card: rgba(0,0,0,0.3);
-            --shadow-scrolled: rgba(0,0,0,0.4);
-
-            /* Accents (same for both themes) */
-            --accent-blue: #4facfe;
-            --accent-blue-light: #00f2fe;
-            --accent-cyan: #4dffd2;
-            --accent-orange: #ffa94d;
-            --accent-yellow: #f5af19;
-            --accent-pink: #f093fb;
-            --accent-pink-dark: #fa709a;
-            --accent-red: #ff6b6b;
-
-            /* Special */
-            --bg-amex: #006fcf;
-            --bg-boa: #c41230;
-            --bg-home: #2d5016;
-            --text-home: #90EE90;
-            --bg-intl: #8B4513;
-            --text-intl: #FFD700;
-        }}
-
-        /* Light Theme */
-        [data-theme="light"] {{
-            --bg-gradient-start: #f0f4f8;
-            --bg-gradient-end: #ffffff;
-            --bg-card: rgba(0,0,0,0.03);
-            --bg-card-hover: rgba(0,0,0,0.06);
-            --bg-input: rgba(0,0,0,0.03);
-            --bg-input-focus: rgba(0,0,0,0.05);
-            --bg-table: rgba(0,0,0,0.02);
-            --bg-table-header: rgba(0,0,0,0.04);
-            --bg-table-hover: rgba(0,0,0,0.03);
-            --bg-tooltip: rgba(30,30,30,0.95);
-            --bg-txn-row: rgba(0,0,0,0.04);
-            --bg-scrollbar-track: rgba(0,0,0,0.05);
-            --bg-scrollbar-thumb: rgba(0,0,0,0.15);
-            --bg-scrollbar-thumb-hover: rgba(0,0,0,0.25);
-            --bg-highlight: rgba(255, 200, 0, 0.3);
-            --bg-code: rgba(0,0,0,0.06);
-            --bg-help: rgba(0,0,0,0.02);
-            --bg-location: #666;
-
-            --text-primary: #1a1a2e;
-            --text-secondary: #555;
-            --text-muted: #777;
-            --text-dim: #888;
-            --text-light: #666;
-            --text-lighter: #555;
-            --text-tooltip: #fff;
-
-            --border-light: rgba(0,0,0,0.08);
-            --border-medium: rgba(0,0,0,0.12);
-            --border-strong: rgba(0,0,0,0.2);
-            --border-scrolled: #ddd;
-            --border-help: rgba(0,0,0,0.08);
-            --border-table: rgba(0,0,0,0.05);
-
-            --shadow-card: rgba(0,0,0,0.1);
-            --shadow-scrolled: rgba(0,0,0,0.15);
-
-            /* Darker accent colors for better contrast on light backgrounds */
-            --accent-blue: #2563eb;
-            --accent-cyan: #0d9488;
-            --accent-orange: #ea580c;
-            --accent-yellow: #ca8a04;
-            --accent-pink: #c026d3;
-            --accent-pink-dark: #be185d;
-            --accent-red: #dc2626;
-        }}
-
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
-            color: var(--text-primary);
-            min-height: 100vh;
-            padding: 2rem;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-        }}
-        header {{
-            text-align: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--border-light);
-            position: relative;
-        }}
-        h1 {{
-            font-size: 2.5rem;
-            font-weight: 300;
-            margin-bottom: 0.5rem;
-            background: linear-gradient(90deg, var(--accent-blue), var(--accent-blue-light));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }}
-        .subtitle {{
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-        }}
-        .theme-toggle {{
-            position: absolute;
-            top: 0;
-            right: 0;
-            background: var(--bg-card);
-            border: 1px solid var(--border-medium);
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
-            cursor: pointer;
-            font-size: 1.1rem;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
-        .theme-toggle:hover {{
-            background: var(--bg-card-hover);
-            transform: scale(1.1);
-        }}
-        .search-box {{
-            margin: 1.5rem 0;
-            text-align: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            background: var(--bg-gradient-start);
-            padding: 12px 20px;
-            margin: 0 -20px 1.5rem -20px;
-            border-bottom: 1px solid transparent;
-            transition: box-shadow 0.2s, border-color 0.2s;
-            width: calc(100% + 40px);
-        }}
-        .search-box.scrolled {{
-            box-shadow: 0 2px 12px var(--shadow-scrolled);
-            border-bottom-color: var(--border-scrolled);
-        }}
-        .search-box input {{
-            width: 100%;
-            max-width: 500px;
-            padding: 0.75rem 1rem;
-            border-radius: 8px;
-            border: 1px solid var(--border-medium);
-            background: var(--bg-input);
-            color: var(--text-primary);
-            font-size: 1rem;
-            outline: none;
-            transition: all 0.2s;
-        }}
-        .search-box input:focus {{
-            border-color: var(--accent-blue);
-            background: var(--bg-input-focus);
-        }}
-        .search-box input::placeholder {{
-            color: var(--text-muted);
-        }}
-        .date-range-select {{
-            padding: 0.6rem 2rem 0.6rem 1rem;
-            border-radius: 8px;
-            border: 1px solid var(--border-medium);
-            background: var(--bg-input);
-            color: var(--text-primary);
-            font-size: 0.85rem;
-            font-weight: 500;
-            outline: none;
-            cursor: pointer;
-            margin-left: 0.75rem;
-            transition: all 0.2s;
-            appearance: none;
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 0.7rem center;
-            min-width: 120px;
-        }}
-        .date-range-select:hover {{
-            border-color: var(--accent-blue);
-            background-color: var(--bg-input-focus);
-        }}
-        .date-range-select:focus {{
-            border-color: var(--accent-blue);
-            background-color: var(--bg-input-focus);
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-        }}
-        .date-range-select option {{
-            background: var(--bg-card);
-            color: var(--text-primary);
-            padding: 0.5rem;
-        }}
-        .date-range-select optgroup {{
-            background: var(--bg-card);
-            color: var(--text-muted);
-            font-weight: 600;
-            font-style: normal;
-        }}
-        .autocomplete-container {{
-            position: relative;
-            display: inline-block;
-            width: 100%;
-            max-width: 500px;
-        }}
-        .autocomplete-list {{
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 100%;
-            max-width: 500px;
-            background: var(--bg-gradient-start);
-            border: 1px solid var(--border-medium);
-            border-top: none;
-            border-radius: 0 0 8px 8px;
-            max-height: 300px;
-            overflow-y: auto;
-            z-index: 1000;
-            display: none;
-        }}
-        .autocomplete-list.show {{
-            display: block;
-        }}
-        .autocomplete-item {{
-            padding: 0.6rem 1rem;
-            cursor: pointer;
-            text-align: left;
-            color: var(--text-primary);
-            border-bottom: 1px solid var(--border-light);
-        }}
-        .autocomplete-item:last-child {{
-            border-bottom: none;
-        }}
-        .autocomplete-item:hover, .autocomplete-item.selected {{
-            background: rgba(79, 172, 254, 0.2);
-        }}
-        .autocomplete-item .type {{
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            margin-left: 0.5rem;
-        }}
-        .autocomplete-item .type.category {{
-            color: var(--accent-blue);
-        }}
-        .autocomplete-item .type.merchant {{
-            color: var(--accent-cyan);
-        }}
-        .autocomplete-item .type.location {{
-            color: var(--accent-orange);
-        }}
-        .autocomplete-item .score {{
-            font-size: 0.7rem;
-            color: var(--accent-yellow);
-            margin-left: 0.5rem;
-            opacity: 0.8;
-        }}
-        .filter-chips {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-            margin-top: 0.75rem;
-            justify-content: center;
-        }}
-        .filter-chips:empty {{
-            display: none;
-        }}
-        .filter-chip {{
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.35rem 0.6rem;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: 1px solid;
-        }}
-        .filter-chip.include {{
-            background: rgba(79, 172, 254, 0.2);
-            border-color: var(--accent-blue);
-            color: var(--accent-blue);
-        }}
-        .filter-chip.exclude {{
-            background: rgba(255, 107, 107, 0.2);
-            border-color: var(--accent-red);
-            color: var(--accent-red);
-            text-decoration: line-through;
-        }}
-        .filter-chip .chip-type {{
-            font-size: 0.7rem;
-            opacity: 0.7;
-            text-transform: uppercase;
-        }}
-        .filter-chip .chip-remove {{
-            margin-left: 0.2rem;
-            font-size: 1rem;
-            line-height: 1;
-            opacity: 0.7;
-        }}
-        .filter-chip .chip-remove:hover {{
-            opacity: 1;
-        }}
-        .filter-chip.category {{ border-color: var(--accent-blue); }}
-        .filter-chip.category.include {{ background: rgba(79, 172, 254, 0.2); color: var(--accent-blue); }}
-        .filter-chip.merchant {{ border-color: var(--accent-cyan); }}
-        .filter-chip.merchant.include {{ background: rgba(77, 255, 210, 0.2); color: var(--accent-cyan); }}
-        .filter-chip.location {{ border-color: var(--accent-orange); }}
-        .filter-chip.location.include {{ background: rgba(255, 169, 77, 0.2); color: var(--accent-orange); }}
-        .filter-chip.month {{ border-color: var(--accent-purple); }}
-        .filter-chip.month.include {{ background: rgba(139, 92, 246, 0.2); color: var(--accent-purple); }}
-        .filter-chip.category.exclude, .filter-chip.merchant.exclude, .filter-chip.location.exclude, .filter-chip.month.exclude {{
-            background: rgba(255, 107, 107, 0.15);
-            border-color: var(--accent-red);
-            color: var(--accent-red);
-        }}
-        .clear-all-btn {{
-            background: transparent;
-            border: 1px solid var(--border-strong);
-            color: var(--text-secondary);
-            padding: 0.25rem 0.75rem;
-            border-radius: 1rem;
-            font-size: 0.75rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }}
-        .clear-all-btn:hover {{
-            background: rgba(255, 107, 107, 0.2);
-            border-color: var(--accent-red);
-            color: var(--accent-red);
-        }}
-        .summary-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }}
-        .card {{
-            background: var(--bg-card);
-            border-radius: 16px;
-            padding: 1.5rem;
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--border-light);
-            transition: transform 0.2s, box-shadow 0.2s;
-            cursor: pointer;
-        }}
-        .card:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 8px 30px var(--shadow-card);
-        }}
-        .card h2 {{
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--text-secondary);
-            margin-bottom: 1rem;
-        }}
-        .card .amount {{
-            font-size: 2.5rem;
-            font-weight: 600;
-        }}
-        .card .label {{
-            font-size: 0.9rem;
-            color: var(--text-muted);
-            margin-top: 0.25rem;
-        }}
-        .card.monthly .amount {{ color: var(--accent-blue); }}
-        .card.non-recurring .amount {{ color: var(--accent-pink); }}
-        .card.total .amount {{ color: var(--accent-cyan); }}
-        .breakdown {{
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border-light);
-        }}
-        .breakdown-item {{
-            display: flex;
-            justify-content: space-between;
-            padding: 0.5rem 0;
-            font-size: 0.95rem;
-        }}
-        .breakdown-item .name {{ color: var(--text-lighter); }}
-        .breakdown-item .value {{ font-weight: 500; }}
-        .breakdown-item .breakdown-pct {{ color: var(--text-muted); font-size: 0.85rem; }}
-        section {{
-            margin-bottom: 1rem;
-        }}
-        .section-header {{
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            padding: 1rem;
-            background: var(--bg-table);
-            border-radius: 12px;
-            margin-bottom: 0.5rem;
-            transition: background 0.2s;
-        }}
-        .section-header:hover {{
-            background: var(--bg-card-hover);
-        }}
-        .section-header h2 {{
-            font-size: 1.25rem;
-            font-weight: 500;
-            margin: 0;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }}
-        .section-header .toggle {{
-            font-size: 1.5rem;
-            transition: transform 0.3s;
-            color: var(--text-muted);
-        }}
-        .section-header.collapsed .toggle {{
-            transform: rotate(-90deg);
-        }}
-        .section-header .section-total {{
-            font-family: 'SF Mono', Monaco, monospace;
-            font-size: 1.1rem;
-            color: var(--text-secondary);
-        }}
-        .section-header .section-pct {{
-            font-size: 0.9rem;
-            color: var(--text-muted);
-        }}
-        section.monthly-section .section-header h2 {{ color: var(--accent-blue); }}
-        section.annual-section .section-header h2 {{ color: var(--accent-yellow); }}
-        section.travel-section .section-header h2 {{ color: var(--accent-pink); }}
-        section.oneoff-section .section-header h2 {{ color: var(--accent-pink-dark); }}
-        section.variable-section .section-header h2 {{ color: var(--accent-cyan); }}
-        .section-content {{
-            overflow: hidden;
-            transition: max-height 0.4s ease-out, opacity 0.3s ease-out;
-            max-height: 5000px;
-            opacity: 1;
-        }}
-        .section-content.collapsed {{
-            max-height: 0;
-            opacity: 0;
-        }}
-        .table-wrapper {{
-            max-height: 500px;
-            overflow-y: auto;
-            border-radius: 12px;
-        }}
-        .table-wrapper::-webkit-scrollbar {{
-            width: 8px;
-        }}
-        .table-wrapper::-webkit-scrollbar-track {{
-            background: var(--bg-scrollbar-track);
-            border-radius: 4px;
-        }}
-        .table-wrapper::-webkit-scrollbar-thumb {{
-            background: var(--bg-scrollbar-thumb);
-            border-radius: 4px;
-        }}
-        .table-wrapper::-webkit-scrollbar-thumb:hover {{
-            background: var(--bg-scrollbar-thumb-hover);
-        }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            background: var(--bg-table);
-            border-radius: 12px;
-            overflow: hidden;
-        }}
-        th {{
-            text-align: left;
-            padding: 1rem;
-            background: var(--bg-table-header);
-            font-weight: 500;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            user-select: none;
-            transition: background 0.2s;
-        }}
-        th:hover {{
-            background: var(--bg-card-hover);
-        }}
-        th.sorted-asc::after {{ content: ' ↑'; color: var(--accent-blue); }}
-        th.sorted-desc::after {{ content: ' ↓'; color: var(--accent-blue); }}
-        th:last-child, td:last-child {{ text-align: right; }}
-        td {{
-            padding: 0.85rem 1rem;
-            border-top: 1px solid var(--border-table);
-        }}
-        tr:hover td {{
-            background: var(--bg-table-hover);
-        }}
-        tr.hidden {{
-            display: none;
-        }}
-        .merchant {{ font-weight: 500; }}
-        .category {{ color: var(--text-secondary); font-size: 0.9rem; }}
-        .money {{ font-family: 'SF Mono', Monaco, monospace; }}
-        .pct {{ font-family: 'SF Mono', Monaco, monospace; color: var(--text-secondary); font-size: 0.85rem; }}
-        .filter-pct {{ font-size: 0.5em; color: var(--text-secondary); font-weight: normal; }}
-        .total-row td {{
-            font-weight: 600;
-            background: var(--bg-table-header);
-            border-top: 2px solid var(--border-light);
-        }}
-        .badge {{
-            display: inline-block;
-            padding: 0.2rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }}
-        .badge.avg {{ background: rgba(79, 172, 254, 0.2); color: var(--accent-blue); }}
-        .badge.div {{ background: rgba(240, 147, 251, 0.2); color: var(--accent-pink); }}
-        /* Tooltips */
-        [data-tooltip] {{
-            position: relative;
-            cursor: help;
-        }}
-        [data-tooltip]:hover::after {{
-            content: attr(data-tooltip);
-            position: absolute;
-            bottom: 125%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--bg-tooltip);
-            color: var(--text-tooltip);
-            padding: 0.5rem 0.75rem;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            white-space: nowrap;
-            z-index: 1000;
-            pointer-events: none;
-        }}
-        [data-tooltip]:hover::before {{
-            content: '';
-            position: absolute;
-            bottom: 115%;
-            left: 50%;
-            transform: translateX(-50%);
-            border: 6px solid transparent;
-            border-top-color: var(--bg-tooltip);
-            z-index: 1000;
-        }}
-        th[data-tooltip] {{ cursor: pointer; }}
-        .highlight {{
-            background: var(--bg-highlight);
-            color: var(--text-primary);
-            padding: 0 2px;
-            border-radius: 2px;
-        }}
-        /* Expandable transaction rows */
-        .merchant-row {{
-            cursor: pointer;
-        }}
-        .merchant-row:hover {{
-            background: var(--bg-card);
-        }}
-        .merchant-row .chevron {{
-            display: inline-block;
-            width: 1em;
-            transition: transform 0.2s;
-            color: var(--text-muted);
-        }}
-        .merchant-row.expanded .chevron {{
-            transform: rotate(90deg);
-        }}
-        .txn-row {{
-            background: var(--bg-txn-row);
-        }}
-        .txn-row.hidden {{
-            display: none;
-        }}
-        .txn-row td {{
-            padding: 0.3rem 0.5rem;
-            font-size: 0.85rem;
-            color: var(--text-light);
-            border-bottom: none;
-        }}
-        .txn-row td:first-child {{
-            padding-left: 2rem;
-        }}
-        .txn-detail {{
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }}
-        .txn-date {{
-            color: var(--text-muted);
-            min-width: 3rem;
-        }}
-        .txn-desc {{
-            flex: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }}
-        .txn-amount {{
-            color: var(--accent-pink);
-            font-family: monospace;
-            min-width: 5rem;
-            text-align: right;
-        }}
-        .txn-source {{
-            font-size: 0.7rem;
-            padding: 0.1rem 0.4rem;
-            border-radius: 3px;
-            margin-left: 0.5rem;
-            font-weight: bold;
-        }}
-        .txn-source.amex {{
-            background: var(--bg-amex);
-            color: white;
-        }}
-        .txn-source.boa {{
-            background: var(--bg-boa);
-            color: white;
-        }}
-        .txn-location {{
-            font-size: 0.7rem;
-            padding: 0.1rem 0.4rem;
-            border-radius: 3px;
-            margin-left: 0.5rem;
-            font-weight: bold;
-            background: var(--bg-location);
-            color: #fff;
-        }}
-        .txn-location.home {{
-            background: var(--bg-home);
-            color: var(--text-home);
-        }}
-        .txn-location.intl {{
-            background: var(--bg-intl);
-            color: var(--text-intl);
-        }}
-        .chart-section {{
-            background: var(--bg-card);
-            border-radius: 16px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-        }}
-        .chart-section .section-header {{
-            cursor: pointer;
-            margin: -1.5rem -1.5rem 1.5rem -1.5rem;
-            padding: 1rem 1.5rem;
-            border-radius: 16px 16px 0 0;
-        }}
-        .chart-section .section-header:hover {{
-            background: var(--bg-row-hover);
-        }}
-        .chart-section .section-header h2 {{
-            font-size: 1.25rem;
-            font-weight: 500;
-            margin: 0;
-            color: var(--text-primary);
-        }}
-        .chart-section .section-header .toggle {{
-            display: inline-block;
-            transition: transform 0.2s;
-        }}
-        .chart-section .section-header.collapsed .toggle {{
-            transform: rotate(-90deg);
-        }}
-        .charts-grid {{
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 2rem;
-        }}
-        @media (min-width: 1024px) {{
-            .charts-grid {{
-                grid-template-columns: 2fr 1fr;
-            }}
-        }}
-        .chart-container {{
-            position: relative;
-            background: var(--bg-table);
-            border-radius: 12px;
-            padding: 1.5rem;
-        }}
-        .chart-container h3 {{
-            font-size: 1rem;
-            font-weight: 500;
-            margin-bottom: 1rem;
-            color: var(--text-secondary);
-        }}
-        .chart-wrapper {{
-            position: relative;
-            height: 300px;
-        }}
-        .donut-chart {{
-            position: relative;
-            width: 200px;
-            height: 200px;
-        }}
-        .donut-chart svg {{
-            transform: rotate(-90deg);
-        }}
-        .donut-chart .center-text {{
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-        }}
-        .donut-chart .center-text .amount {{
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }}
-        .donut-chart .center-text .label {{
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-        }}
-        .legend {{
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 1rem;
-            margin-top: 1rem;
-        }}
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.85rem;
-            color: var(--text-lighter);
-            cursor: pointer;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            transition: background 0.2s;
-        }}
-        .legend-item:hover {{
-            background: var(--bg-card);
-        }}
-        .legend-item .dot {{
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-        }}
-        footer {{
-            text-align: center;
-            padding-top: 2rem;
-            color: var(--text-dim);
-            font-size: 0.85rem;
-        }}
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(10px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
-        }}
-        section {{
-            animation: fadeIn 0.4s ease-out forwards;
-        }}
-        section:nth-child(2) {{ animation-delay: 0.1s; }}
-        section:nth-child(3) {{ animation-delay: 0.2s; }}
-        section:nth-child(4) {{ animation-delay: 0.3s; }}
-        section:nth-child(5) {{ animation-delay: 0.4s; }}
-
-        /* Click-to-filter on cells */
-        .clickable {{ cursor: pointer; }}
-        .clickable:hover {{ text-decoration: underline; color: var(--accent-blue); }}
-        .clickable .chevron {{ text-decoration: none !important; display: inline-block; }}
-        .location-badge.clickable:hover {{ background: var(--accent-blue); }}
-
-        /* Help/Guide section - Compact inline design */
-        .help-section {{
-            background: var(--bg-help);
-            border: 1px solid var(--border-help);
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-        }}
-        .help-section-header {{
-            padding: 0.75rem 1rem;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: background 0.2s;
-        }}
-        .help-section-header:hover {{
-            background: var(--bg-table);
-        }}
-        .help-section-header h3 {{
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-            margin: 0;
-        }}
-        .help-section-header .toggle {{
-            color: var(--text-muted);
-            font-size: 0.7rem;
-            transition: transform 0.2s;
-        }}
-        .help-section.collapsed .help-section-header .toggle {{
-            transform: rotate(-90deg);
-        }}
-        .help-section-content {{
-            padding: 0.75rem 1rem 1rem;
-            border-top: 1px solid var(--border-table);
-            display: grid;
-            grid-template-columns: auto 1fr;
-            gap: 0.4rem 1rem;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            align-items: baseline;
-        }}
-        .help-section.collapsed .help-section-content {{
-            display: none;
-        }}
-        .help-section-content .label {{
-            color: var(--text-muted);
-            font-weight: 500;
-            white-space: nowrap;
-        }}
-        .help-section-content .value {{
-            line-height: 1.5;
-        }}
-        .help-section-content .badge {{
-            margin-right: 0.15rem;
-        }}
-        .help-section-content code {{
-            background: var(--bg-code);
-            padding: 0.1rem 0.35rem;
-            border-radius: 3px;
-            font-size: 0.7rem;
-            color: var(--accent-blue);
-        }}
-        .help-section-content strong {{
-            color: var(--text-lighter);
-            font-weight: 500;
-        }}
+{spending_report_css}
     </style>
 </head>
 <body>
@@ -2628,10 +1856,11 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             monthly = data['total'] / 12
         section_total = stats['monthly_total']
         pct = (data['total'] / section_total * 100) if section_total > 0 else 0
-        merchant_id = merchant.replace("'", "").replace('"', '').replace(' ', '_')
+        merchant_id = make_merchant_id(merchant)
         cat_data = f"{data.get('category', '')}/{data.get('subcategory', '')}".lower()
+        category_id = make_category_id(data.get('category', ''))
         html += f'''
-                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
+                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-category-id="{category_id}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
                         <td class="merchant"><span class="chevron clickable" onclick="toggleTransactionsFromChevron(event, this)">▶</span> <span class="clickable" onclick="addFilterFromCell(event, this, 'merchant')">{merchant}</span></td>
                         <td>{data['months_active']}</td>
                         <td>{data['count']}</td>
@@ -2644,7 +1873,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-category-id="{category_id}">
                         <td colspan="7"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2688,12 +1917,14 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
     for merchant, data in sorted_annual:
         section_total = stats['annual_total']
         pct = (data['total'] / section_total * 100) if section_total > 0 else 0
-        merchant_id = merchant.replace("'", "").replace('"', '').replace(' ', '_')
+        merchant_id = make_merchant_id(merchant)
         cat_data = f"{data.get('category', '')}/{data.get('subcategory', '')}".lower()
+        category_id = make_category_id(data.get('category', ''))
+        subcategory_id = make_category_id(data.get('subcategory', ''))
         html += f'''
-                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
+                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-category-id="{category_id}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
                         <td class="merchant"><span class="chevron clickable" onclick="toggleTransactionsFromChevron(event, this)">▶</span> <span class="clickable" onclick="addFilterFromCell(event, this, 'merchant')">{merchant}</span></td>
-                        <td class="category clickable" onclick="addFilterFromCell(event, this, 'category')">{data['subcategory']}</td>
+                        <td class="category clickable" data-category-id="{subcategory_id}" onclick="addFilterFromCell(event, this, 'category')">{data['subcategory']}</td>
                         <td>{data['count']}</td>
                         <td class="money">{fmt(data['total'])}</td>
                         <td class="pct">{pct:.1f}%</td>
@@ -2702,7 +1933,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-category-id="{category_id}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2744,12 +1975,14 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
     for merchant, data in sorted_periodic:
         section_total = stats['periodic_total']
         pct = (data['total'] / section_total * 100) if section_total > 0 else 0
-        merchant_id = merchant.replace("'", "").replace('"', '').replace(' ', '_')
+        merchant_id = make_merchant_id(merchant)
         cat_data = f"{data.get('category', '')}/{data.get('subcategory', '')}".lower()
+        category_id = make_category_id(data.get('category', ''))
+        subcategory_id = make_category_id(data.get('subcategory', ''))
         html += f'''
-                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
+                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-category-id="{category_id}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
                         <td class="merchant"><span class="chevron clickable" onclick="toggleTransactionsFromChevron(event, this)">▶</span> <span class="clickable" onclick="addFilterFromCell(event, this, 'merchant')">{merchant}</span></td>
-                        <td class="category clickable" onclick="addFilterFromCell(event, this, 'category')">{data['subcategory']}</td>
+                        <td class="category clickable" data-category-id="{subcategory_id}" onclick="addFilterFromCell(event, this, 'category')">{data['subcategory']}</td>
                         <td>{data['count']}</td>
                         <td class="money">{fmt(data['total'])}</td>
                         <td class="pct">{pct:.1f}%</td>
@@ -2758,7 +1991,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-category-id="{category_id}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2800,13 +2033,14 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
     for merchant, data in sorted_travel:
         section_total = stats['travel_total']
         pct = (data['total'] / section_total * 100) if section_total > 0 else 0
-        merchant_id = merchant.replace("'", "").replace('"', '').replace(' ', '_')
+        merchant_id = make_merchant_id(merchant)
         cat_data = f"{data.get('category', 'travel')}/{data.get('subcategory', '')}".lower()
+        category_id = make_category_id(data.get('category', 'travel'))
         category_display = data.get('category', 'Travel')
         html += f'''
-                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
+                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-category-id="{category_id}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
                         <td class="merchant"><span class="chevron clickable" onclick="toggleTransactionsFromChevron(event, this)">▶</span> <span class="clickable" onclick="addFilterFromCell(event, this, 'merchant')">{merchant}</span></td>
-                        <td class="clickable" onclick="addFilterFromCell(event, this, 'category')">{category_display}</td>
+                        <td class="clickable" data-category-id="{category_id}" onclick="addFilterFromCell(event, this, 'category')">{category_display}</td>
                         <td>{data['count']}</td>
                         <td class="money">{fmt(data['total'])}</td>
                         <td class="pct">{pct:.1f}%</td>
@@ -2815,7 +2049,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-category-id="{category_id}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2857,12 +2091,13 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
     for merchant, data in sorted_oneoff:
         section_total = stats['one_off_total']
         pct = (data['total'] / section_total * 100) if section_total > 0 else 0
-        merchant_id = merchant.replace("'", "").replace('"', '').replace(' ', '_')
+        merchant_id = make_merchant_id(merchant)
         cat_data = f"{data.get('category', '')}/{data.get('subcategory', '')}".lower()
+        category_id = make_category_id(data.get('category', ''))
         html += f'''
-                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
+                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-category-id="{category_id}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
                         <td class="merchant"><span class="chevron clickable" onclick="toggleTransactionsFromChevron(event, this)">▶</span> <span class="clickable" onclick="addFilterFromCell(event, this, 'merchant')">{merchant}</span></td>
-                        <td class="category clickable" onclick="addFilterFromCell(event, this, 'category')">{data['category']}</td>
+                        <td class="category clickable" data-category-id="{category_id}" onclick="addFilterFromCell(event, this, 'category')">{data['category']}</td>
                         <td>{data['count']}</td>
                         <td class="money">{fmt(data['total'])}</td>
                         <td class="pct">{pct:.1f}%</td>
@@ -2871,7 +2106,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-category-id="{category_id}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2917,12 +2152,14 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         avg = data['total'] / months if months > 0 else 0
         section_total = stats['variable_total']
         pct = (data['total'] / section_total * 100) if section_total > 0 else 0
-        merchant_id = merchant.replace("'", "").replace('"', '').replace(' ', '_')
+        merchant_id = make_merchant_id(merchant)
         cat_data = f"{data.get('category', '')}/{data.get('subcategory', '')}".lower()
+        category_id = make_category_id(data.get('category', ''))
+        subcategory_id = make_category_id(data.get('subcategory', ''))
         html += f'''
-                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
+                    <tr class="merchant-row" data-merchant="{merchant_id}" data-category="{cat_data}" data-category-id="{category_id}" data-ytd="{data['total']:.2f}" onclick="toggleTransactions(this)">
                         <td class="merchant"><span class="chevron clickable" onclick="toggleTransactionsFromChevron(event, this)">▶</span> <span class="clickable" onclick="addFilterFromCell(event, this, 'merchant')">{merchant}</span></td>
-                        <td class="category"><span class="clickable" onclick="addFilterFromCell(event, this, 'category')">{data['category']}</span>/<span class="clickable" onclick="addFilterFromCell(event, this, 'category')">{data['subcategory']}</span></td>
+                        <td class="category"><span class="clickable" data-category-id="{category_id}" onclick="addFilterFromCell(event, this, 'category')">{data['category']}</span>/<span class="clickable" data-category-id="{subcategory_id}" onclick="addFilterFromCell(event, this, 'category')">{data['subcategory']}</span></td>
                         <td>{months}</td>
                         <td>{data['count']}</td>
                         <td class="money">{fmt(avg)}</td>
@@ -2933,7 +2170,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-category-id="{category_id}">
                         <td colspan="7"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2958,16 +2195,11 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         </footer>
     </div>
 
+    <!-- Data injection for JavaScript -->
     <script>
-        // Currency format
-        const currencyFormat = '{currency_format}';
-        function formatCurrency(amount) {{
-            const formatted = amount.toLocaleString('en-US', {{ maximumFractionDigits: 0 }});
-            return currencyFormat.replace('{{amount}}', formatted);
-        }}
-
-        // Store original totals
-        const originalTotals = {{
+        // Injected data from Python - accessed by spending_report.js via window.*
+        window.currencyFormat = '{currency_format}';
+        window.originalTotals = {{
             monthly: {stats['monthly_avg']},
             monthlyYtd: {stats['monthly_total']},
             annual: {stats['annual_total']},
@@ -2978,1580 +2210,21 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             variableYtd: {stats['variable_total']},
             totalYtd: {actual}
         }};
-
-        // Table configuration - declarative column mapping for each table type
-        // This replaces hardcoded column indices throughout the code
-        const TABLE_CONFIG = {{
-            'monthly-table': {{
-                section: 'monthly-section',
-                columns: {{ merchant: 0, months: 1, count: 2, type: 3, monthly: 4, ytd: 5, pct: 6 }},
-                hasMonthlyColumn: true,
-                totalColumn: 'ytd'
-            }},
-            'variable-table': {{
-                section: 'variable-section',
-                columns: {{ merchant: 0, category: 1, months: 2, count: 3, monthly: 4, ytd: 5, pct: 6 }},
-                hasMonthlyColumn: true,
-                totalColumn: 'ytd'
-            }},
-            'annual-table': {{
-                section: 'annual-section',
-                columns: {{ merchant: 0, category: 1, count: 2, total: 3, pct: 4 }},
-                hasMonthlyColumn: false,
-                totalColumn: 'total'
-            }},
-            'periodic-table': {{
-                section: 'periodic-section',
-                columns: {{ merchant: 0, category: 1, count: 2, total: 3, pct: 4 }},
-                hasMonthlyColumn: false,
-                totalColumn: 'total'
-            }},
-            'travel-table': {{
-                section: 'travel-section',
-                columns: {{ merchant: 0, category: 1, count: 2, total: 3, pct: 4 }},
-                hasMonthlyColumn: false,
-                totalColumn: 'total'
-            }},
-            'oneoff-table': {{
-                section: 'oneoff-section',
-                columns: {{ merchant: 0, category: 1, count: 2, total: 3, pct: 4 }},
-                hasMonthlyColumn: false,
-                totalColumn: 'total'
-            }}
-        }};
-
-        // Autocomplete data
-        const autocompleteData = [
-            {','.join(f'{{"text": "{cat}", "type": "category"}}' for cat in sorted_categories)},
+        window.autocompleteData = [
+            {','.join(f'{{"text": "{cat}", "type": "category", "id": "{make_category_id(cat)}"}}' for cat in sorted_categories)},
             {','.join(f'{{"text": "{merchant.replace(chr(34), chr(92)+chr(34))}", "type": "merchant", "id": "{make_merchant_id(merchant)}"}}' for merchant in sorted_merchants)},
-            {','.join(f'{{"text": "{loc}", "type": "location"}}' for loc in sorted_locations)}
+            {','.join(f'{{"text": "{loc}", "type": "location", "id": "{make_location_id(loc)}"}}' for loc in sorted_locations)}
         ];
-
-        // Pre-computed embeddings for semantic search
         window.embeddingsData = {embeddings_json};
-
-        // Autocomplete state
-        let selectedIndex = -1;
-
-        // Active filters state (window. for cross-script access)
-        window.activeFilters = [];  // array of filter objects with text, type, mode
-
-        // Month filter helpers
-        const monthNames = {{Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06',
-                            Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12'}};
-        const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-        function monthLabelToKey(label) {{
-            // "Dec 2025" -> "2025-12"
-            const [mon, year] = label.split(' ');
-            return `${{year}}-${{monthNames[mon]}}`;
-        }}
-
-        function monthKeyToLabel(key) {{
-            // "2025-12" -> "Dec 2025"
-            // "2025-01..2025-03" -> "Jan–Mar 2025"
-            if (key.includes('..')) {{
-                const [start, end] = key.split('..');
-                const [sy, sm] = start.split('-');
-                const [ey, em] = end.split('-');
-                const startMon = monthLabels[parseInt(sm) - 1];
-                const endMon = monthLabels[parseInt(em) - 1];
-                if (sy === ey) {{
-                    return `${{startMon}}–${{endMon}} ${{sy}}`;
-                }}
-                return `${{startMon}} ${{sy}}–${{endMon}} ${{ey}}`;
-            }}
-            const [year, month] = key.split('-');
-            return `${{monthLabels[parseInt(month) - 1]}} ${{year}}`;
-        }}
-
-        function monthMatchesFilter(txnMonth, filterText) {{
-            // Check for range separator (supports both '..' and ':')
-            const rangeMatch = filterText.match(/^(\d{{4}}-\d{{2}})(?:\.\.|:)(\d{{4}}-\d{{2}})$/);
-            if (rangeMatch) {{
-                const [, start, end] = rangeMatch;
-                return txnMonth >= start && txnMonth <= end;
-            }}
-            // Single month: "2025-12"
-            return txnMonth === filterText;
-        }}
-
-        // ========================================
-        // FilterEngine - Unified Filter Matching
-        // ========================================
-        const FilterEngine = {{
-            // Check if a transaction matches a single filter
-            txnMatchesFilter(txn, filter) {{
-                const filterText = filter.text.toLowerCase();
-
-                if (filter.type === 'month') {{
-                    const txnMonth = txn.dataset.month || '';
-                    return monthMatchesFilter(txnMonth, filterText);
-                }}
-
-                if (filter.type === 'location') {{
-                    const locBadge = txn.querySelector('.txn-location');
-                    const txnLoc = locBadge ? locBadge.textContent.toLowerCase() : '';
-                    return txnLoc === filterText;
-                }}
-
-                if (filter.type === 'category') {{
-                    // Check transaction's category data
-                    const txnCat = txn.dataset.category || '';
-                    if (txnCat.toLowerCase().includes(filterText)) return true;
-                    // Check if travel table
-                    const tableId = txn.closest('table')?.id;
-                    if (tableId === 'travel-table' && filterText === 'travel') return true;
-                    return false;
-                }}
-
-                if (filter.type === 'merchant') {{
-                    const merchantId = txn.dataset.merchant;
-                    if (merchantId && merchantId.toLowerCase().includes(filterText)) return true;
-                    const desc = txn.querySelector('.txn-desc');
-                    return desc && desc.textContent.toLowerCase().includes(filterText);
-                }}
-
-                return false;
-            }},
-
-            // Check if a merchant row matches a single filter
-            merchantMatchesFilter(row, filter, txnRows) {{
-                const filterText = filter.text.toLowerCase();
-                const merchantId = row.dataset.merchant;
-                const tableId = row.closest('table')?.id;
-
-                if (filter.type === 'category') {{
-                    // Check visible category cell
-                    const catCell = row.querySelector('.category');
-                    if (catCell) {{
-                        const catText = catCell.textContent.toLowerCase();
-                        if (catText.includes(filterText)) return true;
-                    }}
-                    // Check data-category attribute
-                    const dataCat = row.dataset.category;
-                    if (dataCat && dataCat.includes(filterText)) return true;
-                    // Travel table = all Travel category
-                    if (tableId === 'travel-table' && filterText === 'travel') return true;
-                    return false;
-                }}
-
-                if (filter.type === 'location') {{
-                    return txnRows.some(txn => {{
-                        if (txn.dataset.merchant !== merchantId) return false;
-                        const locBadge = txn.querySelector('.txn-location');
-                        return locBadge && locBadge.textContent.toLowerCase() === filterText;
-                    }});
-                }}
-
-                if (filter.type === 'month') {{
-                    return txnRows.some(txn => {{
-                        if (txn.dataset.merchant !== merchantId) return false;
-                        const txnMonth = txn.dataset.month || '';
-                        return monthMatchesFilter(txnMonth, filterText);
-                    }});
-                }}
-
-                if (filter.type === 'merchant') {{
-                    // Check data-merchant attribute first (exact ID match)
-                    if (merchantId && merchantId.toLowerCase().includes(filterText)) return true;
-                    // Also check visible merchant name
-                    const merchCell = row.querySelector('.merchant');
-                    if (merchCell) {{
-                        const merchText = merchCell.textContent.replace('▶', '').trim().toLowerCase();
-                        if (merchText === filterText || merchText.includes(filterText)) return true;
-                    }}
-                    return false;
-                }}
-
-                return false;
-            }},
-
-            // Check if a transaction matches all include filters (AND across types, OR within type)
-            txnMatchesAllIncludes(txn, includeFilters) {{
-                if (includeFilters.length === 0) return true;
-
-                // Group filters by type
-                const byType = {{}};
-                includeFilters.forEach(f => {{
-                    if (!byType[f.type]) byType[f.type] = [];
-                    byType[f.type].push(f);
-                }});
-
-                // Must match at least one filter of each type present
-                for (const filters of Object.values(byType)) {{
-                    const matchesType = filters.some(f => this.txnMatchesFilter(txn, f));
-                    if (!matchesType) return false;
-                }}
-                return true;
-            }},
-
-            // Check if a transaction matches any exclude filter
-            txnMatchesAnyExclude(txn, excludeFilters) {{
-                return excludeFilters.some(f => this.txnMatchesFilter(txn, f));
-            }},
-
-            // Main entry: check if transaction passes all filters
-            txnPassesFilters(txn, includeFilters, excludeFilters) {{
-                if (!this.txnMatchesAllIncludes(txn, includeFilters)) return false;
-                if (this.txnMatchesAnyExclude(txn, excludeFilters)) return false;
-                return true;
-            }}
-        }};
-
-        function addFilter(text, type, displayText = null) {{
-            // Don't add duplicate filters
-            if (activeFilters.some(f => f.text === text && f.type === type)) return;
-            const filter = {{ text, type, mode: 'include' }};
-            if (displayText) filter.displayText = displayText;
-            activeFilters.push(filter);
-            renderFilters();
-            applyFilters();
-        }}
-
-        function removeFilter(index) {{
-            activeFilters.splice(index, 1);
-            renderFilters();
-            applyFilters();
-        }}
-
-        function toggleFilter(index) {{
-            activeFilters[index].mode = activeFilters[index].mode === 'include' ? 'exclude' : 'include';
-            renderFilters();
-            applyFilters();
-        }}
-
-        function applyDateRange(value) {{
-            const select = document.getElementById('dateRangeSelect');
-            if (value) {{
-                // Check if this month/range is already in filters
-                const exists = activeFilters.some(f => f.type === 'month' && f.text === value);
-                if (!exists) {{
-                    addFilter(value, 'month');
-                }}
-            }}
-            // Reset dropdown to "All Dates" after selection (acts as "add filter" button)
-            if (select) {{
-                select.value = '';
-            }}
-        }}
-
-        function syncDatePickerWithFilters() {{
-            // Reset dropdown when filters change (multi-select via chips)
-            const select = document.getElementById('dateRangeSelect');
-            if (select) {{
-                select.value = '';
-            }}
-        }}
-
-        function renderFilters() {{
-            const container = document.getElementById('filterChips');
-            let html = activeFilters.map((f, i) => {{
-                // Use displayText if available, otherwise format based on type
-                let displayText = f.displayText || f.text;
-                if (f.type === 'month') displayText = monthKeyToLabel(f.text);
-                const typeChar = f.type === 'month' ? 'd' : f.type.charAt(0);
-                return `
-                <div class="filter-chip ${{f.type}} ${{f.mode}}" data-index="${{i}}">
-                    <span class="chip-type">${{typeChar}}</span>
-                    <span class="chip-text">${{displayText}}</span>
-                    <span class="chip-remove" data-action="remove">×</span>
-                </div>
-            `;
-            }}).join('');
-
-            // Add "Clear all" button if there are multiple filters
-            if (activeFilters.length > 1) {{
-                html += '<button class="clear-all-btn" onclick="clearAllFilters()">Clear all</button>';
-            }}
-
-            container.innerHTML = html;
-
-            // Add click handlers
-            container.querySelectorAll('.filter-chip').forEach(chip => {{
-                chip.addEventListener('click', (e) => {{
-                    const idx = parseInt(chip.dataset.index);
-                    if (e.target.dataset.action === 'remove') {{
-                        removeFilter(idx);
-                    }} else {{
-                        toggleFilter(idx);
-                    }}
-                }});
-            }});
-
-            // Sync date picker with current filters
-            syncDatePickerWithFilters();
-        }}
-
-        function clearAllFilters() {{
-            activeFilters = [];
-            renderFilters();
-            applyFilters();
-        }}
-
-        function applyFilters() {{
-            const tables = document.querySelectorAll('table');
-            const includeFilters = activeFilters.filter(f => f.mode === 'include');
-            const excludeFilters = activeFilters.filter(f => f.mode === 'exclude');
-
-            // If no filters, show all
-            if (activeFilters.length === 0) {{
-                document.querySelectorAll('section').forEach(section => {{
-                    section.style.display = '';
-                }});
-                tables.forEach(table => {{
-                    table.querySelectorAll('tbody tr:not(.total-row)').forEach(row => {{
-                        if (!row.classList.contains('txn-row')) {{
-                            row.classList.remove('hidden');
-                        }}
-                        row.querySelectorAll('.highlight').forEach(el => {{
-                            el.outerHTML = el.textContent;
-                        }});
-                    }});
-                }});
-                document.querySelectorAll('.merchant-row.expanded').forEach(row => {{
-                    row.classList.remove('expanded');
-                }});
-                document.querySelectorAll('.txn-row').forEach(row => {{
-                    row.classList.add('hidden');
-                }});
-                restoreOriginalTotals();
-                const totalEl = document.getElementById('totalSpending');
-                const original = parseInt(totalEl.dataset.original);
-                totalEl.textContent = formatCurrency(original);
-                return;
-            }}
-
-            // Check if we have location or month filters (requires transaction-level filtering)
-            const hasLocationFilter = activeFilters.some(f => f.type === 'location');
-            const hasMonthFilter = activeFilters.some(f => f.type === 'month');
-            const needsTxnFiltering = hasLocationFilter || hasMonthFilter;
-
-            tables.forEach(table => {{
-                const merchantRows = table.querySelectorAll('tbody tr.merchant-row');
-                const txnRows = Array.from(table.querySelectorAll('tbody tr.txn-row'));
-                let hasVisibleRows = false;
-
-                if (needsTxnFiltering) {{
-                    // Location/month filter: filter at transaction level using FilterEngine
-                    const visibleMerchants = new Set();
-
-                    txnRows.forEach(txn => {{
-                        if (FilterEngine.txnPassesFilters(txn, includeFilters, excludeFilters)) {{
-                            txn.classList.remove('hidden');
-                            visibleMerchants.add(txn.dataset.merchant);
-                        }} else {{
-                            txn.classList.add('hidden');
-                        }}
-                    }});
-
-                    // Show merchant rows that have visible transactions
-                    merchantRows.forEach(row => {{
-                        if (visibleMerchants.has(row.dataset.merchant)) {{
-                            row.classList.remove('hidden');
-                            row.classList.add('expanded');  // Auto-expand to show txns
-                            hasVisibleRows = true;
-                        }} else {{
-                            row.classList.add('hidden');
-                            row.classList.remove('expanded');
-                        }}
-                    }});
-                }} else {{
-                    // No location/month filter: filter at merchant level using FilterEngine
-                    merchantRows.forEach(row => {{
-                        let shouldShow = false;
-
-                        if (includeFilters.length > 0) {{
-                            shouldShow = includeFilters.some(f => FilterEngine.merchantMatchesFilter(row, f, txnRows));
-                        }} else {{
-                            shouldShow = true;
-                        }}
-
-                        if (shouldShow && excludeFilters.length > 0) {{
-                            shouldShow = !excludeFilters.some(f => FilterEngine.merchantMatchesFilter(row, f, txnRows));
-                        }}
-
-                        if (shouldShow) {{
-                            row.classList.remove('hidden');
-                            hasVisibleRows = true;
-                        }} else {{
-                            row.classList.add('hidden');
-                        }}
-                    }});
-
-                    // Hide all txn-rows when not filtering by location
-                    txnRows.forEach(row => row.classList.add('hidden'));
-                }}
-
-                // Show/hide sections
-                const section = table.closest('section');
-                if (section) {{
-                    const header = section.querySelector('.section-header');
-                    const content = section.querySelector('.section-content');
-                    if (hasVisibleRows) {{
-                        section.style.display = '';
-                        header?.classList.remove('collapsed');
-                        content?.classList.remove('collapsed');
-                    }} else {{
-                        section.style.display = 'none';
-                    }}
-                }}
-            }});
-
-            // Update totals using unified calculation
-            const state = computeFilteredState(activeFilters);
-            renderFilteredTotals(state);
-        }}
-
-        // Render totals from computed state - single rendering path
-        function renderFilteredTotals(state) {{
-            const {{ sectionTotals, merchantTotals, merchantMonths, merchantCounts, numFilteredMonths, totalAmount }} = state;
-            const monthFilters = activeFilters.filter(f => f.type === 'month' && f.mode === 'include');
-
-            // Update merchant rows with computed values
-            document.querySelectorAll('.merchant-row:not(.hidden)').forEach(row => {{
-                const merchantId = row.dataset.merchant;
-                const tableId = row.closest('table')?.id;
-                const config = TABLE_CONFIG[tableId];
-                if (!config) return;
-
-                const filteredTotal = merchantTotals[merchantId] || 0;
-                const filteredMonthCount = merchantMonths[merchantId]?.size || 0;
-                const filteredTxnCount = merchantCounts[merchantId] || 0;
-                const cols = config.columns;
-
-                // Update months column if present
-                if (cols.months !== undefined) {{
-                    const monthsCell = row.cells[cols.months];
-                    if (monthsCell) monthsCell.textContent = filteredMonthCount || row.dataset.originalMonths || '';
-                }}
-
-                // Update count column if present
-                if (cols.count !== undefined) {{
-                    const countCell = row.cells[cols.count];
-                    if (countCell) countCell.textContent = filteredTxnCount || row.dataset.originalCount || '';
-                }}
-
-                // Update total/ytd column
-                const totalColName = config.totalColumn;
-                const totalCell = row.cells[cols[totalColName]];
-                if (totalCell && filteredTotal > 0) {{
-                    totalCell.innerHTML = '<span class="money">' + formatMoney(filteredTotal) + '</span>';
-                }}
-
-                // Update monthly column if present
-                if (config.hasMonthlyColumn && cols.monthly !== undefined && filteredTotal > 0) {{
-                    const monthlyCell = row.cells[cols.monthly];
-                    if (monthlyCell) {{
-                        const monthlyAvg = filteredTotal / numFilteredMonths;
-                        monthlyCell.innerHTML = '<span class="money">' + formatMoney(monthlyAvg, true) + '</span>';
-                    }}
-                }}
-
-                // Update percentage column
-                if (cols.pct !== undefined && sectionTotals[tableId] > 0 && filteredTotal > 0) {{
-                    const pctCell = row.cells[cols.pct];
-                    if (pctCell) {{
-                        pctCell.textContent = (filteredTotal / sectionTotals[tableId] * 100).toFixed(1) + '%';
-                    }}
-                }}
-            }});
-
-            // Calculate monthly averages
-            const monthlyAvg = sectionTotals['monthly-table'] / numFilteredMonths;
-            const variableAvg = sectionTotals['variable-table'] / numFilteredMonths;
-
-            // Update section headers
-            updateSectionTotal('monthly-section', monthlyAvg, true, sectionTotals['monthly-table'], totalAmount);
-            updateSectionTotal('annual-section', sectionTotals['annual-table'], false, null, totalAmount);
-            updateSectionTotal('periodic-section', sectionTotals['periodic-table'], false, null, totalAmount);
-            updateSectionTotal('travel-section', sectionTotals['travel-table'], false, null, totalAmount);
-            updateSectionTotal('oneoff-section', sectionTotals['oneoff-table'], false, null, totalAmount);
-            updateSectionTotal('variable-section', variableAvg, true, sectionTotals['variable-table'], totalAmount);
-
-            // Update summary cards
-            updateSummaryCards(
-                monthlyAvg,
-                variableAvg,
-                sectionTotals['monthly-table'],
-                sectionTotals['variable-table'],
-                sectionTotals['annual-table'],
-                sectionTotals['periodic-table'],
-                sectionTotals['travel-table'],
-                sectionTotals['oneoff-table']
-            );
-
-            // Update table total rows
-            updateTableTotalRow('monthly-table', monthlyAvg, sectionTotals['monthly-table']);
-            updateTableTotalRow('annual-table', null, sectionTotals['annual-table']);
-            updateTableTotalRow('periodic-table', null, sectionTotals['periodic-table']);
-            updateTableTotalRow('travel-table', null, sectionTotals['travel-table']);
-            updateTableTotalRow('oneoff-table', null, sectionTotals['oneoff-table']);
-            updateTableTotalRow('variable-table', variableAvg, sectionTotals['variable-table']);
-
-            // Update Total Spending card
-            const totalEl = document.getElementById('totalSpending');
-            const hasOtherIncludeFilters = activeFilters.some(f => f.type !== 'month' && f.mode === 'include');
-
-            if (monthFilters.length > 0 && !hasOtherIncludeFilters) {{
-                totalEl.innerHTML = formatCurrency(totalAmount);
-            }} else if (activeFilters.some(f => f.mode === 'include')) {{
-                const pct = (totalAmount / originalTotals.totalYtd * 100).toFixed(1);
-                totalEl.innerHTML = formatCurrency(totalAmount) +
-                    '<span class="filter-pct"> (' + pct + '%)</span>';
-            }} else {{
-                totalEl.innerHTML = formatCurrency(totalAmount);
-            }}
-        }}
-
-        // Cosine similarity function
-        function cosineSimilarity(a, b) {{
-            let dotProduct = 0, normA = 0, normB = 0;
-            for (let i = 0; i < a.length; i++) {{
-                dotProduct += a[i] * b[i];
-                normA += a[i] * a[i];
-                normB += b[i] * b[i];
-            }}
-            return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-        }}
-
-        // Semantic search function
-        async function semanticSearch(query) {{
-            if (!window.semanticReady || !window.semanticModel || !window.embeddingsData) {{
-                return null;
-            }}
-            try {{
-                // Get query embedding
-                const output = await window.semanticModel(query, {{ pooling: 'mean', normalize: true }});
-                const queryEmbedding = Array.from(output.data);
-
-                // Calculate similarities
-                const results = window.embeddingsData.items.map((item, i) => ({{
-                    text: item,
-                    type: i < {len(sorted_categories)} ? 'category' : 'merchant',
-                    score: cosineSimilarity(queryEmbedding, window.embeddingsData.vectors[i])
-                }}));
-
-                // Sort by similarity and return top matches
-                return results.sort((a, b) => b.score - a.score).filter(r => r.score > 0.3);
-            }} catch (e) {{
-                console.error('Semantic search error:', e);
-                return null;
-            }}
-        }}
-
-        // Setup autocomplete
-        const searchInput = document.getElementById('searchInput');
-        const autocompleteList = document.getElementById('autocompleteList');
-
-        // Debounce timer for semantic search
-        let semanticDebounce = null;
-
-        searchInput.addEventListener('input', async function() {{
-            const query = this.value.toLowerCase().trim();
-
-            if (query.length < 1) {{
-                autocompleteList.classList.remove('show');
-                return;
-            }}
-
-            // First show text matches immediately
-            // Sort by match quality: exact > starts-with > contains
-            let matches = autocompleteData
-                .filter(item => item.text.toLowerCase().includes(query))
-                .sort((a, b) => {{
-                    const aLower = a.text.toLowerCase();
-                    const bLower = b.text.toLowerCase();
-                    const aExact = aLower === query;
-                    const bExact = bLower === query;
-                    const aStarts = aLower.startsWith(query);
-                    const bStarts = bLower.startsWith(query);
-                    // Exact matches first
-                    if (aExact && !bExact) return -1;
-                    if (bExact && !aExact) return 1;
-                    // Then starts-with
-                    if (aStarts && !bStarts) return -1;
-                    if (bStarts && !aStarts) return 1;
-                    // Then alphabetically
-                    return aLower.localeCompare(bLower);
-                }})
-                .slice(0, 8);
-
-            // Render text matches
-            renderAutocomplete(matches, false);
-
-            // Then try semantic search with debounce
-            if (window.semanticReady && query.length >= 2) {{
-                clearTimeout(semanticDebounce);
-                semanticDebounce = setTimeout(async () => {{
-                    const semanticResults = await semanticSearch(query);
-                    if (semanticResults && semanticResults.length > 0) {{
-                        // Merge: semantic results that aren't already in text matches
-                        const textMatchTexts = new Set(matches.map(m => m.text.toLowerCase()));
-                        const newSemanticMatches = semanticResults
-                            .filter(r => !textMatchTexts.has(r.text.toLowerCase()))
-                            .slice(0, 5);
-
-                        if (newSemanticMatches.length > 0) {{
-                            const combined = [...matches, ...newSemanticMatches].slice(0, 10);
-                            renderAutocomplete(combined, true);
-                        }}
-                    }}
-                }}, 300);
-            }}
-        }});
-
-        function renderAutocomplete(matches, hasSemantic) {{
-            if (matches.length === 0) {{
-                autocompleteList.classList.remove('show');
-                return;
-            }}
-
-            autocompleteList.innerHTML = matches.map((item, i) => {{
-                const scoreHtml = item.score ? `<span class="score">${{Math.round(item.score * 100)}}%</span>` : '';
-                const idAttr = item.id ? ` data-id="${{item.id}}"` : '';
-                return `<div class="autocomplete-item${{i === selectedIndex ? ' selected' : ''}}" data-value="${{item.text}}" data-type="${{item.type}}"${{idAttr}}>
-                    ${{item.text}}<span class="type ${{item.type}}">${{item.type}}</span>${{scoreHtml}}
-                </div>`;
-            }}).join('');
-            autocompleteList.classList.add('show');
-            selectedIndex = -1;
-        }}
-
-        searchInput.addEventListener('keydown', function(e) {{
-            const items = autocompleteList.querySelectorAll('.autocomplete-item');
-            if (!items.length) return;
-
-            if (e.key === 'ArrowDown') {{
-                e.preventDefault();
-                selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
-                updateSelection(items);
-            }} else if (e.key === 'ArrowUp') {{
-                e.preventDefault();
-                selectedIndex = Math.max(selectedIndex - 1, -1);
-                updateSelection(items);
-            }} else if (e.key === 'Enter' && selectedIndex >= 0) {{
-                e.preventDefault();
-                const item = items[selectedIndex];
-                selectItem(item.dataset.value, item.dataset.type, item.dataset.id);
-            }}
-        }});
-
-        function updateSelection(items) {{
-            items.forEach((item, i) => {{
-                item.classList.toggle('selected', i === selectedIndex);
-            }});
-        }}
-
-        function selectItem(value, type, id) {{
-            // For merchants, use ID for filter/hash but display text for chip
-            if (type === 'merchant' && id) {{
-                addFilter(id, type, value);  // id for filter, value for display
-            }} else {{
-                addFilter(value, type);
-            }}
-            searchInput.value = '';
-            autocompleteList.classList.remove('show');
-            searchInput.focus();
-        }}
-
-        autocompleteList.addEventListener('click', function(e) {{
-            const item = e.target.closest('.autocomplete-item');
-            if (item) {{
-                selectItem(item.dataset.value, item.dataset.type, item.dataset.id);
-            }}
-        }});
-
-        document.addEventListener('click', function(e) {{
-            if (!e.target.closest('.autocomplete-container')) {{
-                autocompleteList.classList.remove('show');
-            }}
-        }});
-
-        // Toggle section collapse/expand
-        function toggleSection(header) {{
-            header.classList.toggle('collapsed');
-            const content = header.nextElementSibling;
-            content.classList.toggle('collapsed');
-        }}
-
-        // Toggle transaction detail rows
-        function toggleTransactions(row) {{
-            const merchantId = row.dataset.merchant;
-            const isExpanded = row.classList.toggle('expanded');
-
-            // Find all transaction rows for this merchant
-            let nextRow = row.nextElementSibling;
-            while (nextRow && nextRow.classList.contains('txn-row') && nextRow.dataset.merchant === merchantId) {{
-                nextRow.classList.toggle('hidden', !isExpanded);
-                nextRow = nextRow.nextElementSibling;
-            }}
-        }}
-
-        // Toggle transactions from chevron click
-        function toggleTransactionsFromChevron(event, chevron) {{
-            event.stopPropagation();
-            const row = chevron.closest('.merchant-row');
-            if (row) toggleTransactions(row);
-        }}
-
-        // Parse money value from cell
-        function parseMoney(text) {{
-            // Remove currency symbols, commas, and /mo suffix
-            return parseFloat(text.replace(/[^0-9.-]/g, '')) || 0;
-        }}
-
-        // Format as money
-        function formatMoney(value, perMonth = false) {{
-            const formatted = formatCurrency(value);
-            return perMonth ? formatted + '/mo' : formatted;
-        }}
-
-        // Update totals for a table based on visible rows
-        // Uses TABLE_CONFIG for column indices
-        function updateTableTotals(tableId) {{
-            const table = document.getElementById(tableId);
-            if (!table) return {{ monthly: 0, ytd: 0 }};
-
-            const config = TABLE_CONFIG[tableId];
-            if (!config) return {{ monthly: 0, ytd: 0 }};
-
-            const cols = config.columns;
-            const totalColName = config.totalColumn;
-            const merchantRows = table.querySelectorAll('tbody tr.merchant-row');
-            const totalRow = table.querySelector('.total-row');
-            let monthlySum = 0;
-            let ytdSum = 0;
-
-            // Check if month filters are active - if so, calculate from visible transactions
-            const hasMonthFilter = window.activeFilters && window.activeFilters.some(f => f.type === 'month');
-
-            if (hasMonthFilter) {{
-                // Calculate from visible transaction rows for accurate month filtering
-                const merchantTotals = {{}};
-                table.querySelectorAll('tbody tr.txn-row').forEach(txn => {{
-                    if (getComputedStyle(txn).display !== 'none') {{
-                        const merchantId = txn.dataset.merchant;
-                        const amount = parseFloat(txn.dataset.amount) || 0;
-                        merchantTotals[merchantId] = (merchantTotals[merchantId] || 0) + amount;
-                        ytdSum += amount;
-                    }}
-                }});
-
-                // Update percentages for visible merchant rows
-                if (cols.pct !== undefined && ytdSum > 0) {{
-                    merchantRows.forEach(row => {{
-                        if (!row.classList.contains('hidden')) {{
-                            const pctCell = row.cells[cols.pct];
-                            if (pctCell) {{
-                                const merchantId = row.dataset.merchant;
-                                const rowYtd = merchantTotals[merchantId] || 0;
-                                const pct = (rowYtd / ytdSum * 100).toFixed(1);
-                                pctCell.textContent = pct + '%';
-                            }}
-                        }}
-                    }});
-                }}
-
-                // Count visible months for monthly average
-                const visibleMonths = new Set();
-                table.querySelectorAll('tbody tr.txn-row').forEach(txn => {{
-                    if (getComputedStyle(txn).display !== 'none') {{
-                        visibleMonths.add(txn.dataset.month);
-                    }}
-                }});
-                const numMonths = visibleMonths.size || 1;
-                monthlySum = ytdSum / numMonths;
-            }} else {{
-                // No month filter - use original data-ytd for faster calculation
-                merchantRows.forEach(row => {{
-                    if (!row.classList.contains('hidden')) {{
-                        const ytdValue = parseFloat(row.dataset.ytd) || 0;
-                        ytdSum += ytdValue;
-                        if (config.hasMonthlyColumn && cols.monthly !== undefined) {{
-                            monthlySum += parseMoney(row.cells[cols.monthly].textContent);
-                        }}
-                    }}
-                }});
-
-                // Update percentages for visible rows
-                if (cols.pct !== undefined && ytdSum > 0) {{
-                    merchantRows.forEach(row => {{
-                        if (!row.classList.contains('hidden')) {{
-                            const pctCell = row.cells[cols.pct];
-                            if (pctCell) {{
-                                const rowYtd = parseFloat(row.dataset.ytd) || 0;
-                                const pct = (rowYtd / ytdSum * 100).toFixed(1);
-                                pctCell.textContent = pct + '%';
-                            }}
-                        }}
-                    }});
-                }}
-            }}
-
-            // Update total row using TABLE_CONFIG
-            if (totalRow) {{
-                if (config.hasMonthlyColumn && cols.monthly !== undefined) {{
-                    const monthlyCell = totalRow.cells[cols.monthly];
-                    if (monthlyCell) {{
-                        monthlyCell.innerHTML = '<span class="money">' + formatMoney(monthlySum, true) + '</span>';
-                    }}
-                }}
-                const ytdCell = totalRow.cells[cols[totalColName]];
-                if (ytdCell) {{
-                    ytdCell.innerHTML = '<span class="money">' + formatMoney(ytdSum) + '</span>';
-                }}
-            }}
-
-            return {{ monthly: monthlySum, ytd: ytdSum }};
-        }}
-
-        // Update section header total and percentage
-        // For monthly/variable sections: pass ytdValue to update both monthly and YTD displays
-        // filteredTotal is used to calculate the percentage of total spending
-        function updateSectionTotal(sectionClass, value, perMonth = false, ytdValue = null, filteredTotal = null) {{
-            const section = document.querySelector('.' + sectionClass);
-            if (section) {{
-                const monthlySpan = section.querySelector('.section-monthly');
-                const ytdSpan = section.querySelector('.section-ytd');
-                const pctSpan = section.querySelector('.section-pct');
-
-                if (monthlySpan && ytdSpan && ytdValue !== null) {{
-                    // Section has both monthly and YTD display
-                    monthlySpan.textContent = formatMoney(value, true);
-                    ytdSpan.textContent = formatMoney(ytdValue);
-                    // Update percentage based on YTD value
-                    if (pctSpan && filteredTotal !== null && filteredTotal > 0) {{
-                        const pct = (ytdValue / filteredTotal * 100).toFixed(1);
-                        pctSpan.textContent = '(' + pct + '%)';
-                    }}
-                }} else {{
-                    // Sections with single total (annual, periodic, travel, oneoff)
-                    const totalSpan = section.querySelector('.section-total');
-                    if (totalSpan) {{
-                        // Update the text content but preserve the pct span
-                        const valueText = formatMoney(value, perMonth);
-                        if (pctSpan && filteredTotal !== null && filteredTotal > 0) {{
-                            const pct = (value / filteredTotal * 100).toFixed(1);
-                            pctSpan.textContent = '(' + pct + '%)';
-                            // Update the total span text (value + space before pct)
-                            totalSpan.childNodes[0].textContent = valueText + ' ';
-                        }} else {{
-                            totalSpan.textContent = valueText;
-                        }}
-                    }}
-                }}
-            }}
-        }}
-
-        // Update summary cards
-        // Now accepts both monthly averages and YTD totals for accurate filtering
-        function updateSummaryCards(monthlyAvg, variableAvg, monthlyYtd, variableYtd, annualTotal, periodicTotal, travelTotal, oneoffTotal) {{
-            const trueMonthly = monthlyAvg + variableAvg;
-            const nonRecurring = annualTotal + periodicTotal + travelTotal + oneoffTotal;
-
-            // Calculate filtered total using actual YTD values (not projected)
-            const filteredTotal = monthlyYtd + variableYtd + annualTotal + periodicTotal + travelTotal + oneoffTotal;
-
-            // Helper to format percentage
-            const formatPct = (val) => filteredTotal > 0 ? (val / filteredTotal * 100).toFixed(1) + '%' : '0.0%';
-
-            // Update Monthly Budget card
-            const monthlyCard = document.querySelector('.card.monthly');
-            if (monthlyCard) {{
-                monthlyCard.querySelector('.amount').innerHTML = formatMoney(trueMonthly) + '<span style="font-size: 1rem; color: #888;">/mo</span>';
-                const breakdownItems = monthlyCard.querySelectorAll('.breakdown-item .value');
-                if (breakdownItems[0]) breakdownItems[0].innerHTML = formatMoney(monthlyAvg) + ' <span class="breakdown-pct">(' + formatPct(monthlyYtd) + ')</span>';
-                if (breakdownItems[1]) breakdownItems[1].innerHTML = formatMoney(variableAvg) + ' <span class="breakdown-pct">(' + formatPct(variableYtd) + ')</span>';
-            }}
-
-            // Update Non-Recurring card
-            const nonRecCard = document.querySelector('.card.non-recurring');
-            if (nonRecCard) {{
-                nonRecCard.querySelector('.amount').innerHTML = formatMoney(nonRecurring) + ' <span class="breakdown-pct">(' + formatPct(nonRecurring) + ')</span>';
-                const breakdownItems = nonRecCard.querySelectorAll('.breakdown-item .value');
-                if (breakdownItems[0]) breakdownItems[0].innerHTML = formatMoney(annualTotal) + ' <span class="breakdown-pct">(' + formatPct(annualTotal) + ')</span>';
-                if (breakdownItems[1]) breakdownItems[1].innerHTML = formatMoney(periodicTotal) + ' <span class="breakdown-pct">(' + formatPct(periodicTotal) + ')</span>';
-                if (breakdownItems[2]) breakdownItems[2].innerHTML = formatMoney(travelTotal) + ' <span class="breakdown-pct">(' + formatPct(travelTotal) + ')</span>';
-                if (breakdownItems[3]) breakdownItems[3].innerHTML = formatMoney(oneoffTotal) + ' <span class="breakdown-pct">(' + formatPct(oneoffTotal) + ')</span>';
-            }}
-        }}
-
-        // Filter tables based on search input
-        function filterTables() {{
-            const query = document.getElementById('searchInput').value.toLowerCase().trim();
-            const tables = document.querySelectorAll('table');
-            const sections = document.querySelectorAll('section');
-
-            // If no query, show all and reset
-            if (!query) {{
-                document.querySelectorAll('section').forEach(section => {{
-                    section.style.display = '';
-                }});
-                tables.forEach(table => {{
-                    table.querySelectorAll('tbody tr:not(.total-row)').forEach(row => {{
-                        row.classList.remove('hidden');
-                        // Remove highlights
-                        row.querySelectorAll('.highlight').forEach(el => {{
-                            el.outerHTML = el.textContent;
-                        }});
-                    }});
-                }});
-                // Collapse all expanded transactions
-                document.querySelectorAll('.merchant-row.expanded').forEach(row => {{
-                    row.classList.remove('expanded');
-                }});
-                document.querySelectorAll('.txn-row').forEach(row => {{
-                    row.classList.add('hidden');
-                }});
-                // Restore original totals when clearing filters
-                restoreOriginalTotals();
-                // Restore original total spending
-                const totalEl = document.getElementById('totalSpending');
-                const original = parseInt(totalEl.dataset.original);
-                totalEl.textContent = formatCurrency(original);
-                return;
-            }}
-
-            // Split query into words for multi-word search
-            const queryWords = query ? query.split(/\\s+/).filter(w => w.length > 0) : [];
-
-            tables.forEach(table => {{
-                const rows = table.querySelectorAll('tbody tr:not(.total-row)');
-                let hasVisibleRows = false;
-                const merchantsWithMatchingTxns = new Set();
-
-                // First pass: check all rows for matches
-                rows.forEach(row => {{
-                    const text = row.textContent.toLowerCase();
-                    const matches = queryWords.every(word => text.includes(word));
-
-                    if (matches) {{
-                        row.classList.remove('hidden');
-                        // If a txn-row matches, remember its merchant so we show the merchant row too
-                        if (row.classList.contains('txn-row')) {{
-                            merchantsWithMatchingTxns.add(row.dataset.merchant);
-                        }}
-                    }} else {{
-                        row.classList.add('hidden');
-                        row.querySelectorAll('.highlight').forEach(el => {{
-                            el.outerHTML = el.textContent;
-                        }});
-                    }}
-                }});
-
-                // Second pass: ensure merchant rows are visible if any of their txns matched
-                rows.forEach(row => {{
-                    if (row.classList.contains('merchant-row')) {{
-                        const merchantId = row.dataset.merchant;
-                        const isVisible = !row.classList.contains('hidden') || merchantsWithMatchingTxns.has(merchantId);
-
-                        if (isVisible) {{
-                            row.classList.remove('hidden');
-                            hasVisibleRows = true;
-                            // Highlight matching text
-                            row.querySelectorAll('td').forEach(cell => {{
-                                let html = cell.textContent;
-                                const escapedWords = queryWords.map(w => w.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&'));
-                                const regex = new RegExp(`(${{escapedWords.join('|')}})`, 'gi');
-                                html = html.replace(regex, '<span class="highlight">$1</span>');
-                                cell.innerHTML = html;
-                            }});
-                        }}
-                    }}
-                }});
-
-                // Show/hide sections based on matches
-                const section = table.closest('section');
-                if (section) {{
-                    const header = section.querySelector('.section-header');
-                    const content = section.querySelector('.section-content');
-                    if (hasVisibleRows) {{
-                        section.style.display = '';
-                        header?.classList.remove('collapsed');
-                        content?.classList.remove('collapsed');
-                    }} else {{
-                        section.style.display = 'none';
-                    }}
-                }}
-            }});
-
-            updateAllTotals();
-        }}
-
-        // ========================================
-        // Unified Calculation: computeFilteredState
-        // ========================================
-        // Pure calculation function - determines which transactions match filters
-        // and computes all totals. No DOM manipulation.
-        function computeFilteredState(filters) {{
-            const includeFilters = filters.filter(f => f.mode === 'include');
-            const excludeFilters = filters.filter(f => f.mode === 'exclude');
-
-            const sectionTotals = {{
-                'monthly-table': 0,
-                'annual-table': 0,
-                'periodic-table': 0,
-                'travel-table': 0,
-                'oneoff-table': 0,
-                'variable-table': 0
-            }};
-
-            const merchantTotals = {{}};
-            const merchantMonths = {{}};
-            const merchantCounts = {{}};
-            const matchingTxns = new Set();
-
-            // If no filters, all transactions match
-            const hasFilters = filters.length > 0;
-
-            document.querySelectorAll('tr.txn-row').forEach(txn => {{
-                const matches = !hasFilters || FilterEngine.txnPassesFilters(txn, includeFilters, excludeFilters);
-
-                if (matches) {{
-                    matchingTxns.add(txn);
-                    const amount = parseFloat(txn.dataset.amount) || 0;
-                    const merchantId = txn.dataset.merchant;
-                    const month = txn.dataset.month;
-                    const tableId = txn.closest('table')?.id;
-
-                    if (tableId && sectionTotals.hasOwnProperty(tableId)) {{
-                        sectionTotals[tableId] += amount;
-                    }}
-
-                    if (merchantId) {{
-                        if (!merchantTotals[merchantId]) {{
-                            merchantTotals[merchantId] = 0;
-                            merchantMonths[merchantId] = new Set();
-                            merchantCounts[merchantId] = 0;
-                        }}
-                        merchantTotals[merchantId] += amount;
-                        merchantCounts[merchantId]++;
-                        if (month) merchantMonths[merchantId].add(month);
-                    }}
-                }}
-            }});
-
-            // Calculate number of months in the filter for monthly average
-            const monthFilters = filters.filter(f => f.type === 'month' && f.mode === 'include');
-            let numFilteredMonths = 12; // Default: full year
-            if (monthFilters.length > 0) {{
-                const allMonths = new Set();
-                monthFilters.forEach(f => {{
-                    if (f.text.includes('..')) {{
-                        const [start, end] = f.text.split('..');
-                        const startDate = new Date(start + '-01');
-                        const endDate = new Date(end + '-01');
-                        let current = new Date(startDate);
-                        while (current <= endDate) {{
-                            allMonths.add(current.toISOString().slice(0, 7));
-                            current.setMonth(current.getMonth() + 1);
-                        }}
-                    }} else {{
-                        allMonths.add(f.text);
-                    }}
-                }});
-                numFilteredMonths = allMonths.size || 1;
-            }}
-
-            const totalAmount = Object.values(sectionTotals).reduce((a, b) => a + b, 0);
-
-            return {{
-                sectionTotals,
-                merchantTotals,
-                merchantMonths,
-                merchantCounts,
-                matchingTxns,
-                numFilteredMonths,
-                totalAmount,
-                hasFilters
-            }};
-        }}
-
-        function updateTotalsFromTransactions() {{
-            // Calculate totals from visible transaction rows (for month/location filtering)
-            // Sum amounts per merchant and per section based on visible txn-rows
-            const sectionTotals = {{
-                'monthly-table': 0,
-                'annual-table': 0,
-                'periodic-table': 0,
-                'travel-table': 0,
-                'oneoff-table': 0,
-                'variable-table': 0
-            }};
-
-            // Track amounts, months, and counts per merchant
-            const merchantTotals = {{}};
-            const merchantMonths = {{}};
-            const merchantCounts = {{}};
-
-            document.querySelectorAll('tr.txn-row:not(.hidden)').forEach(txn => {{
-                const amount = parseFloat(txn.dataset.amount) || 0;
-                const merchantId = txn.dataset.merchant;
-                const month = txn.dataset.month;
-                const tableId = txn.closest('table')?.id;
-
-                if (tableId && sectionTotals.hasOwnProperty(tableId)) {{
-                    sectionTotals[tableId] += amount;
-                }}
-
-                // Track per-merchant totals, months, and counts
-                if (merchantId) {{
-                    if (!merchantTotals[merchantId]) {{
-                        merchantTotals[merchantId] = 0;
-                        merchantMonths[merchantId] = new Set();
-                        merchantCounts[merchantId] = 0;
-                    }}
-                    merchantTotals[merchantId] += amount;
-                    merchantCounts[merchantId]++;
-                    if (month) merchantMonths[merchantId].add(month);
-                }}
-            }});
-
-            // Calculate number of months in the filter for monthly average
-            const monthFilters = activeFilters.filter(f => f.type === 'month');
-            let numFilteredMonths = 1;
-            if (monthFilters.length > 0) {{
-                // Count unique months across all month filters
-                const allMonths = new Set();
-                monthFilters.forEach(f => {{
-                    if (f.text.includes('..')) {{
-                        // Range filter - count months in range
-                        const [start, end] = f.text.split('..');
-                        const startDate = new Date(start + '-01');
-                        const endDate = new Date(end + '-01');
-                        let current = new Date(startDate);
-                        while (current <= endDate) {{
-                            allMonths.add(current.toISOString().slice(0, 7));
-                            current.setMonth(current.getMonth() + 1);
-                        }}
-                    }} else {{
-                        allMonths.add(f.text);
-                    }}
-                }});
-                numFilteredMonths = allMonths.size || 1;
-            }} else {{
-                numFilteredMonths = 12; // Full year
-            }}
-
-            // Update each merchant row with filtered amounts, months, and counts
-            // Uses TABLE_CONFIG for column indices instead of hardcoded values
-            document.querySelectorAll('.merchant-row').forEach(row => {{
-                const merchantId = row.dataset.merchant;
-                const tableId = row.closest('table')?.id;
-                const config = TABLE_CONFIG[tableId];
-                if (!config) return;
-
-                const filteredTotal = merchantTotals[merchantId] || 0;
-                const filteredMonthCount = merchantMonths[merchantId]?.size || 0;
-                const filteredTxnCount = merchantCounts[merchantId] || 0;
-                const cols = config.columns;
-
-                if (filteredTotal > 0) {{
-                    // Update months column if present
-                    if (cols.months !== undefined) {{
-                        const monthsCell = row.cells[cols.months];
-                        if (monthsCell) monthsCell.textContent = filteredMonthCount;
-                    }}
-
-                    // Update count column if present
-                    if (cols.count !== undefined) {{
-                        const countCell = row.cells[cols.count];
-                        if (countCell) countCell.textContent = filteredTxnCount;
-                    }}
-
-                    // Update total/ytd column
-                    const totalColName = config.totalColumn;
-                    const totalCell = row.cells[cols[totalColName]];
-                    if (totalCell) {{
-                        totalCell.innerHTML = '<span class="money">' + formatMoney(filteredTotal) + '</span>';
-                    }}
-
-                    // Update monthly column if present
-                    if (config.hasMonthlyColumn && cols.monthly !== undefined) {{
-                        const monthlyCell = row.cells[cols.monthly];
-                        if (monthlyCell) {{
-                            const monthlyAvg = filteredTotal / numFilteredMonths;
-                            monthlyCell.innerHTML = '<span class="money">' + formatMoney(monthlyAvg, true) + '</span>';
-                        }}
-                    }}
-
-                    // Update percentage column
-                    if (cols.pct !== undefined && sectionTotals[tableId] > 0) {{
-                        const pctCell = row.cells[cols.pct];
-                        if (pctCell) {{
-                            pctCell.textContent = (filteredTotal / sectionTotals[tableId] * 100).toFixed(1) + '%';
-                        }}
-                    }}
-                }}
-            }});
-
-            const totalAmount = Object.values(sectionTotals).reduce((a, b) => a + b, 0);
-
-            // Update section headers - use filtered month count for monthly calculations
-            const monthlyAvg = sectionTotals['monthly-table'] / numFilteredMonths;
-            const variableAvg = sectionTotals['variable-table'] / numFilteredMonths;
-
-            updateSectionTotal('monthly-section', monthlyAvg, true, sectionTotals['monthly-table'], totalAmount);
-            updateSectionTotal('annual-section', sectionTotals['annual-table'], false, null, totalAmount);
-            updateSectionTotal('periodic-section', sectionTotals['periodic-table'], false, null, totalAmount);
-            updateSectionTotal('travel-section', sectionTotals['travel-table'], false, null, totalAmount);
-            updateSectionTotal('oneoff-section', sectionTotals['oneoff-table'], false, null, totalAmount);
-            updateSectionTotal('variable-section', variableAvg, true, sectionTotals['variable-table'], totalAmount);
-
-            // Update summary cards
-            updateSummaryCards(
-                monthlyAvg,
-                variableAvg,
-                sectionTotals['monthly-table'],  // monthlyYtd
-                sectionTotals['variable-table'], // variableYtd
-                sectionTotals['annual-table'],   // annualTotal
-                sectionTotals['periodic-table'], // periodicTotal
-                sectionTotals['travel-table'],   // travelTotal
-                sectionTotals['oneoff-table']    // oneoffTotal
-            );
-
-            // Update table total rows (uses TABLE_CONFIG for column indices)
-            updateTableTotalRow('monthly-table', monthlyAvg, sectionTotals['monthly-table']);
-            updateTableTotalRow('annual-table', null, sectionTotals['annual-table']);
-            updateTableTotalRow('periodic-table', null, sectionTotals['periodic-table']);
-            updateTableTotalRow('travel-table', null, sectionTotals['travel-table']);
-            updateTableTotalRow('oneoff-table', null, sectionTotals['oneoff-table']);
-            updateTableTotalRow('variable-table', variableAvg, sectionTotals['variable-table']);
-
-            // Update Total Spending card
-            const totalEl = document.getElementById('totalSpending');
-            const hasOtherIncludeFilters = activeFilters.some(f => f.type !== 'month' && f.mode === 'include');
-
-            if (monthFilters.length > 0 && !hasOtherIncludeFilters) {{
-                totalEl.innerHTML = formatCurrency(totalAmount);
-            }} else if (activeFilters.some(f => f.mode === 'include')) {{
-                const pct = (totalAmount / originalTotals.totalYtd * 100).toFixed(1);
-                totalEl.innerHTML = formatCurrency(totalAmount) +
-                    '<span class="filter-pct"> (' + pct + '%)</span>';
-            }} else {{
-                totalEl.innerHTML = formatCurrency(totalAmount);
-            }}
-        }}
-
-        // Update total row for a table - uses TABLE_CONFIG for column indices
-        function updateTableTotalRow(tableId, monthlyValue, ytdValue) {{
-            const table = document.getElementById(tableId);
-            if (!table) return;
-            const config = TABLE_CONFIG[tableId];
-            if (!config) return;
-
-            const cols = config.columns;
-            const totalRow = table.querySelector('.total-row');
-            if (totalRow) {{
-                // Update monthly column if present
-                if (config.hasMonthlyColumn && cols.monthly !== undefined && monthlyValue !== null) {{
-                    const monthlyCell = totalRow.cells[cols.monthly];
-                    if (monthlyCell) {{
-                        monthlyCell.innerHTML = '<span class="money">' + formatMoney(monthlyValue, true) + '</span>';
-                    }}
-                }}
-                // Update total/ytd column
-                const totalColName = config.totalColumn;
-                const ytdCell = totalRow.cells[cols[totalColName]];
-                if (ytdCell && ytdValue !== null) {{
-                    ytdCell.innerHTML = '<span class="money">' + formatMoney(ytdValue) + '</span>';
-                }}
-            }}
-        }}
-
-        function updateAllTotals() {{
-            // Update all totals based on visible rows (uses TABLE_CONFIG for column indices)
-            const monthlyTotals = updateTableTotals('monthly-table');
-            const annualTotals = updateTableTotals('annual-table');
-            const periodicTotals = updateTableTotals('periodic-table');
-            const travelTotals = updateTableTotals('travel-table');
-            const oneoffTotals = updateTableTotals('oneoff-table');
-            const variableTotals = updateTableTotals('variable-table');
-
-            // Calculate filtered total for percentage calculations
-            const totalYtd = monthlyTotals.ytd + annualTotals.ytd + periodicTotals.ytd + travelTotals.ytd + oneoffTotals.ytd + variableTotals.ytd;
-
-            // Update section headers (pass totalYtd for percentage calculation)
-            updateSectionTotal('monthly-section', monthlyTotals.monthly, true, monthlyTotals.ytd, totalYtd);
-            updateSectionTotal('annual-section', annualTotals.ytd, false, null, totalYtd);
-            updateSectionTotal('periodic-section', periodicTotals.ytd, false, null, totalYtd);
-            updateSectionTotal('travel-section', travelTotals.ytd, false, null, totalYtd);
-            updateSectionTotal('oneoff-section', oneoffTotals.ytd, false, null, totalYtd);
-            updateSectionTotal('variable-section', variableTotals.monthly, true, variableTotals.ytd, totalYtd);
-
-            // Update summary cards (pass both monthly avg and YTD totals)
-            updateSummaryCards(
-                monthlyTotals.monthly,
-                variableTotals.monthly,
-                monthlyTotals.ytd,
-                variableTotals.ytd,
-                annualTotals.ytd,
-                periodicTotals.ytd,
-                travelTotals.ytd,
-                oneoffTotals.ytd
-            );
-
-            // Update Total Spending card with filtered total and percentage
-            const totalEl = document.getElementById('totalSpending');
-            const labelEl = document.getElementById('totalSpendingLabel');
-            const monthFilters = activeFilters.filter(f => f.type === 'month');
-            const hasOtherIncludeFilters = activeFilters.some(f => f.type !== 'month' && f.mode === 'include');
-
-            // Calculate percentage - but only show when it's meaningful
-            // When filtering by month only, the total IS the complete period total, no percentage needed
-            // When filtering by category/merchant (with or without month), show % of filtered total
-            if (monthFilters.length > 0 && !hasOtherIncludeFilters) {{
-                // Month-only filter: don't show percentage (it's the complete total for that period)
-                totalEl.innerHTML = formatCurrency(totalYtd);
-            }} else if (activeFilters.some(f => f.mode === 'include')) {{
-                // Have include filters (category/merchant): show percentage of appropriate base
-                const baseTotal = monthFilters.length > 0 ? totalYtd : originalTotals.totalYtd;
-                // When month filtered, compare to original month totals; when not, compare to YTD
-                const pct = (totalYtd / originalTotals.totalYtd * 100).toFixed(1);
-                totalEl.innerHTML = formatCurrency(totalYtd) +
-                    '<span class="filter-pct"> (' + pct + '%)</span>';
-            }} else {{
-                // No active include filters
-                totalEl.innerHTML = formatCurrency(totalYtd);
-            }}
-
-            // Update label based on month filters
-            if (labelEl) {{
-                if (monthFilters.length > 0) {{
-                    // Show month range in label
-                    const monthNames = monthFilters.map(f => monthKeyToLabel(f.text)).join(', ');
-                    labelEl.textContent = 'Total Spending (' + monthNames + ')';
-                }} else {{
-                    labelEl.textContent = 'Total Spending (YTD)';
-                }}
-            }}
-        }}
-
-        function restoreOriginalTotals() {{
-            // Restore table totals for all visible rows
-            updateTableTotals('monthly-table');
-            updateTableTotals('annual-table');
-            updateTableTotals('periodic-table');
-            updateTableTotals('travel-table');
-            updateTableTotals('oneoff-table');
-            updateTableTotals('variable-table');
-
-            // Restore section headers with original values (pass totalYtd for percentage calculation)
-            updateSectionTotal('monthly-section', originalTotals.monthly, true, originalTotals.monthlyYtd, originalTotals.totalYtd);
-            updateSectionTotal('annual-section', originalTotals.annual, false, null, originalTotals.totalYtd);
-            updateSectionTotal('periodic-section', originalTotals.periodic, false, null, originalTotals.totalYtd);
-            updateSectionTotal('travel-section', originalTotals.travel, false, null, originalTotals.totalYtd);
-            updateSectionTotal('oneoff-section', originalTotals.oneoff, false, null, originalTotals.totalYtd);
-            updateSectionTotal('variable-section', originalTotals.variable, true, originalTotals.variableYtd, originalTotals.totalYtd);
-
-            // Restore summary cards with original values (pass both monthly and YTD)
-            updateSummaryCards(
-                originalTotals.monthly,
-                originalTotals.variable,
-                originalTotals.monthlyYtd,
-                originalTotals.variableYtd,
-                originalTotals.annual,
-                originalTotals.periodic,
-                originalTotals.travel,
-                originalTotals.oneoff
-            );
-
-            // Restore label to YTD
-            const labelEl = document.getElementById('totalSpendingLabel');
-            if (labelEl) {{
-                labelEl.textContent = 'Total Spending (YTD)';
-            }}
-        }}
-
-        // Sort table by column
-        function sortTable(tableId, colIndex, type) {{
-            const table = document.getElementById(tableId);
-            const tbody = table.querySelector('tbody');
-            const rows = Array.from(tbody.querySelectorAll('tr.merchant-row'));
-            const th = table.querySelectorAll('th')[colIndex];
-
-            // Determine sort direction
-            const isAsc = th.classList.contains('sorted-asc');
-
-            // Clear all sort indicators
-            table.querySelectorAll('th').forEach(h => {{
-                h.classList.remove('sorted-asc', 'sorted-desc');
-            }});
-
-            // Sort rows
-            rows.sort((a, b) => {{
-                let aVal = a.cells[colIndex].textContent.trim();
-                let bVal = b.cells[colIndex].textContent.trim();
-
-                if (type === 'money') {{
-                    aVal = parseFloat(aVal.replace(/[$,]/g, '')) || 0;
-                    bVal = parseFloat(bVal.replace(/[$,]/g, '')) || 0;
-                }} else if (type === 'number') {{
-                    aVal = parseFloat(aVal) || 0;
-                    bVal = parseFloat(bVal) || 0;
-                }} else {{
-                    aVal = aVal.toLowerCase();
-                    bVal = bVal.toLowerCase();
-                }}
-
-                if (isAsc) {{
-                    return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
-                }} else {{
-                    return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-                }}
-            }});
-
-            // Update sort indicator
-            th.classList.add(isAsc ? 'sorted-desc' : 'sorted-asc');
-
-            // Re-append rows in new order (merchant rows + their transaction rows)
-            const totalRow = tbody.querySelector('.total-row');
-            const allTxnRows = Array.from(tbody.querySelectorAll('.txn-row'));
-            rows.forEach(row => {{
-                tbody.appendChild(row);
-                // Append associated transaction rows right after merchant row
-                const merchantId = row.dataset.merchant;
-                allTxnRows.filter(txn => txn.dataset.merchant === merchantId)
-                    .forEach(txn => tbody.appendChild(txn));
-            }});
-            if (totalRow) tbody.appendChild(totalRow);
-        }}
-
-        // Keyboard shortcut for search
-        document.addEventListener('keydown', (e) => {{
-            if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {{
-                e.preventDefault();
-                document.getElementById('searchInput').focus();
-            }}
-            if (e.key === 'Escape') {{
-                document.getElementById('searchInput').blur();
-                document.getElementById('searchInput').value = '';
-                autocompleteList.classList.remove('show');
-                filterTables();
-            }}
-        }});
-
-        // Card click to scroll to section
-        document.querySelectorAll('.card').forEach((card, index) => {{
-            card.addEventListener('click', () => {{
-                const sections = document.querySelectorAll('section');
-                if (index === 0 && sections[0]) {{
-                    sections[0].scrollIntoView({{ behavior: 'smooth' }});
-                }} else if (index === 1) {{
-                    // Non-recurring - scroll to annual
-                    sections[1]?.scrollIntoView({{ behavior: 'smooth' }});
-                }}
-            }});
-        }});
-
-        // ============================================
-        // Sticky search bar shadow on scroll
-        // ============================================
-        window.addEventListener('scroll', () => {{
-            const searchBox = document.querySelector('.search-box');
-            if (window.scrollY > 50) {{
-                searchBox.classList.add('scrolled');
-            }} else {{
-                searchBox.classList.remove('scrolled');
-            }}
-        }});
-
-        // ============================================
-        // Click-to-filter on cells (merchant, category, location)
-        // ============================================
-        function addFilterFromCell(event, element, filterType) {{
-            event.stopPropagation(); // Don't trigger row expand
-            let text = element.textContent.trim();
-            let displayText = null;
-
-            // For category, extract main category (e.g., "Food" from "Food/Delivery")
-            if (filterType === 'category') {{
-                text = text.split('/')[0];
-            }}
-            // For merchant, use data-merchant attribute for hash/matching, but keep display text
-            if (filterType === 'merchant') {{
-                const row = element.closest('tr.merchant-row');
-                if (row && row.dataset.merchant) {{
-                    displayText = text.replace(/^[▶▼]\\s*/, ''); // Human-readable name
-                    text = row.dataset.merchant; // ID for hash/matching
-                }} else {{
-                    text = text.replace(/^[▶▼]\\s*/, '');
-                }}
-            }}
-
-            addFilter(text, filterType, displayText);
-        }}
-
-        // ============================================
-        // Hash-based filter bookmarks
-        // ============================================
-
-        function filtersToHash() {{
-            if (activeFilters.length === 0) {{
-                history.replaceState(null, null, window.location.pathname);
-                return;
-            }}
-            const typeMap = {{category: 'c', merchant: 'm', location: 'l', month: 'd'}};
-            const encoded = activeFilters.map(f => {{
-                const mode = f.mode === 'exclude' ? '-' : '+';
-                const type = typeMap[f.type] || f.type.charAt(0);
-                return mode + type + ':' + encodeURIComponent(f.text);
-            }}).join('&');
-            history.replaceState(null, null, '#' + encoded);
-        }}
-
-        function hashToFilters() {{
-            const hash = window.location.hash.slice(1);
-            if (!hash) return;
-
-            const typeMap = {{c: 'category', m: 'merchant', l: 'location', d: 'month'}};
-            const parts = hash.split('&');
-            parts.forEach(part => {{
-                if (part.length < 2) return;
-
-                // Handle both formats: "+c:value" (with mode) and "c:value" (without mode)
-                let mode = 'include';
-                let startIdx = 0;
-
-                if (part.charAt(0) === '+' || part.charAt(0) === '-') {{
-                    mode = part.charAt(0) === '-' ? 'exclude' : 'include';
-                    startIdx = 1;
-                }}
-
-                const typeChar = part.charAt(startIdx);
-                const colonIdx = part.indexOf(':', startIdx);
-                if (colonIdx === -1) return;
-
-                const type = typeMap[typeChar] || 'category';
-                const text = decodeURIComponent(part.slice(colonIdx + 1));
-                if (text && !activeFilters.some(f => f.text === text && f.type === type)) {{
-                    activeFilters.push({{ text, type, mode }});
-                }}
-            }});
-
-            if (activeFilters.length > 0) {{
-                renderFilters();
-                applyFilters();
-            }}
-        }}
-
-        // Update hash when filters change (patch applyFilters)
-        const originalApplyFilters = applyFilters;
-        applyFilters = function() {{
-            originalApplyFilters();
-            filtersToHash();
-        }};
-
-        // Load filters from hash on page load
-        window.addEventListener('hashchange', () => {{
-            activeFilters = [];
-            hashToFilters();
-        }});
-
-        // Initial load from hash
-        hashToFilters();
+        window.sectionData = {section_data_json};
+        window.activeFilters = [];
     </script>
+
+    <!-- Spending Report JavaScript (embedded from spending_report.js) -->
+    <script>
+{spending_report_js}
+    </script>
+
 
     <!-- Chart rendering -->
     <script>
@@ -4691,7 +2364,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
                     onClick: (event, elements) => {{
                         if (elements.length > 0) {{
                             const category = window.categoryPieChart.data.labels[elements[0].index];
-                            addFilter(category, 'category');
+                            addFilter(category.toLowerCase(), 'category', category);
                         }}
                     }},
                     plugins: {{
@@ -4746,7 +2419,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
                             const category = window.categoryByMonthChart.data.datasets[datasetIndex].label;
                             const monthLabel = window.categoryByMonthChart.data.labels[dataIndex];
                             const monthKey = monthLabelToKey(monthLabel);
-                            addFilter(category, 'category');
+                            addFilter(category.toLowerCase(), 'category', category);
                             addFilter(monthKey, 'month');
                         }}
                     }},
@@ -4805,6 +2478,9 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             createMonthlyTrendChart();
             createCategoryPieChart();
             createCategoryByMonthChart();
+
+            // Load filters from URL hash after charts are ready
+            hashToFilters();
         }});
         
         // Re-create charts on theme toggle
@@ -4814,137 +2490,6 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             setTimeout(updateChartsForTheme, 50);
         }};
 
-        // Update charts based on filtered transactions
-        function updateChartsFromFilters() {{
-            // Check if month filter is active (requires txn-level visibility check)
-            const hasMonthFilter = window.activeFilters && window.activeFilters.some(f => f.type === 'month');
-
-            // Collect data from transaction rows based on filter type
-            const visibleTxns = [];
-            document.querySelectorAll('.txn-row').forEach(row => {{
-                const merchantId = row.dataset.merchant;
-                const merchantRow = document.querySelector(`.merchant-row[data-merchant="${{merchantId}}"]`);
-                const merchantVisible = merchantRow && getComputedStyle(merchantRow).display !== 'none';
-
-                if (hasMonthFilter) {{
-                    // Month filter: check both merchant AND txn visibility (month filters hide specific txns)
-                    const txnVisible = getComputedStyle(row).display !== 'none';
-                    if (merchantVisible && txnVisible) {{
-                        visibleTxns.push({{
-                            amount: parseFloat(row.dataset.amount) || 0,
-                            month: row.dataset.month,
-                            category: row.dataset.category,
-                            mainCategory: row.dataset.mainCategory
-                        }});
-                    }}
-                }} else {{
-                    // Category/merchant filter: only check merchant visibility
-                    // (txn-rows are collapsed by default, not filtered)
-                    if (merchantVisible) {{
-                        visibleTxns.push({{
-                            amount: parseFloat(row.dataset.amount) || 0,
-                            month: row.dataset.month,
-                            category: row.dataset.category,
-                            mainCategory: row.dataset.mainCategory
-                        }});
-                    }}
-                }}
-            }});
-
-            // If no filters active, use original data
-            if (visibleTxns.length === 0 || window.activeFilters.length === 0) {{
-                // Reset to original data
-                if (window.monthlyTrendChart) {{
-                    window.monthlyTrendChart.data.labels = chartData.monthly.labels;
-                    window.monthlyTrendChart.data.datasets[0].data = chartData.monthly.data;
-                    window.monthlyTrendChart.update();
-                }}
-                if (window.categoryPieChart) {{
-                    window.categoryPieChart.data.labels = chartData.categoryPie.labels;
-                    window.categoryPieChart.data.datasets[0].data = chartData.categoryPie.data;
-                    window.categoryPieChart.update();
-                }}
-                if (window.categoryByMonthChart) {{
-                    window.categoryByMonthChart.data.labels = chartData.categoryByMonth.labels;
-                    window.categoryByMonthChart.data.datasets.forEach((ds, i) => {{
-                        ds.data = chartData.categoryByMonth.datasets[i].data;
-                        ds.hidden = false;  // Unhide all datasets
-                    }});
-                    window.categoryByMonthChart.update();
-                }}
-                return;
-            }}
-
-            // Calculate monthly totals
-            const monthlyTotals = {{}};
-            const categoryTotals = {{}};
-            const categoryMonthly = {{}};
-
-            visibleTxns.forEach(txn => {{
-                // Monthly totals
-                monthlyTotals[txn.month] = (monthlyTotals[txn.month] || 0) + txn.amount;
-
-                // Category totals (uses full subcategory path for pie chart)
-                categoryTotals[txn.category] = (categoryTotals[txn.category] || 0) + txn.amount;
-
-                // Category by month (uses main category to match chart datasets)
-                if (!categoryMonthly[txn.mainCategory]) categoryMonthly[txn.mainCategory] = {{}};
-                categoryMonthly[txn.mainCategory][txn.month] = (categoryMonthly[txn.mainCategory][txn.month] || 0) + txn.amount;
-            }});
-
-            // Update monthly trend chart
-            if (window.monthlyTrendChart) {{
-                const sortedMonths = Object.keys(monthlyTotals).sort();
-                const labels = sortedMonths.map(m => {{
-                    const [year, month] = m.split('-');
-                    return new Date(year, month - 1).toLocaleDateString('en-US', {{ month: 'short', year: 'numeric' }});
-                }});
-                window.monthlyTrendChart.data.labels = labels;
-                window.monthlyTrendChart.data.datasets[0].data = sortedMonths.map(m => monthlyTotals[m]);
-                window.monthlyTrendChart.update();
-            }}
-
-            // Update category pie chart
-            if (window.categoryPieChart) {{
-                const sortedCats = Object.entries(categoryTotals)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 8);
-                window.categoryPieChart.data.labels = sortedCats.map(c => c[0]);
-                window.categoryPieChart.data.datasets[0].data = sortedCats.map(c => c[1]);
-                window.categoryPieChart.update();
-            }}
-
-            // Update category by month chart
-            if (window.categoryByMonthChart) {{
-                const sortedMonths = Object.keys(monthlyTotals).sort();
-                const labels = sortedMonths.map(m => {{
-                    const [year, month] = m.split('-');
-                    return new Date(year, month - 1).toLocaleDateString('en-US', {{ month: 'short', year: 'numeric' }});
-                }});
-                window.categoryByMonthChart.data.labels = labels;
-
-                // Update each dataset and hide empty ones
-                window.categoryByMonthChart.data.datasets.forEach(ds => {{
-                    const catData = categoryMonthly[ds.label] || {{}};
-                    ds.data = sortedMonths.map(m => catData[m] || 0);
-                    // Hide dataset if all values are zero
-                    ds.hidden = ds.data.every(v => v === 0);
-                }});
-                window.categoryByMonthChart.update();
-            }}
-        }}
-
-        // Hook into applyFilters to update charts
-        const originalApplyFiltersForCharts = applyFilters;
-        applyFilters = function() {{
-            originalApplyFiltersForCharts();
-            setTimeout(updateChartsFromFilters, 100);
-        }};
-
-        // Update charts if filters were loaded from hash on page load
-        if (window.activeFilters && window.activeFilters.length > 0) {{
-            setTimeout(updateChartsFromFilters, 500);
-        }}
     </script>
 
     <!-- Embedded JSON data for LLM analysis tools -->
