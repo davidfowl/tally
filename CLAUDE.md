@@ -28,7 +28,7 @@ Netflix → Monthly
 
   Decision trace:
     ✗ NOT excluded: Subscriptions not in [Transfers, Cash, Income]
-    ✗ NOT travel: category=Subscriptions, is_travel=false
+    ✗ NOT travel: category=Subscriptions
     ✗ NOT annual: (Subscriptions, Streaming) not in annual categories
     ✗ NOT periodic: no periodic patterns matched
     ✓ IS monthly: Subscriptions with 6/6 months (>= 3 bill threshold)

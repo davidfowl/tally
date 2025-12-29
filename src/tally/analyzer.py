@@ -487,20 +487,17 @@ def classify_by_occurrence(merchant, data, num_months=12):
     reasoning['trace'].append(f"✗ NOT excluded: {category} not in [Transfers, Cash, Income]")
 
     # =========================================================================
-    # TRAVEL: Either explicit travel category OR location-based travel flag
+    # TRAVEL: Explicit travel category only
     # - category='Travel' from merchant rules (airlines, hotels, etc.)
-    # - is_travel=True from international location detection
+    # NOTE: Location-based travel detection was removed because it was unreliable
+    # (e.g., "FG" in utility company name triggered international detection).
+    # Users can mark merchants as travel via merchant_categories.csv.
     # =========================================================================
-    is_travel = data.get('is_travel', False)
-    if category == 'Travel' or is_travel:
-        if category == 'Travel':
-            reasoning['trace'].append(f"✓ IS travel: category=Travel")
-            reasoning['decision'] = "Travel: category is Travel"
-        else:
-            reasoning['trace'].append(f"✓ IS travel: is_travel=true (location-based)")
-            reasoning['decision'] = "Travel: international location detected"
+    if category == 'Travel':
+        reasoning['trace'].append(f"✓ IS travel: category=Travel")
+        reasoning['decision'] = "Travel: category is Travel"
         return ('travel', reasoning)
-    reasoning['trace'].append(f"✗ NOT travel: category={category}, is_travel=false")
+    reasoning['trace'].append(f"✗ NOT travel: category={category}")
 
     # =========================================================================
     # ANNUAL BILLS: True once-a-year expenses

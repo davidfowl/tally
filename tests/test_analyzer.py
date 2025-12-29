@@ -331,3 +331,116 @@ class TestCurrencyFormatting:
         from tally.analyzer import format_currency
         assert format_currency(-1234) == "$-1,234"
         assert format_currency(-1234, "{amount} zł") == "-1,234 zł"
+
+
+class TestTravelClassification:
+    """Tests for travel classification based on category, not location codes."""
+
+    def test_travel_classification_based_on_category(self):
+        """Travel classification should be based on category='Travel' only."""
+        from tally.analyzer import classify_by_occurrence
+
+        # Merchant with Travel category should be classified as travel
+        travel_data = {
+            'category': 'Travel',
+            'subcategory': 'Airline',
+            'count': 2,
+            'total': 500.0,
+            'months_active': 2,
+            'cv': 0.1,
+            'max_payment': 300.0,
+            'is_consistent': True,
+        }
+        classification, reasoning = classify_by_occurrence('Delta Airlines', travel_data, 12)
+        assert classification == 'travel'
+        assert 'category=Travel' in reasoning['trace'][1]
+
+    def test_no_travel_classification_from_is_travel_flag(self):
+        """Location-based is_travel flag should NOT trigger travel classification."""
+        from tally.analyzer import classify_by_occurrence
+
+        # Merchant with is_travel=True but non-Travel category should NOT be travel
+        # This simulates the case where a location code like "FG" was misinterpreted
+        # as international travel
+        data_with_is_travel_flag = {
+            'category': 'Bills',
+            'subcategory': 'Electric',
+            'count': 12,
+            'total': 1200.0,
+            'months_active': 12,
+            'cv': 0.1,
+            'max_payment': 100.0,
+            'is_consistent': True,
+            'is_travel': True,  # This should be ignored
+        }
+        classification, reasoning = classify_by_occurrence('Local Utility FG', data_with_is_travel_flag, 12)
+        # Should be classified as monthly, not travel
+        assert classification == 'monthly', f"Expected 'monthly' but got '{classification}'"
+
+    def test_non_travel_category_with_location_code_not_travel(self):
+        """Merchants with non-Travel category should not be classified as travel regardless of location."""
+        from tally.analyzer import classify_by_occurrence
+
+        # University with "TN" prefix - should NOT be travel even if location detection fired
+        university_data = {
+            'category': 'Education',
+            'subcategory': 'Tuition',
+            'count': 4,
+            'total': 10000.0,
+            'months_active': 4,
+            'cv': 0.5,
+            'max_payment': 3000.0,
+            'is_consistent': False,
+            'is_travel': True,  # Location detection may have set this
+        }
+        classification, reasoning = classify_by_occurrence('TN STATE UNIVERSITY', university_data, 12)
+        # Should be classified as periodic (tuition), not travel
+        assert classification == 'periodic', f"Expected 'periodic' but got '{classification}'"
+
+    def test_retailer_with_ap_not_travel(self):
+        """Retailer with 'AP' in name should not be classified as Asia-Pacific travel."""
+        from tally.analyzer import classify_by_occurrence
+
+        # Retailer with "AP" in description - should NOT be travel
+        retailer_data = {
+            'category': 'Shopping',
+            'subcategory': 'Retail',
+            'count': 5,
+            'total': 500.0,
+            'months_active': 3,
+            'cv': 0.3,
+            'max_payment': 150.0,
+            'is_consistent': True,
+            'is_travel': True,  # Location detection may have misinterpreted "AP"
+        }
+        classification, reasoning = classify_by_occurrence('APPLIANCE DEPOT AP', retailer_data, 12)
+        # Should be classified as one_off (shopping with <3 months and >$1000) or variable
+        # Actually with total=500, months_active=3, it won't be one_off (needs >$1000)
+        # Should be variable
+        assert classification == 'variable', f"Expected 'variable' but got '{classification}'"
+
+    def test_travel_trace_no_longer_mentions_is_travel_flag(self):
+        """The decision trace should no longer mention is_travel flag."""
+        from tally.analyzer import classify_by_occurrence
+
+        # Non-travel merchant
+        data = {
+            'category': 'Food',
+            'subcategory': 'Restaurant',
+            'count': 10,
+            'total': 500.0,
+            'months_active': 5,
+            'cv': 0.2,
+            'max_payment': 75.0,
+            'is_consistent': True,
+        }
+        _, reasoning = classify_by_occurrence('Local Restaurant', data, 12)
+
+        # Find the travel trace line
+        travel_trace = [t for t in reasoning['trace'] if 'travel' in t.lower()]
+        assert len(travel_trace) > 0, "Should have a travel trace line"
+
+        # The trace should not mention is_travel=false
+        for trace in travel_trace:
+            assert 'is_travel=false' not in trace, f"Trace should not mention is_travel flag: {trace}"
+            assert 'is_travel=true' not in trace, f"Trace should not mention is_travel flag: {trace}"
