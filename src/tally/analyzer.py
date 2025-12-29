@@ -1344,6 +1344,10 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         all_merchants.add(merchant)
     sorted_merchants = sorted(all_merchants)
 
+    # Helper function to create merchant ID (same as used in HTML generation)
+    def make_merchant_id(name):
+        return name.replace("'", "").replace('"', '').replace(' ', '_')
+
     # Collect all unique locations for autocomplete
     all_locations = set()
     for data in monthly_merchants.values():
@@ -3009,7 +3013,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         // Autocomplete data
         const autocompleteData = [
             {','.join(f'{{"text": "{cat}", "type": "category"}}' for cat in sorted_categories)},
-            {','.join(f'{{"text": "{merchant.replace(chr(34), chr(92)+chr(34))}", "type": "merchant"}}' for merchant in sorted_merchants)},
+            {','.join(f'{{"text": "{merchant.replace(chr(34), chr(92)+chr(34))}", "type": "merchant", "id": "{make_merchant_id(merchant)}"}}' for merchant in sorted_merchants)},
             {','.join(f'{{"text": "{loc}", "type": "location"}}' for loc in sorted_locations)}
         ];
 
@@ -3139,10 +3143,13 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
                 }}
 
                 if (filter.type === 'merchant') {{
+                    // Check data-merchant attribute first (exact ID match)
+                    if (merchantId && merchantId.toLowerCase().includes(filterText)) return true;
+                    // Also check visible merchant name
                     const merchCell = row.querySelector('.merchant');
                     if (merchCell) {{
                         const merchText = merchCell.textContent.replace('▶', '').trim().toLowerCase();
-                        return merchText === filterText || merchText.includes(filterText);
+                        if (merchText === filterText || merchText.includes(filterText)) return true;
                     }}
                     return false;
                 }}
@@ -3182,10 +3189,12 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             }}
         }};
 
-        function addFilter(text, type) {{
+        function addFilter(text, type, displayText = null) {{
             // Don't add duplicate filters
             if (activeFilters.some(f => f.text === text && f.type === type)) return;
-            activeFilters.push({{ text, type, mode: 'include' }});
+            const filter = {{ text, type, mode: 'include' }};
+            if (displayText) filter.displayText = displayText;
+            activeFilters.push(filter);
             renderFilters();
             applyFilters();
         }}
@@ -3228,8 +3237,9 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         function renderFilters() {{
             const container = document.getElementById('filterChips');
             let html = activeFilters.map((f, i) => {{
-                // Display month filters with readable format
-                const displayText = f.type === 'month' ? monthKeyToLabel(f.text) : f.text;
+                // Use displayText if available, otherwise format based on type
+                let displayText = f.displayText || f.text;
+                if (f.type === 'month') displayText = monthKeyToLabel(f.text);
                 const typeChar = f.type === 'month' ? 'd' : f.type.charAt(0);
                 return `
                 <div class="filter-chip ${{f.type}} ${{f.mode}}" data-index="${{i}}">
@@ -3589,7 +3599,8 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
 
             autocompleteList.innerHTML = matches.map((item, i) => {{
                 const scoreHtml = item.score ? `<span class="score">${{Math.round(item.score * 100)}}%</span>` : '';
-                return `<div class="autocomplete-item${{i === selectedIndex ? ' selected' : ''}}" data-value="${{item.text}}" data-type="${{item.type}}">
+                const idAttr = item.id ? ` data-id="${{item.id}}"` : '';
+                return `<div class="autocomplete-item${{i === selectedIndex ? ' selected' : ''}}" data-value="${{item.text}}" data-type="${{item.type}}"${{idAttr}}>
                     ${{item.text}}<span class="type ${{item.type}}">${{item.type}}</span>${{scoreHtml}}
                 </div>`;
             }}).join('');
@@ -3612,7 +3623,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             }} else if (e.key === 'Enter' && selectedIndex >= 0) {{
                 e.preventDefault();
                 const item = items[selectedIndex];
-                selectItem(item.dataset.value, item.dataset.type);
+                selectItem(item.dataset.value, item.dataset.type, item.dataset.id);
             }}
         }});
 
@@ -3622,8 +3633,13 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             }});
         }}
 
-        function selectItem(value, type) {{
-            addFilter(value, type);
+        function selectItem(value, type, id) {{
+            // For merchants, use ID for filter/hash but display text for chip
+            if (type === 'merchant' && id) {{
+                addFilter(id, type, value);  // id for filter, value for display
+            }} else {{
+                addFilter(value, type);
+            }}
             searchInput.value = '';
             autocompleteList.classList.remove('show');
             searchInput.focus();
@@ -3632,7 +3648,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         autocompleteList.addEventListener('click', function(e) {{
             const item = e.target.closest('.autocomplete-item');
             if (item) {{
-                selectItem(item.dataset.value, item.dataset.type);
+                selectItem(item.dataset.value, item.dataset.type, item.dataset.id);
             }}
         }});
 
@@ -4437,17 +4453,24 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         function addFilterFromCell(event, element, filterType) {{
             event.stopPropagation(); // Don't trigger row expand
             let text = element.textContent.trim();
+            let displayText = null;
 
             // For category, extract main category (e.g., "Food" from "Food/Delivery")
             if (filterType === 'category') {{
                 text = text.split('/')[0];
             }}
-            // For merchant, remove chevron if present
+            // For merchant, use data-merchant attribute for hash/matching, but keep display text
             if (filterType === 'merchant') {{
-                text = text.replace(/^[▶▼]\\s*/, '');
+                const row = element.closest('tr.merchant-row');
+                if (row && row.dataset.merchant) {{
+                    displayText = text.replace(/^[▶▼]\\s*/, ''); // Human-readable name
+                    text = row.dataset.merchant; // ID for hash/matching
+                }} else {{
+                    text = text.replace(/^[▶▼]\\s*/, '');
+                }}
             }}
 
-            addFilter(text, filterType);
+            addFilter(text, filterType, displayText);
         }}
 
         // ============================================
