@@ -24,9 +24,10 @@ class TestLoadMerchantRules:
 COSTCO,Costco,Food,Grocery
 STARBUCKS,Starbucks,Food,Coffee
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = load_merchant_rules(f.name)
 
@@ -36,7 +37,7 @@ STARBUCKS,Starbucks,Food,Coffee
             assert rules[0][1] == 'Costco'
             assert rules[0][2] == 'Food'
             assert rules[0][3] == 'Grocery'
-
+        finally:
             os.unlink(f.name)
 
     def test_load_rules_with_modifiers(self):
@@ -45,9 +46,10 @@ STARBUCKS,Starbucks,Food,Coffee
 COSTCO[amount>200],Costco Bulk,Shopping,Bulk
 BESTBUY[date=2025-01-15],TV Purchase,Shopping,Electronics
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = load_merchant_rules(f.name)
 
@@ -65,7 +67,7 @@ BESTBUY[date=2025-01-15],TV Purchase,Shopping,Electronics
             assert rules[1][1] == 'TV Purchase'
             assert len(rules[1][4].date_conditions) == 1
             assert rules[1][4].date_conditions[0].value == date(2025, 1, 15)
-
+        finally:
             os.unlink(f.name)
 
     def test_load_rules_with_comments(self):
@@ -76,16 +78,17 @@ COSTCO,Costco,Food,Grocery
 # Another comment
 STARBUCKS,Starbucks,Food,Coffee
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = load_merchant_rules(f.name)
 
             assert len(rules) == 2
             assert rules[0][1] == 'Costco'
             assert rules[1][1] == 'Starbucks'
-
+        finally:
             os.unlink(f.name)
 
     def test_load_rules_with_empty_lines(self):
@@ -97,14 +100,15 @@ COSTCO,Costco,Food,Grocery
 STARBUCKS,Starbucks,Food,Coffee
 
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = load_merchant_rules(f.name)
 
             assert len(rules) == 2
-
+        finally:
             os.unlink(f.name)
 
     def test_load_rules_with_regex_patterns(self):
@@ -113,16 +117,17 @@ STARBUCKS,Starbucks,Food,Coffee
 UBER\\s(?!EATS),Uber,Transport,Rideshare
 COSTCO(?!.*GAS),Costco,Food,Grocery
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = load_merchant_rules(f.name)
 
             assert len(rules) == 2
             assert rules[0][0] == 'UBER\\s(?!EATS)'
             assert rules[1][0] == 'COSTCO(?!.*GAS)'
-
+        finally:
             os.unlink(f.name)
 
     def test_load_nonexistent_file(self):
@@ -137,16 +142,17 @@ COSTCO,Costco,Food,Grocery
 ,Empty Pattern,Food,Other
 STARBUCKS,Starbucks,Food,Coffee
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = load_merchant_rules(f.name)
 
             assert len(rules) == 2
             assert rules[0][1] == 'Costco'
             assert rules[1][1] == 'Starbucks'
-
+        finally:
             os.unlink(f.name)
 
 
@@ -357,15 +363,16 @@ class TestGetAllRules:
         csv_content = """Pattern,Merchant,Category,Subcategory
 MYCUSTOM,My Custom Merchant,Custom,Category
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules(f.name)
 
             # First rule should be the user rule
             assert rules[0][1] == 'My Custom Merchant'
-
+        finally:
             os.unlink(f.name)
 
     def test_user_rules_override_baseline(self):
@@ -375,9 +382,10 @@ MYCUSTOM,My Custom Merchant,Custom,Category
         csv_content = """Pattern,Merchant,Category,Subcategory
 NETFLIX,My Netflix,Entertainment,Movies
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
             f.write(csv_content)
-            f.flush()
+            f.close()
 
             rules = get_all_rules(f.name)
 
@@ -385,5 +393,5 @@ NETFLIX,My Netflix,Entertainment,Movies
             merchant, category, subcategory, match_info = normalize_merchant('NETFLIX.COM', rules)
             assert (merchant, category, subcategory) == ('My Netflix', 'Entertainment', 'Movies')
             assert match_info['source'] == 'user'
-
+        finally:
             os.unlink(f.name)

@@ -12,14 +12,15 @@ class TestCLIErrorHandling:
 
     def test_explain_no_config_suggests_init(self):
         """Running explain without config should suggest tally init."""
-        result = subprocess.run(
-            ['uv', 'run', 'tally', 'explain'],
-            cwd='/tmp',
-            capture_output=True,
-            text=True
-        )
-        assert result.returncode == 1
-        assert 'tally init' in result.stderr
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'explain'],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 1
+            assert 'tally init' in result.stderr
 
     def test_explain_invalid_merchant_suggests_similar(self):
         """Typo in merchant name should suggest similar names."""
