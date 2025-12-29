@@ -147,7 +147,7 @@ Netflix → Monthly
     ✓ IS monthly: Subscriptions with 6/6 months (>= 3 bill threshold)
 
   Calculation: avg (CV=0.00 (<0.3), payments are consistent)
-  Rule: NETFLIX.* (user)   # Shows pattern and source (user/baseline)
+  Rule: NETFLIX.* (user)   # Shows pattern and source (user/built-in)
 ```
 
 **Discovery & Debugging:**

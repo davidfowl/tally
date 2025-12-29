@@ -37,7 +37,7 @@ Netflix → Monthly
     Formula: avg_when_active = 95.94 / 6 months = 15.99
     CV: 0.00
 
-  Rule: NETFLIX.* (user)   # Shows which pattern matched and source (user/baseline)
+  Rule: NETFLIX.* (user)   # Shows which pattern matched and source (user/built-in)
 ```
 
 ## Core Files
@@ -120,5 +120,5 @@ Netflix → Monthly
 - Use `tally diag` to debug - it shows:
   - Config directory and settings file status
   - Data sources with parsed format details (columns, custom captures, templates)
-  - Merchant rules (baseline + user rules)
+  - Merchant rules (user-defined rules)
 - The tool MUST be usable without external documentation

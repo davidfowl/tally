@@ -345,15 +345,13 @@ class TestExtractMerchantName:
 class TestGetAllRules:
     """Tests for get_all_rules function."""
 
-    def test_returns_baseline_when_no_user_rules(self):
-        """Should return baseline rules when no user file."""
+    def test_returns_empty_when_no_user_rules(self):
+        """Should return empty list when no user file."""
         rules = get_all_rules(None)
-        assert len(rules) > 0  # Has baseline rules
-        # All rules should be 6-tuples (with source)
-        assert all(len(r) == 6 for r in rules)
+        assert len(rules) == 0  # No baseline rules
 
-    def test_user_rules_come_first(self):
-        """User rules should come before baseline rules."""
+    def test_user_rules_loaded(self):
+        """User rules should be loaded from CSV file."""
         csv_content = """Pattern,Merchant,Category,Subcategory
 MYCUSTOM,My Custom Merchant,Custom,Category
 """
@@ -363,15 +361,16 @@ MYCUSTOM,My Custom Merchant,Custom,Category
 
             rules = get_all_rules(f.name)
 
-            # First rule should be the user rule
+            # Should have the user rule
+            assert len(rules) == 1
             assert rules[0][1] == 'My Custom Merchant'
+            # All rules should be 6-tuples (with source)
+            assert all(len(r) == 6 for r in rules)
 
             os.unlink(f.name)
 
-    def test_user_rules_override_baseline(self):
-        """User rules should be able to override baseline rules."""
-        # NETFLIX is in baseline as Subscriptions > Streaming
-        # User can override it
+    def test_user_rule_matching(self):
+        """User rules should match transactions."""
         csv_content = """Pattern,Merchant,Category,Subcategory
 NETFLIX,My Netflix,Entertainment,Movies
 """
@@ -381,7 +380,7 @@ NETFLIX,My Netflix,Entertainment,Movies
 
             rules = get_all_rules(f.name)
 
-            # When we match NETFLIX, user rule should win
+            # When we match NETFLIX, user rule should match
             merchant, category, subcategory, match_info = normalize_merchant('NETFLIX.COM', rules)
             assert (merchant, category, subcategory) == ('My Netflix', 'Entertainment', 'Movies')
             assert match_info['source'] == 'user'
