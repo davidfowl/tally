@@ -3052,9 +3052,10 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         }}
 
         function monthMatchesFilter(txnMonth, filterText) {{
-            if (filterText.includes('..')) {{
-                // Range: "2025-01..2025-03"
-                const [start, end] = filterText.split('..');
+            // Check for range separator (supports both '..' and ':')
+            const rangeMatch = filterText.match(/^(\d{{4}}-\d{{2}})(?:\.\.|:)(\d{{4}}-\d{{2}})$/);
+            if (rangeMatch) {{
+                const [, start, end] = rangeMatch;
                 return txnMonth >= start && txnMonth <= end;
             }}
             // Single month: "2025-12"
