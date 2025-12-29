@@ -1396,6 +1396,74 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
     import json
     embedded_json = export_json(stats, verbose=2)
 
+    # Prepare chart data
+    # 1. Monthly spending trend
+    by_month = stats['by_month']
+    sorted_months = sorted(by_month.keys())
+    monthly_labels = [datetime.strptime(m, '%Y-%m').strftime('%b %Y') for m in sorted_months]
+    monthly_totals = [by_month[m] for m in sorted_months]
+    
+    # 2. Category breakdown by month - build spending per category per month
+    category_by_month = defaultdict(lambda: defaultdict(float))
+    for merchant_dict in [monthly_merchants, annual_merchants, periodic_merchants, 
+                          travel_merchants, one_off_merchants, variable_merchants]:
+        for merchant, data in merchant_dict.items():
+            category = data.get('category', 'Other')
+            for txn in data.get('transactions', []):
+                # Parse month from transaction date (MM/DD format stored, need year)
+                # Actually, we need to track by month from the monthly_amounts
+                pass
+    
+    # Build category breakdown from merchant data - use monthly_amounts dict
+    category_monthly_totals = defaultdict(lambda: defaultdict(float))
+    for merchant_dict in [monthly_merchants, annual_merchants, periodic_merchants,
+                          travel_merchants, one_off_merchants, variable_merchants]:
+        for merchant, data in merchant_dict.items():
+            category = data.get('category', 'Other')
+            for month, amount in data.get('monthly_amounts', {}).items():
+                category_monthly_totals[category][month] += amount
+    
+    # Prepare data for category breakdown chart
+    top_categories = ['Food', 'Shopping', 'Transport', 'Bills', 'Subscriptions', 
+                      'Health', 'Travel', 'Home', 'Personal']
+    category_datasets = []
+    
+    for cat in top_categories:
+        if cat in category_monthly_totals:
+            cat_data = [category_monthly_totals[cat].get(m, 0) for m in sorted_months]
+            if sum(cat_data) > 0:  # Only include if has data
+                category_datasets.append({
+                    'label': cat,
+                    'data': cat_data
+                })
+    
+    # 3. Category pie chart data
+    category_totals = {}
+    for (cat, subcat), data in by_category.items():
+        if cat not in excluded:
+            category_totals[cat] = category_totals.get(cat, 0) + data['total']
+    
+    # Sort by total and take top 8 categories
+    sorted_categories_by_total = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
+    pie_labels = [cat for cat, _ in sorted_categories_by_total[:8]]
+    pie_data = [total for _, total in sorted_categories_by_total[:8]]
+    
+    # Convert chart data to JSON
+    chart_data_json = json.dumps({
+        'monthly': {
+            'labels': monthly_labels,
+            'data': monthly_totals
+        },
+        'categoryByMonth': {
+            'labels': monthly_labels,
+            'datasets': category_datasets
+        },
+        'categoryPie': {
+            'labels': pie_labels,
+            'data': pie_data
+        }
+    })
+
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1459,6 +1527,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             window.initSemanticSearch();
         }}
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         /* Theme CSS Variables */
         :root {{
@@ -2097,10 +2166,44 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
             background: var(--bg-intl);
             color: var(--text-intl);
         }}
+        .chart-section {{
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }}
+        .chart-section h2 {{
+            font-size: 1.25rem;
+            font-weight: 500;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }}
+        .charts-grid {{
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }}
+        @media (min-width: 1024px) {{
+            .charts-grid {{
+                grid-template-columns: 2fr 1fr;
+            }}
+        }}
         .chart-container {{
-            display: flex;
-            justify-content: center;
-            margin: 2rem 0;
+            position: relative;
+            background: var(--bg-table);
+            border-radius: 12px;
+            padding: 1.5rem;
+            min-height: 300px;
+        }}
+        .chart-container h3 {{
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }}
+        .chart-wrapper {{
+            position: relative;
+            height: 300px;
         }}
         .donut-chart {{
             position: relative;
@@ -2326,6 +2429,31 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
                         <span class="name">Uncategorized</span>
                         <span class="value">{fmt(uncat)} ({uncat/actual*100:.1f}%)</span>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="chart-section">
+            <h2>Spending Charts & Trends</h2>
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <h3>Monthly Spending Trend</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="monthlyTrendChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <h3>Category Breakdown</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="categoryPieChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-container" style="margin-top: 2rem;">
+                <h3>Category Spending by Month</h3>
+                <div class="chart-wrapper">
+                    <canvas id="categoryByMonthChart"></canvas>
                 </div>
             </div>
         </div>
@@ -3724,6 +3852,243 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
 
         // Initial load from hash
         hashToFilters();
+    </script>
+
+    <!-- Chart rendering -->
+    <script>
+        // Chart data from Python
+        const chartData = {chart_data_json};
+        const currencySymbol = '{currency_format}'.split('{{')[0] || '$';
+        
+        // Chart.js default configuration for theme support
+        Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+        Chart.defaults.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-table').trim();
+        
+        // Color palette for categories
+        const categoryColors = {{
+            'Food': 'rgba(79, 172, 254, 0.8)',        // Blue
+            'Shopping': 'rgba(240, 147, 251, 0.8)',   // Pink
+            'Transport': 'rgba(74, 222, 128, 0.8)',   // Green
+            'Bills': 'rgba(251, 191, 36, 0.8)',       // Yellow
+            'Subscriptions': 'rgba(147, 197, 253, 0.8)', // Light blue
+            'Health': 'rgba(251, 113, 133, 0.8)',     // Rose
+            'Travel': 'rgba(196, 181, 253, 0.8)',     // Purple
+            'Home': 'rgba(253, 186, 116, 0.8)',       // Orange
+            'Personal': 'rgba(163, 230, 53, 0.8)',    // Lime
+            'Entertainment': 'rgba(251, 146, 60, 0.8)', // Orange
+            'Education': 'rgba(139, 92, 246, 0.8)',   // Violet
+            'Other': 'rgba(156, 163, 175, 0.8)'       // Gray
+        }};
+        
+        // Update charts on theme change
+        function updateChartsForTheme() {{
+            Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+            Chart.defaults.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-table').trim();
+            
+            // Recreate all charts
+            if (window.monthlyTrendChart) {{
+                window.monthlyTrendChart.destroy();
+                createMonthlyTrendChart();
+            }}
+            if (window.categoryPieChart) {{
+                window.categoryPieChart.destroy();
+                createCategoryPieChart();
+            }}
+            if (window.categoryByMonthChart) {{
+                window.categoryByMonthChart.destroy();
+                createCategoryByMonthChart();
+            }}
+        }}
+        
+        // 1. Monthly Spending Trend (Line Chart)
+        function createMonthlyTrendChart() {{
+            const ctx = document.getElementById('monthlyTrendChart');
+            if (!ctx) return;
+            
+            window.monthlyTrendChart = new Chart(ctx, {{
+                type: 'line',
+                data: {{
+                    labels: chartData.monthly.labels,
+                    datasets: [{{
+                        label: 'Total Spending',
+                        data: chartData.monthly.data,
+                        borderColor: 'rgba(79, 172, 254, 1)',
+                        backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{
+                        legend: {{
+                            display: false
+                        }},
+                        tooltip: {{
+                            callbacks: {{
+                                label: function(context) {{
+                                    return 'Total: ' + currencySymbol + context.parsed.y.toLocaleString('en-US', {{ maximumFractionDigits: 0 }});
+                                }}
+                            }}
+                        }}
+                    }},
+                    scales: {{
+                        y: {{
+                            beginAtZero: true,
+                            ticks: {{
+                                callback: function(value) {{
+                                    return currencySymbol + value.toLocaleString('en-US', {{ maximumFractionDigits: 0 }});
+                                }}
+                            }},
+                            grid: {{
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            }}
+                        }},
+                        x: {{
+                            grid: {{
+                                display: false
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        
+        // 2. Category Pie Chart
+        function createCategoryPieChart() {{
+            const ctx = document.getElementById('categoryPieChart');
+            if (!ctx) return;
+            
+            const colors = chartData.categoryPie.labels.map(label => 
+                categoryColors[label] || 'rgba(156, 163, 175, 0.8)'
+            );
+            
+            window.categoryPieChart = new Chart(ctx, {{
+                type: 'doughnut',
+                data: {{
+                    labels: chartData.categoryPie.labels,
+                    datasets: [{{
+                        data: chartData.categoryPie.data,
+                        backgroundColor: colors,
+                        borderWidth: 2,
+                        borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-table').trim()
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{
+                        legend: {{
+                            position: 'bottom',
+                            labels: {{
+                                padding: 15,
+                                font: {{
+                                    size: 11
+                                }}
+                            }}
+                        }},
+                        tooltip: {{
+                            callbacks: {{
+                                label: function(context) {{
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                    return context.label + ': ' + currencySymbol + context.parsed.toLocaleString('en-US', {{ maximumFractionDigits: 0 }}) + ' (' + percentage + '%)';
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        
+        // 3. Category Spending by Month (Stacked Bar Chart)
+        function createCategoryByMonthChart() {{
+            const ctx = document.getElementById('categoryByMonthChart');
+            if (!ctx) return;
+            
+            const datasets = chartData.categoryByMonth.datasets.map(ds => ({{
+                label: ds.label,
+                data: ds.data,
+                backgroundColor: categoryColors[ds.label] || 'rgba(156, 163, 175, 0.8)',
+                borderWidth: 0
+            }}));
+            
+            window.categoryByMonthChart = new Chart(ctx, {{
+                type: 'bar',
+                data: {{
+                    labels: chartData.categoryByMonth.labels,
+                    datasets: datasets
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{
+                        legend: {{
+                            position: 'bottom',
+                            labels: {{
+                                padding: 10,
+                                font: {{
+                                    size: 10
+                                }},
+                                boxWidth: 12
+                            }}
+                        }},
+                        tooltip: {{
+                            callbacks: {{
+                                label: function(context) {{
+                                    return context.dataset.label + ': ' + currencySymbol + context.parsed.y.toLocaleString('en-US', {{ maximumFractionDigits: 0 }});
+                                }},
+                                footer: function(tooltipItems) {{
+                                    let total = 0;
+                                    tooltipItems.forEach(item => {{
+                                        total += item.parsed.y;
+                                    }});
+                                    return 'Total: ' + currencySymbol + total.toLocaleString('en-US', {{ maximumFractionDigits: 0 }});
+                                }}
+                            }}
+                        }}
+                    }},
+                    scales: {{
+                        x: {{
+                            stacked: true,
+                            grid: {{
+                                display: false
+                            }}
+                        }},
+                        y: {{
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: {{
+                                callback: function(value) {{
+                                    return currencySymbol + value.toLocaleString('en-US', {{ maximumFractionDigits: 0 }});
+                                }}
+                            }},
+                            grid: {{
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        
+        // Initialize charts when page loads
+        document.addEventListener('DOMContentLoaded', function() {{
+            createMonthlyTrendChart();
+            createCategoryPieChart();
+            createCategoryByMonthChart();
+        }});
+        
+        // Re-create charts on theme toggle
+        const originalToggleTheme = toggleTheme;
+        toggleTheme = function() {{
+            originalToggleTheme();
+            setTimeout(updateChartsForTheme, 50);
+        }};
     </script>
 
     <!-- Embedded JSON data for LLM analysis tools -->
