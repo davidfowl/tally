@@ -1304,6 +1304,12 @@ def cmd_run(args):
         rules = get_all_rules(rules_file)
         if not args.quiet:
             print(f"Loaded {len(rules)} categorization rules from {rules_file}")
+            if len(rules) == 0:
+                print()
+                print("⚠️  No merchant rules defined - all transactions will be 'Unknown'")
+                print("    Run 'tally discover' to find unknown merchants and get suggested rules.")
+                print("    Tip: Use an AI agent with 'tally discover' to auto-generate rules!")
+                print()
     else:
         rules = get_all_rules()  # No rules file
         if not args.quiet:
