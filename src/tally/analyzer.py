@@ -2644,7 +2644,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{data.get('category', 'Unknown')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
                         <td colspan="7"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2702,7 +2702,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{data.get('category', 'Unknown')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2758,7 +2758,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{data.get('category', 'Unknown')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2815,7 +2815,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{data.get('category', 'Unknown')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2871,7 +2871,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{data.get('category', 'Unknown')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
                         <td colspan="5"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -2933,7 +2933,7 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
         sorted_txns = sorted(data.get('transactions', []), key=lambda x: x['date'], reverse=True)
         for txn in sorted_txns:
             html += f'''
-                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{data.get('category', 'Unknown')}">
+                    <tr class="txn-row hidden" data-merchant="{merchant_id}" data-amount="{txn['amount']:.2f}" data-month="{txn['month']}" data-category="{cat_data}" data-main-category="{data.get('category', '')}">
                         <td colspan="7"><div class="txn-detail"><span class="txn-date">{txn['date']}</span><span class="txn-desc">{txn['description']}</span><span class="txn-amount">{fmt_dec(txn['amount'])}</span><span class="txn-source {txn['source'].lower()}">{txn['source']}</span>{location_badge(txn.get('location'))}</div></td>
                     </tr>'''
 
@@ -4833,7 +4833,8 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
                         visibleTxns.push({{
                             amount: parseFloat(row.dataset.amount) || 0,
                             month: row.dataset.month,
-                            category: row.dataset.category
+                            category: row.dataset.category,
+                            mainCategory: row.dataset.mainCategory
                         }});
                     }}
                 }} else {{
@@ -4843,7 +4844,8 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
                         visibleTxns.push({{
                             amount: parseFloat(row.dataset.amount) || 0,
                             month: row.dataset.month,
-                            category: row.dataset.category
+                            category: row.dataset.category,
+                            mainCategory: row.dataset.mainCategory
                         }});
                     }}
                 }}
@@ -4882,12 +4884,12 @@ def write_summary_file(stats, filepath, year=2025, home_locations=None, currency
                 // Monthly totals
                 monthlyTotals[txn.month] = (monthlyTotals[txn.month] || 0) + txn.amount;
 
-                // Category totals
+                // Category totals (uses full subcategory path for pie chart)
                 categoryTotals[txn.category] = (categoryTotals[txn.category] || 0) + txn.amount;
 
-                // Category by month
-                if (!categoryMonthly[txn.category]) categoryMonthly[txn.category] = {{}};
-                categoryMonthly[txn.category][txn.month] = (categoryMonthly[txn.category][txn.month] || 0) + txn.amount;
+                // Category by month (uses main category to match chart datasets)
+                if (!categoryMonthly[txn.mainCategory]) categoryMonthly[txn.mainCategory] = {{}};
+                categoryMonthly[txn.mainCategory][txn.month] = (categoryMonthly[txn.mainCategory][txn.month] || 0) + txn.amount;
             }});
 
             // Update monthly trend chart
