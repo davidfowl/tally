@@ -1,6 +1,6 @@
-# Custom Merchant Categorization Rules
+# Merchant Categorization Rules
 #
-# Add your custom rules here. These override the ~700 built-in rules.
+# Define your merchant categorization rules here.
 # Format: Pattern,Merchant,Category,Subcategory
 #
 # - Pattern: Python regex (case-insensitive) matched against transaction descriptions
@@ -8,8 +8,8 @@
 # - Use (?!...) for negative lookahead: UBER\s(?!EATS) excludes Uber Eats
 # - Test patterns at regex101.com (Python flavor)
 #
-# First match wins - your rules are checked before built-in rules.
-# Run: budget-analyze inspect <file> to see your transaction descriptions.
+# First match wins.
+# Run: tally inspect <file> to see your transaction descriptions.
 #
 # Examples:
 #   MY LOCAL BAKERY,My Favorite Bakery,Food,Restaurant
