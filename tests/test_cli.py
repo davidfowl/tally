@@ -38,6 +38,11 @@ data_sources:
     format: "{date:%Y-%m-%d},{description},{amount}"
 """)
 
+            # Create merchant rules file
+            with open(os.path.join(config_dir, 'merchant_categories.csv'), 'w') as f:
+                f.write("Pattern,Merchant,Category,Subcategory\n")
+                f.write("NETFLIX,Netflix,Subscriptions,Streaming\n")
+
             # Create test data with Netflix
             with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
                 f.write("date,description,amount\n")
@@ -127,6 +132,11 @@ data_sources:
     file: data/test.csv
     format: "{date:%Y-%m-%d},{description},{amount}"
 """)
+
+            # Create merchant rules file
+            with open(os.path.join(config_dir, 'merchant_categories.csv'), 'w') as f:
+                f.write("Pattern,Merchant,Category,Subcategory\n")
+                f.write("NETFLIX,Netflix,Subscriptions,Streaming\n")
 
             # Create data that will be categorized
             with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
