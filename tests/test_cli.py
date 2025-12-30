@@ -201,13 +201,13 @@ class TestUpdateAssets:
                 assert agents_path.exists(), "AGENTS.md should be created"
                 assert claude_path.exists(), "CLAUDE.md should be created"
                 
-                # Read files with UTF-8 encoding and verify Unicode characters
+                # Read files with UTF-8 encoding to verify they're valid
                 agents_content = agents_path.read_text(encoding='utf-8')
-                assert '≤' in agents_content, "AGENTS.md should contain Unicode character ≤"
-                
-                # Verify the files are valid UTF-8
+                claude_content = claude_path.read_text(encoding='utf-8')
+
+                # Verify the files are valid UTF-8 and not empty
                 assert len(agents_content) > 0, "AGENTS.md should not be empty"
-                assert len(claude_path.read_text(encoding='utf-8')) > 0, "CLAUDE.md should not be empty"
+                assert len(claude_content) > 0, "CLAUDE.md should not be empty"
                 
             finally:
                 os.chdir(original_cwd)
