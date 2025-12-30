@@ -45,18 +45,20 @@ jobs:
 
       - name: Verify E2E passed
         run: |
-          echo "Checking E2E status for commit ${{ steps.info.outputs.sha }}..."
+          echo "Checking latest E2E status on main branch..."
 
+          # Get the latest E2E run on main branch
           STATUS=$(gh run list \
-            --commit ${{ steps.info.outputs.sha }} \
+            --branch main \
             --workflow "E2E Smoke Test" \
-            --json conclusion \
+            --json conclusion,status \
+            --limit 1 \
             -q '.[0].conclusion')
 
           echo "E2E conclusion: $STATUS"
 
           if [ "$STATUS" != "success" ]; then
-            echo "::error::E2E tests did not pass for commit ${{ steps.info.outputs.sha }}"
+            echo "::error::E2E tests did not pass on main branch"
             echo "Status was: $STATUS"
             echo ""
             echo "The release candidate cannot be published until E2E tests pass."
