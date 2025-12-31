@@ -15,10 +15,15 @@ title: "Spending Analysis"
 
 # Data sources - list of transaction files to process
 # Paths are relative to the parent of the config directory
+# Supports glob patterns (*, ?, []) to match multiple files
 data_sources:
   - name: AMEX
-    file: data/amex-2025.csv
+    file: data/amex-2025.csv      # Single file
     type: amex
+  # Example with glob pattern to match multiple files:
+  # - name: AMEX
+  #   file: data/amex*.csv        # Matches amex-2024.csv, amex-2025.csv, etc.
+  #   type: amex
   - name: BOA
     file: data/boa-checking.txt
     type: boa

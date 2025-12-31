@@ -80,11 +80,12 @@ currency_format: "€{amount}"  # Optional: €1,234 or "{amount} zł" for 1,234
 
 data_sources:
   - name: AMEX
-    file: data/amex.csv
+    file: data/amex.csv        # Single file
     account_type: credit_card
     format: "{date:%m/%d/%Y},{description},{amount}"
+  # Use glob patterns to match multiple files:
   - name: Chase
-    file: data/chase.csv
+    file: data/chase*.csv      # Matches chase-2024.csv, chase-2025.csv, etc.
     account_type: credit_card
     format: "{date:%m/%d/%Y},{description},{amount}"
   - name: BofA Checking
@@ -97,6 +98,8 @@ data_sources:
     format: "{date:%d.%m.%Y},{description},{amount}"
     decimal_separator: ","  # European format (1.234,56)
 ```
+
+**File Patterns**: The `file` parameter supports glob patterns (`*`, `?`, `[]`) to match multiple files. Files are processed in sorted order.
 
 ### Account Types
 
