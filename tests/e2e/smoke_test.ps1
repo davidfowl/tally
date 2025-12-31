@@ -194,10 +194,10 @@ subcategory: Other
         Write-Host "Note: View mode not found in HTML (views may be empty)" -ForegroundColor Yellow
     }
 
-    # Test explain with --section flag
-    $sectionOutput = tally explain --section subscriptions 2>&1 | Out-String
-    Write-Host ($sectionOutput | Select-Object -First 10)
-    Write-Host "✓ Section filter works in explain" -ForegroundColor Green
+    # Test explain with --view flag
+    $viewOutput = tally explain --view subscriptions 2>&1 | Out-String
+    Write-Host ($viewOutput | Select-Object -First 10)
+    Write-Host "✓ View filter works in explain" -ForegroundColor Green
 
     Write-Host ""
     Write-Host "=== All tests passed! ===" -ForegroundColor Green

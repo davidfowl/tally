@@ -312,7 +312,7 @@ html_filename: spending_summary.html
 # Merchant rules file - expression-based categorization
 merchants_file: config/merchants.rules
 
-# Sections file (optional) - custom spending views
+# Views file (optional) - custom spending views
 # Create config/views.rules and uncomment:
 # views_file: config/views.rules
 
@@ -2396,9 +2396,9 @@ def cmd_explain(args):
         if not found_any:
             sys.exit(1)
 
-    elif hasattr(args, 'section') and args.section:
+    elif hasattr(args, 'view') and args.view:
         # Show all merchants in a specific view
-        view_name = args.section
+        view_name = args.view
         views_config = config.get('sections')
 
         # Classify by views
@@ -2438,7 +2438,7 @@ def cmd_explain(args):
                 merchants_dict = {name: data for name, data in merchants_list}
                 _print_classification_summary(view_match, merchants_dict, verbose, stats['num_months'])
         else:
-            print("No views.rules found. Run 'tally run' first to generate default sections.")
+            print("No views.rules found. Create config/views.rules to define custom views.")
             sys.exit(1)
 
     elif args.category:
@@ -3067,8 +3067,8 @@ def main():
         help='Increase output verbosity (use -v for trace, -vv for full details)'
     )
     explain_parser.add_argument(
-        '--section',
-        help='Show all merchants in a specific section (e.g., --section bills)'
+        '--view',
+        help='Show all merchants in a specific view (e.g., --view bills)'
     )
     explain_parser.add_argument(
         '--category',

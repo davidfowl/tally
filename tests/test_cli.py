@@ -164,8 +164,8 @@ data_sources:
         assert 'html' in result.stderr
         assert 'json' in result.stderr
 
-    def test_invalid_section_shows_available(self):
-        """Invalid --section should show available sections."""
+    def test_invalid_view_shows_available(self):
+        """Invalid --view should show available views."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = os.path.join(tmpdir, 'config')
             data_dir = os.path.join(tmpdir, 'data')
@@ -185,14 +185,14 @@ data_sources:
                 f.write("2025-01-15,TEST,10.00\n")
 
             result = subprocess.run(
-                ['uv', 'run', 'tally', 'explain', '--section', 'invalid', config_dir],
+                ['uv', 'run', 'tally', 'explain', '--view', 'invalid', config_dir],
                 capture_output=True,
                 text=True
             )
-            # Should fail because 'invalid' is not a valid section
+            # Should fail because 'invalid' is not a valid view
             assert result.returncode == 1
             # Message may be in stdout or stderr depending on error type
             output = result.stdout + result.stderr
-            assert 'No section' in output or 'sections' in output.lower()
+            assert 'No view' in output or 'views' in output.lower()
 
 

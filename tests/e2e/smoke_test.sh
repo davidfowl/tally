@@ -204,10 +204,10 @@ else
     echo "Note: View mode not found in HTML (views may be empty)"
 fi
 
-# Test explain with --section flag
-OUTPUT=$(tally explain --section subscriptions 2>&1) || true
+# Test explain with --view flag
+OUTPUT=$(tally explain --view subscriptions 2>&1) || true
 echo "$OUTPUT" | head -10
-echo "✓ Section filter works in explain"
+echo "✓ View filter works in explain"
 
 echo ""
 echo "=== All tests passed! ==="
