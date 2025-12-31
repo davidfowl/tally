@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import glob
 import os
 import shutil
 import sys
@@ -96,6 +97,37 @@ from .analyzer import (
     write_summary_file,
     write_summary_file_vue,
 )
+
+
+def _expand_file_pattern(config_dir, file_pattern):
+    """
+    Expand a file pattern (which may contain wildcards) to a list of actual file paths.
+    
+    Args:
+        config_dir: Path to the config directory
+        file_pattern: File pattern (e.g., 'data/amex*.csv' or 'data/amex-2025.csv')
+        
+    Returns:
+        List of absolute file paths that match the pattern, or empty list if no matches
+    """
+    # Try relative to config_dir parent first
+    base_path = os.path.join(config_dir, '..')
+    base_path = os.path.normpath(base_path)
+    pattern_path = os.path.join(base_path, file_pattern)
+    pattern_path = os.path.normpath(pattern_path)
+    
+    # Expand glob pattern
+    matched_files = glob.glob(pattern_path)
+    
+    # If no matches with config_dir parent, try relative to config_dir's parent directory
+    if not matched_files:
+        base_path = os.path.dirname(config_dir)
+        pattern_path = os.path.join(base_path, file_pattern)
+        pattern_path = os.path.normpath(pattern_path)
+        matched_files = glob.glob(pattern_path)
+    
+    # Sort files to ensure consistent processing order
+    return sorted(matched_files)
 
 
 def _check_merchant_migration(config: dict, config_dir: str, quiet: bool = False, migrate: bool = False) -> list:
@@ -866,48 +898,50 @@ def cmd_run(args):
     all_txns = []
 
     for source in data_sources:
-        filepath = os.path.join(config_dir, '..', source['file'])
-        filepath = os.path.normpath(filepath)
-
-        if not os.path.exists(filepath):
-            # Try relative to config_dir parent
-            filepath = os.path.join(os.path.dirname(config_dir), source['file'])
-
-        if not os.path.exists(filepath):
+        # Expand glob pattern to get all matching files
+        filepaths = _expand_file_pattern(config_dir, source['file'])
+        
+        if not filepaths:
             if not args.quiet:
-                print(f"  {source['name']}: File not found - {source['file']}")
+                print(f"  {source['name']}: No files found matching pattern - {source['file']}")
             continue
 
         # Get parser type and format spec (set by config_loader.resolve_source_format)
         parser_type = source.get('_parser_type', source.get('type', '')).lower()
         format_spec = source.get('_format_spec')
 
-        try:
-            if parser_type == 'amex':
-                _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
-            elif parser_type == 'boa':
-                _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
-            elif parser_type == 'generic' and format_spec:
-                txns = parse_generic_csv(filepath, format_spec, rules,
-                                         home_locations,
-                                         source_name=source.get('name', 'CSV'),
-                                         decimal_separator=source.get('decimal_separator', '.'),
-                                         cleaning_patterns=cleaning_patterns)
-            else:
+        source_txns = []
+        for filepath in filepaths:
+            try:
+                if parser_type == 'amex':
+                    _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
+                    txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
+                elif parser_type == 'boa':
+                    _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
+                    txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
+                elif parser_type == 'generic' and format_spec:
+                    txns = parse_generic_csv(filepath, format_spec, rules,
+                                             home_locations,
+                                             source_name=source.get('name', 'CSV'),
+                                             decimal_separator=source.get('decimal_separator', '.'),
+                                             cleaning_patterns=cleaning_patterns)
+                else:
+                    if not args.quiet:
+                        print(f"  {source['name']}: Unknown parser type '{parser_type}'")
+                        print(f"    Use 'tally inspect {source['file']}' to determine format")
+                    continue
+                
+                source_txns.extend(txns)
+            except Exception as e:
                 if not args.quiet:
-                    print(f"  {source['name']}: Unknown parser type '{parser_type}'")
-                    print(f"    Use 'tally inspect {source['file']}' to determine format")
+                    print(f"  {source['name']} ({os.path.basename(filepath)}): Error parsing - {e}")
                 continue
-        except Exception as e:
-            if not args.quiet:
-                print(f"  {source['name']}: Error parsing - {e}")
-            continue
 
-        all_txns.extend(txns)
+        all_txns.extend(source_txns)
         if not args.quiet:
-            print(f"  {source['name']}: {len(txns)} transactions")
+            file_count = len(filepaths)
+            files_str = f"{file_count} file{'s' if file_count > 1 else ''}"
+            print(f"  {source['name']}: {len(source_txns)} transactions from {files_str}")
 
     if not all_txns:
         print("Error: No transactions found", file=sys.stderr)
@@ -1085,37 +1119,35 @@ def cmd_discover(args):
     all_txns = []
 
     for source in data_sources:
-        filepath = os.path.join(config_dir, '..', source['file'])
-        filepath = os.path.normpath(filepath)
-
-        if not os.path.exists(filepath):
-            filepath = os.path.join(os.path.dirname(config_dir), source['file'])
-
-        if not os.path.exists(filepath):
+        # Expand glob pattern to get all matching files
+        filepaths = _expand_file_pattern(config_dir, source['file'])
+        
+        if not filepaths:
             continue
 
         parser_type = source.get('_parser_type', source.get('type', '')).lower()
         format_spec = source.get('_format_spec')
 
-        try:
-            if parser_type == 'amex':
-                _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
-            elif parser_type == 'boa':
-                _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
-            elif parser_type == 'generic' and format_spec:
-                txns = parse_generic_csv(filepath, format_spec, rules,
-                                         home_locations,
-                                         source_name=source.get('name', 'CSV'),
-                                         decimal_separator=source.get('decimal_separator', '.'),
-                                         cleaning_patterns=cleaning_patterns)
-            else:
+        for filepath in filepaths:
+            try:
+                if parser_type == 'amex':
+                    _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
+                    txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
+                elif parser_type == 'boa':
+                    _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
+                    txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
+                elif parser_type == 'generic' and format_spec:
+                    txns = parse_generic_csv(filepath, format_spec, rules,
+                                             home_locations,
+                                             source_name=source.get('name', 'CSV'),
+                                             decimal_separator=source.get('decimal_separator', '.'),
+                                             cleaning_patterns=cleaning_patterns)
+                else:
+                    continue
+            except Exception:
                 continue
-        except Exception:
-            continue
 
-        all_txns.extend(txns)
+            all_txns.extend(txns)
 
     if not all_txns:
         print("Error: No transactions found", file=sys.stderr)
@@ -1741,14 +1773,18 @@ def cmd_diag(args):
         print("DATA SOURCES")
         print("-" * 70)
         for i, source in enumerate(config['data_sources'], 1):
-            filepath = os.path.join(config_dir, '..', source['file'])
-            filepath = os.path.normpath(filepath)
-            if not os.path.exists(filepath):
-                filepath = os.path.join(os.path.dirname(config_dir), source['file'])
+            # Expand glob pattern to get all matching files
+            filepaths = _expand_file_pattern(config_dir, source['file'])
 
             print(f"  {i}. {source.get('name', 'unnamed')}")
-            print(f"     File: {source['file']}")
-            print(f"     Exists: {os.path.exists(filepath)}")
+            print(f"     Pattern: {source['file']}")
+            if filepaths:
+                print(f"     Matched files: {len(filepaths)}")
+                for fp in filepaths:
+                    print(f"       - {os.path.basename(fp)}")
+            else:
+                print(f"     Matched files: 0 (no files found)")
+            
             if source.get('type'):
                 print(f"     Type: {source['type']}")
             if source.get('format'):
@@ -1952,11 +1988,12 @@ def cmd_diag(args):
         }
         if config and config.get('data_sources'):
             for source in config['data_sources']:
-                filepath = os.path.join(os.path.dirname(config_dir), source['file'])
+                filepaths = _expand_file_pattern(config_dir, source['file'])
                 output['data_sources'].append({
                     'name': source.get('name'),
                     'file': source['file'],
-                    'exists': os.path.exists(filepath),
+                    'matched_files': len(filepaths),
+                    'files': [os.path.basename(f) for f in filepaths],
                     'type': source.get('type'),
                     'format': source.get('format'),
                 })
@@ -2267,35 +2304,35 @@ def cmd_explain(args):
     # Parse transactions (quietly)
     all_txns = []
     for source in data_sources:
-        filepath = os.path.join(config_dir, '..', source['file'])
-        filepath = os.path.normpath(filepath)
-        if not os.path.exists(filepath):
-            filepath = os.path.join(os.path.dirname(config_dir), source['file'])
-        if not os.path.exists(filepath):
+        # Expand glob pattern to get all matching files
+        filepaths = _expand_file_pattern(config_dir, source['file'])
+        
+        if not filepaths:
             continue
 
         parser_type = source.get('_parser_type', source.get('type', '')).lower()
         format_spec = source.get('_format_spec')
 
-        try:
-            if parser_type == 'amex':
-                _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
-            elif parser_type == 'boa':
-                _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
-            elif parser_type == 'generic' and format_spec:
-                txns = parse_generic_csv(filepath, format_spec, rules,
-                                         home_locations,
-                                         source_name=source.get('name', 'CSV'),
-                                         decimal_separator=source.get('decimal_separator', '.'),
-                                         cleaning_patterns=cleaning_patterns)
-            else:
+        for filepath in filepaths:
+            try:
+                if parser_type == 'amex':
+                    _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
+                    txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
+                elif parser_type == 'boa':
+                    _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
+                    txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
+                elif parser_type == 'generic' and format_spec:
+                    txns = parse_generic_csv(filepath, format_spec, rules,
+                                             home_locations,
+                                             source_name=source.get('name', 'CSV'),
+                                             decimal_separator=source.get('decimal_separator', '.'),
+                                             cleaning_patterns=cleaning_patterns)
+                else:
+                    continue
+            except Exception:
                 continue
-        except Exception:
-            continue
 
-        all_txns.extend(txns)
+            all_txns.extend(txns)
 
     if not all_txns:
         print("Error: No transactions found", file=sys.stderr)
