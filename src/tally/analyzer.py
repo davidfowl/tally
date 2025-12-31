@@ -355,7 +355,10 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
                 continue
 
             # Parse date - handle optional day suffix (e.g., "01/02/2017  Mon")
-            date_str = date_str.split()[0]  # Take just the date part
+            # Only strip trailing text if the date format doesn't contain spaces
+            # (formats like "%d %b %y" for "30 Dec 25" need the spaces preserved)
+            if ' ' not in format_spec.date_format:
+                date_str = date_str.split()[0]  # Take just the date part
             date = datetime.strptime(date_str, format_spec.date_format)
 
             # Parse amount (handle locale-specific formats)
