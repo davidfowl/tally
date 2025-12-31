@@ -288,6 +288,185 @@ class TestDateFormatWithSpaces:
         finally:
             os.unlink(f.name)
 
+    def test_iso_date_format(self):
+        """Parse ISO date format (YYYY-MM-DD) without spaces."""
+        csv_content = """Date,Description,Amount
+2025-01-15,GROCERY STORE,50.00
+2025-02-16,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%Y-%m-%d},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].year == 2025
+            assert txns[0]['date'].month == 1
+            assert txns[0]['date'].day == 15
+        finally:
+            os.unlink(f.name)
+
+    def test_date_with_time_component(self):
+        """Parse date format with time component (spaces in format)."""
+        csv_content = """Date,Description,Amount
+2025-01-15 14:30,GROCERY STORE,50.00
+2025-02-16 09:15,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            # Date-time format with space between date and time
+            format_spec = parse_format_string('{date:%Y-%m-%d %H:%M},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].year == 2025
+            assert txns[0]['date'].month == 1
+            assert txns[0]['date'].day == 15
+            assert txns[0]['date'].hour == 14
+            assert txns[0]['date'].minute == 30
+        finally:
+            os.unlink(f.name)
+
+    def test_european_date_format_with_dots(self):
+        """Parse European date format with dots (DD.MM.YYYY)."""
+        csv_content = """Date,Description,Amount
+15.01.2025,GROCERY STORE,50.00
+16.02.2025,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%d.%m.%Y},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].day == 15
+            assert txns[0]['date'].month == 1
+            assert txns[0]['date'].year == 2025
+        finally:
+            os.unlink(f.name)
+
+    def test_date_with_leading_trailing_spaces(self):
+        """Dates with extra leading/trailing spaces should be trimmed."""
+        csv_content = """Date,Description,Amount
+  01/15/2025  ,GROCERY STORE,50.00
+   01/16/2025   ,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%m/%d/%Y},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].month == 1
+            assert txns[0]['date'].day == 15
+        finally:
+            os.unlink(f.name)
+
+    def test_abbreviated_month_name_with_period(self):
+        """Parse date with abbreviated month that includes period."""
+        csv_content = """Date,Description,Amount
+15 Jan. 2025,GROCERY STORE,50.00
+16 Feb. 2025,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            # Format with abbreviated month and period: "15 Jan. 2025"
+            format_spec = parse_format_string('{date:%d %b. %Y},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].day == 15
+            assert txns[0]['date'].month == 1
+            assert txns[0]['date'].year == 2025
+        finally:
+            os.unlink(f.name)
+
+    def test_multiple_spaces_in_date_format(self):
+        """Date format with multiple spaces should be handled correctly."""
+        csv_content = """Date,Description,Amount
+15  Jan  2025,GROCERY STORE,50.00
+16  Feb  2025,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            # Format with double spaces: "15  Jan  2025"
+            format_spec = parse_format_string('{date:%d  %b  %Y},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].day == 15
+            assert txns[0]['date'].month == 1
+        finally:
+            os.unlink(f.name)
+
+    def test_date_with_day_suffix_multiple_spaces(self):
+        """Date without spaces in format should strip suffix even with multiple spaces."""
+        csv_content = """Date,Description,Amount
+01/15/2025    Wednesday,GROCERY STORE,50.00
+01/16/2025  Thu,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            # Format without spaces - should strip any suffix
+            format_spec = parse_format_string('{date:%m/%d/%Y},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].month == 1
+            assert txns[0]['date'].day == 15
+        finally:
+            os.unlink(f.name)
+
+    def test_two_digit_year_format(self):
+        """Parse date with two-digit year."""
+        csv_content = """Date,Description,Amount
+01/15/25,GROCERY STORE,50.00
+12/31/25,COFFEE SHOP,5.99
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%m/%d/%y},{description},{amount}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 2
+            assert txns[0]['date'].month == 1
+            assert txns[0]['date'].day == 15
+            assert txns[0]['date'].year == 2025
+        finally:
+            os.unlink(f.name)
+
 
 class TestCustomCaptures:
     """Tests for custom column captures with description templates."""
