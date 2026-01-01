@@ -108,7 +108,7 @@
                         </div>
                         <div class="breakdown-item clickable" v-if="transfersCount > 0" @click="addFilter('transfer', 'tag')">
                             <span class="name transfers-label">Transfers</span>
-                            <span class="value" data-testid="transfers-amount">-{{ formatCurrency(Math.abs(transfersTotal)) }}</span>
+                            <span class="value" data-testid="transfers-amount">{{ formatCurrency(Math.abs(transfersTotal)) }}</span>
                         </div>
                     </div>
                 </div>
