@@ -13,7 +13,7 @@ const MerchantSection = defineComponent({
         sectionKey: { type: String, required: true },
         title: { type: String, required: true },
         items: { type: Array, required: true },
-        totalLabel: { type: String, default: 'Total' },
+        totalLabel: { type: String, default: 'Toplam' },
         showTotal: { type: Boolean, default: false },
         totalAmount: { type: Number, default: 0 },
         subtitle: { type: String, default: '' },
@@ -57,7 +57,7 @@ const MerchantSection = defineComponent({
                 </h2>
                 <span class="section-total">
                     <template v-if="categoryMode">
-                        <span class="section-monthly">{{ formatCurrency(totalAmount / numMonths) }}/mo</span> ·
+                        <span class="section-monthly">{{ formatCurrency(totalAmount / numMonths) }}/ay</span> ·
                         <span class="section-ytd">{{ formatCurrency(totalAmount) }}</span>
                         <span class="section-pct">({{ formatPct(totalAmount, grandTotal) }})</span>
                     </template>
@@ -73,17 +73,17 @@ const MerchantSection = defineComponent({
                         <thead>
                             <tr>
                                 <th @click.stop="toggleSort(sectionKey, 'merchant')"
-                                    :class="getSortClass('merchant')">{{ creditMode ? 'Source' : 'Merchant' }}</th>
+                                    :class="getSortClass('merchant')">{{ creditMode ? 'Kaynak' : 'Satıcı' }}</th>
                                 <th @click.stop="toggleSort(sectionKey, 'subcategory')"
-                                    :class="getSortClass('subcategory')">{{ categoryMode ? 'Subcategory' : 'Category' }}</th>
+                                    :class="getSortClass('subcategory')">{{ categoryMode ? 'Alt Kategori' : 'Kategori' }}</th>
                                 <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
                                 <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
-                                    :class="getSortClass('count')">Count</th>
-                                <th>Tags</th>
+                                    :class="getSortClass('count')">Adet</th>
+                                <th>Etiketler</th>
                                 <th v-if="!categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
-                                    :class="getSortClass('count')">Count</th>
+                                    :class="getSortClass('count')">Adet</th>
                                 <th class="money" @click.stop="toggleSort(sectionKey, 'total')"
-                                    :class="getSortClass('total')">{{ creditMode ? 'Amount' : 'Total' }}</th>
+                                    :class="getSortClass('total')">{{ creditMode ? 'Tutar' : 'Toplam' }}</th>
                                 <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'total')"
                                     :class="getSortClass('total')">%</th>
                             </tr>
@@ -102,25 +102,25 @@ const MerchantSection = defineComponent({
                                                       @click.stop="togglePopup($event)">info
                                             <span class="match-info-popup" ref="popup">
                                                 <button class="popup-close" @click="closePopup($event)">&times;</button>
-                                                <div class="popup-header">Why This Matched</div>
+                                                <div class="popup-header">Neden Eşleşti</div>
                                                 <template v-if="item.matchInfo">
                                                     <div v-if="item.matchInfo.explanation" class="popup-explanation">{{ item.matchInfo.explanation }}</div>
                                                     <div class="popup-section">
-                                                        <div class="popup-section-header">Merchant Pattern</div>
+                                                        <div class="popup-section-header">Satıcı Deseni</div>
                                                         <div class="popup-code">{{ item.matchInfo.pattern }}</div>
                                                     </div>
                                                     <div class="popup-section">
-                                                        <div class="popup-section-header">Assigned To</div>
+                                                        <div class="popup-section-header">Atanan Değerler</div>
                                                         <div class="popup-row">
-                                                            <span class="popup-label">Merchant:</span>
+                                                            <span class="popup-label">Satıcı:</span>
                                                             <span class="popup-value">{{ item.matchInfo.assignedMerchant }}</span>
                                                         </div>
                                                         <div class="popup-row">
-                                                            <span class="popup-label">Category:</span>
+                                                            <span class="popup-label">Kategori:</span>
                                                             <span class="popup-value">{{ item.matchInfo.assignedCategory }} / {{ item.matchInfo.assignedSubcategory }}</span>
                                                         </div>
                                                         <div v-if="item.matchInfo.assignedTags && item.matchInfo.assignedTags.length" class="popup-row popup-tags-section">
-                                                            <span class="popup-label">Tags:</span>
+                                                            <span class="popup-label">Etiketler:</span>
                                                             <span class="popup-value">
                                                                 <template v-if="item.matchInfo.tagSources && Object.keys(item.matchInfo.tagSources).length">
                                                                     <div v-for="tag in item.matchInfo.assignedTags" :key="tag" class="popup-tag-item">
@@ -137,12 +137,12 @@ const MerchantSection = defineComponent({
                                                 </template>
                                                 <template v-if="item.viewInfo && item.viewInfo.filterExpr">
                                                     <div class="popup-section">
-                                                        <div class="popup-section-header">View Filter ({{ item.viewInfo.viewName }})</div>
+                                                        <div class="popup-section-header">Görünüm Filtresi ({{ item.viewInfo.viewName }})</div>
                                                         <div v-if="item.viewInfo.explanation" class="popup-explanation" style="margin-top: 0.3em;">{{ item.viewInfo.explanation }}</div>
                                                         <div class="popup-code">{{ item.viewInfo.filterExpr }}</div>
                                                     </div>
                                                 </template>
-                                                <div v-if="item.matchInfo" class="popup-source">From: {{ item.matchInfo.source === 'user' ? 'merchants.rules' : item.matchInfo.source }}</div>
+                                                <div v-if="item.matchInfo" class="popup-source">Kaynak: {{ item.matchInfo.source === 'user' ? 'merchants.rules' : item.matchInfo.source }}</div>
                                             </span>
                                         </span>
                                     </td>
@@ -171,7 +171,7 @@ const MerchantSection = defineComponent({
                                             <span class="txn-date">{{ formatDate(txn.date) }}</span>
                                             <span class="txn-desc"><span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span> <span v-html="highlightDescription(txn.description)"></span></span>
                                             <span class="txn-badges">
-                                                <span v-if="categoryMode && txn.amount < 0" class="txn-badge refund">REFUND</span>
+                                                <span v-if="categoryMode && txn.amount < 0" class="txn-badge refund">İADE</span>
                                                 <span v-if="txn.location && getLocationClass"
                                                       class="txn-location clickable"
                                                       :class="getLocationClass(txn.location)"
@@ -345,11 +345,11 @@ createApp({
         const spendingData = computed(() => window.spendingData || { sections: {}, year: 2025, numMonths: 12 });
 
         // Report title and subtitle
-        const title = computed(() => `${spendingData.value.year} Spending Report`);
+        const title = computed(() => `${spendingData.value.year} Harcama Raporu`);
         const subtitle = computed(() => {
             const data = spendingData.value;
             const sources = data.sources || [];
-            return sources.length > 0 ? `Data from ${sources.join(', ')}` : '';
+            return sources.length > 0 ? `Kaynak: ${sources.join(', ')}` : '';
         });
 
         // Core filtering - returns sections with filtered merchants and transactions
@@ -979,7 +979,7 @@ createApp({
                 matches.push({
                     type: 'text',
                     filterText: q,
-                    displayText: `Search transactions: "${q}"`,
+                    displayText: `İşlemlerde ara: "${q}"`,
                     id: `search:${q}`,
                     isTextSearch: true
                 });
@@ -1173,12 +1173,12 @@ createApp({
 
         // Formatting helpers
         function formatCurrency(amount) {
-            if (amount === undefined || amount === null) return '$0';
+            if (amount === undefined || amount === null) return '0 ₺';
             const rounded = Math.round(amount);
             if (rounded < 0) {
-                return '-$' + Math.abs(rounded).toLocaleString('en-US');
+                return '-' + Math.abs(rounded).toLocaleString('tr-TR') + ' ₺';
             }
-            return '$' + rounded.toLocaleString('en-US');
+            return rounded.toLocaleString('tr-TR') + ' ₺';
         }
 
         function formatDate(dateStr) {
@@ -1186,18 +1186,18 @@ createApp({
             // Handle MM/DD format from Python
             if (dateStr.match(/^\d{1,2}\/\d{1,2}$/)) {
                 const [month, day] = dateStr.split('/');
-                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                return `${months[parseInt(month)-1]} ${parseInt(day)}`;
+                const months = ['Oca','\u015eub','Mar','Nis','May','Haz','Tem','A\u011fu','Eyl','Eki','Kas','Ara'];
+                return `${parseInt(day)} ${months[parseInt(month)-1]}`;
             }
             // Handle YYYY-MM-DD format
             const d = new Date(dateStr + 'T12:00:00');
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return d.toLocaleDateString('tr-TR', { month: 'short', day: 'numeric' });
         }
 
         function formatMonthLabel(key) {
             if (!key) return '';
             const [year, month] = key.split('-');
-            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const months = ['Oca','\u015eub','Mar','Nis','May','Haz','Tem','A\u011fu','Eyl','Eki','Kas','Ara'];
             return `${months[parseInt(month)-1]} ${year}`;
         }
 
@@ -1345,7 +1345,7 @@ createApp({
                     data: {
                         labels,
                         datasets: [{
-                            label: 'Monthly Spending',
+                            label: 'Aylık Harcama',
                             data: [],
                             backgroundColor: '#4facfe',
                             borderRadius: 4
@@ -1362,7 +1362,7 @@ createApp({
                                 beginAtZero: true,
                                 grace: '5%',
                                 ticks: {
-                                    callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + v.toFixed(0)
+                                    callback: v => v >= 1000 ? (v/1000).toFixed(0) + 'k ₺' : v.toFixed(0) + ' ₺'
                                 }
                             }
                         },
@@ -1446,7 +1446,7 @@ createApp({
                                 beginAtZero: true,
                                 grace: '5%',
                                 ticks: {
-                                    callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + v.toFixed(0)
+                                    callback: v => v >= 1000 ? (v/1000).toFixed(0) + 'k ₺' : v.toFixed(0) + ' ₺'
                                 }
                             }
                         },
