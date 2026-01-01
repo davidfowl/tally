@@ -13,6 +13,11 @@ title: "Spending Analysis"
 # currency_format: "€{amount}"      # Euro (prefix)
 # currency_format: "£{amount}"      # British Pound (prefix)
 
+# Language for the HTML report UI (default: "en")
+# Supported: "en" (English), "tr" (Turkish)
+# language: "en"
+# language: "tr"
+
 # Data sources - list of transaction files to process
 # Paths are relative to the parent of the config directory
 data_sources:
