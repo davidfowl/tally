@@ -661,7 +661,7 @@ field.memo = trim(field.memo)</code></pre>
         
         <h3>Weekday vs Weekend Tagging</h3>
         <p>Tag the same merchant differently based on day of week (e.g., work lunches Monday-Friday):</p>
-        <pre><code><span class="highlight">[Starbucks - Work]</span>
+        <pre><code><span class="highlight">[Starbucks - Workdays]</span>
 <span class="keyword">match:</span> contains(<span class="string">"Starbucks"</span>) and weekday &lt; 5  <span class="comment"># Monday-Friday (0-4)</span>
 <span class="keyword">category:</span> Food
 <span class="keyword">subcategory:</span> Coffee

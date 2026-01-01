@@ -462,16 +462,16 @@ STARTER_MERCHANTS = '''# Tally Merchant Rules
 # === Weekday-based tagging ===
 # Tag weekday vs weekend transactions differently
 
-# [Work Lunch - Weekday]
-# match: contains("CAFE") and weekday < 5  # Monday-Friday (0-4)
+# [Starbucks - Workdays]
+# match: contains("Starbucks") and weekday < 5  # Monday-Friday (0-4)
 # category: Food
-# subcategory: Cafe
+# subcategory: Coffee
 # tags: work
 
-# [Cafe - Weekend]
-# match: contains("CAFE") and weekday >= 5  # Saturday-Sunday (5-6)
+# [Starbucks]
+# match: contains("Starbucks") and weekday >= 5  # Saturday-Sunday (5-6)
 # category: Food
-# subcategory: Cafe
+# subcategory: Coffee
 
 # === Add your rules below ===
 
