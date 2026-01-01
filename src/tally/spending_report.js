@@ -119,9 +119,19 @@ const MerchantSection = defineComponent({
                                                             <span class="popup-label">Category:</span>
                                                             <span class="popup-value">{{ item.matchInfo.assignedCategory }} / {{ item.matchInfo.assignedSubcategory }}</span>
                                                         </div>
-                                                        <div v-if="item.matchInfo.assignedTags && item.matchInfo.assignedTags.length" class="popup-row">
+                                                        <div v-if="item.matchInfo.assignedTags && item.matchInfo.assignedTags.length" class="popup-row popup-tags-section">
                                                             <span class="popup-label">Tags:</span>
-                                                            <span class="popup-value">{{ item.matchInfo.assignedTags.join(', ') }}</span>
+                                                            <span class="popup-value">
+                                                                <template v-if="item.matchInfo.tagSources && Object.keys(item.matchInfo.tagSources).length">
+                                                                    <div v-for="tag in item.matchInfo.assignedTags" :key="tag" class="popup-tag-item">
+                                                                        <span class="popup-tag-name">{{ tag }}</span>
+                                                                        <span v-if="item.matchInfo.tagSources[tag]" class="popup-tag-source">
+                                                                            from [{{ item.matchInfo.tagSources[tag].rule }}]
+                                                                        </span>
+                                                                    </div>
+                                                                </template>
+                                                                <template v-else>{{ item.matchInfo.assignedTags.join(', ') }}</template>
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 </template>

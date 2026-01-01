@@ -152,15 +152,18 @@ class TransactionContext:
     - day: Day of month 1-31
     - field: Custom fields captured from CSV format string (dict)
     - source: Data source name (string)
+    - location: Transaction location (string)
     """
 
     __slots__ = ('description', 'amount', 'date', 'variables', 'field', 'source',
-                 'month', 'year', 'day')
+                 'month', 'year', 'day', 'location')
 
     # Class-level function name mapping (looked up dynamically)
     _FUNCTION_NAMES: Set[str] = {
         'contains', 'regex', 'normalized', 'anyof', 'startswith', 'fuzzy',
-        'abs', 'round', 'extract', 'split', 'substring', 'trim'
+        'abs', 'round', 'extract', 'split', 'substring', 'trim',
+        # String mutation functions (for field transforms)
+        'regex_replace', 'uppercase', 'lowercase', 'strip_prefix', 'strip_suffix'
     }
 
     def __init__(
@@ -171,6 +174,7 @@ class TransactionContext:
         variables: Optional[Dict[str, Any]] = None,
         field: Optional[Dict[str, str]] = None,
         source: Optional[str] = None,
+        location: Optional[str] = None,
     ):
         self.description = description
         self.amount = amount  # Preserve sign - use abs(amount) in rules if needed
@@ -178,6 +182,7 @@ class TransactionContext:
         self.variables = variables or {}
         self.field = field  # Custom captures from CSV format string (None if not available)
         self.source = source or ""  # Data source name (e.g., "Amex", "Chase")
+        self.location = location or ""  # Transaction location (e.g., "Seattle, WA")
 
         # Extract date components
         if date:
@@ -408,6 +413,64 @@ class TransactionContext:
         else:
             raise ExpressionError("trim() requires 0 or 1 arguments: trim() or trim(text)")
 
+    def _fn_regex_replace(self, *args) -> str:
+        """Replace regex pattern in text.
+
+        Usage:
+            regex_replace(text, pattern, replacement)
+            regex_replace(field.description, "^APLPAY\\s+", "")
+        """
+        if len(args) != 3:
+            raise ExpressionError("regex_replace() requires 3 arguments: regex_replace(text, pattern, replacement)")
+        text, pattern, replacement = str(args[0]), str(args[1]), str(args[2])
+        return re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    def _fn_uppercase(self, *args) -> str:
+        """Convert text to uppercase.
+
+        Usage:
+            uppercase(field.memo)
+        """
+        if len(args) != 1:
+            raise ExpressionError("uppercase() requires 1 argument: uppercase(text)")
+        return str(args[0]).upper()
+
+    def _fn_lowercase(self, *args) -> str:
+        """Convert text to lowercase.
+
+        Usage:
+            lowercase(field.memo)
+        """
+        if len(args) != 1:
+            raise ExpressionError("lowercase() requires 1 argument: lowercase(text)")
+        return str(args[0]).lower()
+
+    def _fn_strip_prefix(self, *args) -> str:
+        """Remove prefix from text if present.
+
+        Usage:
+            strip_prefix(field.description, "APLPAY ")
+        """
+        if len(args) != 2:
+            raise ExpressionError("strip_prefix() requires 2 arguments: strip_prefix(text, prefix)")
+        text, prefix = str(args[0]), str(args[1])
+        if text.upper().startswith(prefix.upper()):
+            return text[len(prefix):]
+        return text
+
+    def _fn_strip_suffix(self, *args) -> str:
+        """Remove suffix from text if present.
+
+        Usage:
+            strip_suffix(field.description, " DES:XXX")
+        """
+        if len(args) != 2:
+            raise ExpressionError("strip_suffix() requires 2 arguments: strip_suffix(text, suffix)")
+        text, suffix = str(args[0]), str(args[1])
+        if text.upper().endswith(suffix.upper()):
+            return text[:-len(suffix)]
+        return text
+
     @classmethod
     def from_transaction(cls, txn: Dict, variables: Optional[Dict[str, Any]] = None) -> 'TransactionContext':
         """Create context from a transaction dictionary."""
@@ -418,6 +481,7 @@ class TransactionContext:
             variables=variables,
             field=txn.get('field'),
             source=txn.get('source'),
+            location=txn.get('location'),
         )
 
 
@@ -944,22 +1008,35 @@ class TransactionEvaluator:
         return True
 
     def _eval_Attribute(self, node: ast.Attribute) -> Any:
-        """Handle attribute access like field.txn_type."""
+        """Handle attribute access like field.txn_type or field.description."""
         # Handle field.name access
         if isinstance(node.value, ast.Name) and node.value.id.lower() == 'field':
-            field_name = node.attr
-            if self.ctx.field is None:
-                raise ExpressionError(
-                    f"Unknown field: field.{field_name}. "
-                    f"No custom fields captured from CSV format string."
-                )
-            if field_name not in self.ctx.field:
-                available = ', '.join(sorted(self.ctx.field.keys())) if self.ctx.field else 'none'
-                raise ExpressionError(
-                    f"Unknown field: field.{field_name}. "
-                    f"Available fields: {available}"
-                )
-            return self.ctx.field[field_name]
+            field_name = node.attr.lower()
+
+            # Built-in fields
+            if field_name == 'description':
+                return self.ctx.description
+            elif field_name == 'amount':
+                return self.ctx.amount
+            elif field_name == 'date':
+                return self.ctx.date
+            elif field_name == 'source':
+                return getattr(self.ctx, 'source', '')
+            elif field_name == 'location':
+                return getattr(self.ctx, 'location', '')
+
+            # Custom fields from CSV
+            if self.ctx.field is not None and field_name in self.ctx.field:
+                return self.ctx.field[field_name]
+
+            # Field not found
+            available = ['description', 'amount', 'date', 'source', 'location']
+            if self.ctx.field:
+                available.extend(sorted(self.ctx.field.keys()))
+            raise ExpressionError(
+                f"Unknown field: field.{node.attr}. "
+                f"Available fields: {', '.join(available)}"
+            )
 
         raise ExpressionError(f"Unsupported attribute access: {ast.dump(node)}")
 

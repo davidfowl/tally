@@ -158,7 +158,7 @@ def is_travel_location(location, home_locations):
     return False
 
 
-def parse_amex(filepath, rules, home_locations=None, cleaning_patterns=None):
+def parse_amex(filepath, rules, home_locations=None):
     """Parse AMEX CSV file and return list of transactions.
 
     DEPRECATED: Use format strings instead. This parser will be removed in a future release.
@@ -177,7 +177,7 @@ def parse_amex(filepath, rules, home_locations=None, cleaning_patterns=None):
                 date = datetime.strptime(row['Date'], '%m/%d/%Y')
                 merchant, category, subcategory, match_info = normalize_merchant(
                     row['Description'], rules, amount=amount, txn_date=date.date(),
-                    cleaning_patterns=cleaning_patterns, data_source='AMEX',
+                    data_source='AMEX',
                 )
                 location = extract_location(row['Description'])
 
@@ -201,7 +201,7 @@ def parse_amex(filepath, rules, home_locations=None, cleaning_patterns=None):
     return transactions
 
 
-def parse_boa(filepath, rules, home_locations=None, cleaning_patterns=None):
+def parse_boa(filepath, rules, home_locations=None):
     """Parse BOA statement file and return list of transactions.
 
     DEPRECATED: Use format strings instead. This parser will be removed in a future release.
@@ -229,7 +229,7 @@ def parse_boa(filepath, rules, home_locations=None, cleaning_patterns=None):
 
                 merchant, category, subcategory, match_info = normalize_merchant(
                     description, rules, amount=amount, txn_date=date.date(),
-                    cleaning_patterns=cleaning_patterns, data_source='BOA',
+                    data_source='BOA',
                 )
                 location = extract_location(description)
 
@@ -294,7 +294,7 @@ def _iter_rows_with_delimiter(filepath, delimiter, has_header):
 
 
 def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_name='CSV',
-                      decimal_separator='.', cleaning_patterns=None):
+                      decimal_separator='.', transforms=None):
     """
     Parse a CSV file using a custom format specification.
 
@@ -305,7 +305,7 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
         home_locations: Set of location codes considered "home"
         source_name: Name to use for transaction source (default: 'CSV')
         decimal_separator: Character used as decimal separator ('.' or ',')
-        cleaning_patterns: Optional list of regex patterns to strip from descriptions
+        transforms: Optional list of (field_path, expression) tuples for field transforms
 
     Supported delimiters (via format_spec.delimiter):
         - None or ',': Standard CSV (comma-delimited)
@@ -397,12 +397,13 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
             # Normalize merchant
             merchant, category, subcategory, match_info = normalize_merchant(
                 description, rules, amount=amount, txn_date=date.date(),
-                cleaning_patterns=cleaning_patterns,
                 field=captures if captures else None,
                 data_source=format_spec.source_name or source_name,
+                transforms=transforms,
+                location=location,
             )
 
-            transactions.append({
+            txn = {
                 'date': date,
                 'raw_description': description,
                 'description': merchant,
@@ -418,7 +419,12 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
                 'tags': match_info.get('tags', []) if match_info else [],
                 'excluded': None,  # No auto-exclusion; use rules to categorize
                 'field': captures if captures else None,  # Custom CSV captures for rule expressions
-            })
+            }
+            # Add _raw_* keys from transforms (e.g., _raw_description)
+            if match_info and match_info.get('raw_values'):
+                for key, value in match_info['raw_values'].items():
+                    txn[key] = value
+            transactions.append(txn)
 
         except (ValueError, IndexError):
             # Skip problematic rows
@@ -1456,6 +1462,7 @@ def write_summary_file_vue(stats, filepath, year=2025, home_locations=None, curr
                     'assignedCategory': data.get('category', ''),
                     'assignedSubcategory': data.get('subcategory', ''),
                     'assignedTags': sorted(match_info.get('tags', [])),
+                    'tagSources': match_info.get('tag_sources', {}),
                 }
 
             merchants[merchant_id] = {

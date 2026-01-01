@@ -87,6 +87,7 @@ class MerchantEngine:
     def __init__(self):
         self.rules: List[MerchantRule] = []
         self.variables: Dict[str, Any] = {}
+        self.transforms: List[Tuple[str, str]] = []  # [(field_path, expression), ...]
         self._compiled_exprs: Dict[str, Any] = {}  # Cache of parsed ASTs
 
     def load_file(self, filepath: Path) -> None:
@@ -98,6 +99,7 @@ class MerchantEngine:
         """Parse .rules file content."""
         self.rules = []
         self.variables = {}
+        self.transforms = []
         self._compiled_exprs = {}
 
         lines = content.split('\n')
@@ -125,19 +127,23 @@ class MerchantEngine:
                 rule_start_line = line_num
                 continue
 
-            # Variable assignment: name = expression
+            # Variable or transform assignment: name = expression
             if '=' in stripped and current_rule is None:
-                # Check if it's not inside a rule (i.e., a top-level variable)
-                match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$', stripped)
+                # Check if it's not inside a rule (i.e., a top-level assignment)
+                # Match field.name or regular variable name
+                match = re.match(r'^(field\.[a-zA-Z_][a-zA-Z0-9_]*|[a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$', stripped)
                 if match:
-                    var_name, var_expr = match.groups()
+                    lhs, rhs = match.groups()
                     try:
-                        # Parse and pre-evaluate if it's a simple expression
-                        # For now, store the expression string - will evaluate at match time
-                        self.variables[var_name.lower()] = var_expr
+                        if lhs.startswith('field.'):
+                            # Field transform: field.description = regex_replace(...)
+                            self.transforms.append((lhs, rhs))
+                        else:
+                            # Variable definition: is_large = amount > 500
+                            self.variables[lhs.lower()] = rhs
                     except Exception as e:
                         raise MerchantParseError(
-                            f"Invalid variable expression: {e}", line_num, line
+                            f"Invalid expression: {e}", line_num, line
                         )
                     continue
 

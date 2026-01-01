@@ -84,7 +84,7 @@ from ._version import (
 from .config_loader import load_config
 
 BANNER = ''
-from .merchant_utils import get_all_rules, diagnose_rules, explain_description, load_merchant_rules, get_tag_only_rules, apply_tag_rules
+from .merchant_utils import get_all_rules, diagnose_rules, explain_description, load_merchant_rules, get_tag_only_rules, apply_tag_rules, get_transforms
 from .analyzer import (
     parse_amex,
     parse_boa,
@@ -372,17 +372,6 @@ merchants_file: config/merchants.rules
 # travel_labels:
 #   HI: Hawaii
 #   GB: United Kingdom
-
-# Description cleaning patterns (regex)
-# Strip payment processor prefixes/suffixes before matching merchant rules
-# This simplifies your merchant patterns - no need to handle every variation
-# description_cleaning:
-#   - "^APLPAY\\\\s+"           # Apple Pay prefix
-#   - "^SQ\\\\s*\\\\*"          # Square prefix
-#   - "^TST\\\\*\\\\s*"         # Toast POS prefix
-#   - "^PP\\\\s*\\\\*"          # PayPal prefix
-#   - "\\\\s+DES:.*$"           # Bank of America DES suffix
-#   - "\\\\s+ID:.*$"            # Bank of America ID suffix
 '''
 
 STARTER_MERCHANTS = '''# Tally Merchant Rules
@@ -426,6 +415,11 @@ STARTER_MERCHANTS = '''# Tally Merchant Rules
 #   category: Finance
 #   subcategory: Payment
 #   tags: transfer
+
+# === Field Transforms (optional) ===
+# Strip payment processor prefixes before matching:
+# field.description = regex_replace(field.description, "^APLPAY\\\\s+", "")
+# field.description = regex_replace(field.description, "^SQ\\\\s*\\\\*", "")
 
 # === Variables (optional) ===
 # is_large = amount > 500
@@ -814,6 +808,23 @@ output/
     return files_created, files_skipped
 
 
+def _check_deprecated_description_cleaning(config):
+    """Check for deprecated description_cleaning setting and fail with migration instructions."""
+    if config.get('description_cleaning'):
+        patterns = config['description_cleaning']
+        print("Error: 'description_cleaning' setting has been removed.", file=sys.stderr)
+        print("\nMigrate to field transforms in merchants.rules:", file=sys.stderr)
+        print("", file=sys.stderr)
+        for pattern in patterns[:3]:  # Show first 3 examples
+            # Escape the pattern for the regex_replace function
+            escaped = pattern.replace('\\', '\\\\').replace('"', '\\"')
+            print(f'  field.description = regex_replace(field.description, "{escaped}", "")', file=sys.stderr)
+        if len(patterns) > 3:
+            print(f"  # ... and {len(patterns) - 3} more patterns", file=sys.stderr)
+        print("\nAdd these lines at the top of your merchants.rules file.", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_init(args):
     """Handle the 'init' subcommand."""
     import shutil
@@ -985,11 +996,14 @@ def cmd_run(args):
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Check for deprecated settings
+    _check_deprecated_description_cleaning(config)
+
     year = config.get('year', 2025)
     home_locations = config.get('home_locations', set())
     travel_labels = config.get('travel_labels', {})
     data_sources = config.get('data_sources', [])
-    cleaning_patterns = config.get('description_cleaning', [])
+    transforms = get_transforms(config.get('_merchants_file'))
 
     # Check for data sources early before printing anything
     if not data_sources:
@@ -1033,16 +1047,16 @@ def cmd_run(args):
         try:
             if parser_type == 'amex':
                 _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
+                txns = parse_amex(filepath, rules, home_locations)
             elif parser_type == 'boa':
                 _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
+                txns = parse_boa(filepath, rules, home_locations)
             elif parser_type == 'generic' and format_spec:
                 txns = parse_generic_csv(filepath, format_spec, rules,
                                          home_locations,
                                          source_name=source.get('name', 'CSV'),
                                          decimal_separator=source.get('decimal_separator', '.'),
-                                         cleaning_patterns=cleaning_patterns)
+                                         transforms=transforms)
             else:
                 if not args.quiet:
                     print(f"  {source['name']}: Unknown parser type '{parser_type}'")
@@ -1208,9 +1222,12 @@ def cmd_discover(args):
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Check for deprecated settings
+    _check_deprecated_description_cleaning(config)
+
     home_locations = config.get('home_locations', set())
     data_sources = config.get('data_sources', [])
-    cleaning_patterns = config.get('description_cleaning', [])
+    transforms = get_transforms(config.get('_merchants_file'))
 
     if not data_sources:
         print("Error: No data sources configured", file=sys.stderr)
@@ -1248,16 +1265,16 @@ def cmd_discover(args):
         try:
             if parser_type == 'amex':
                 _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
+                txns = parse_amex(filepath, rules, home_locations)
             elif parser_type == 'boa':
                 _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
+                txns = parse_boa(filepath, rules, home_locations)
             elif parser_type == 'generic' and format_spec:
                 txns = parse_generic_csv(filepath, format_spec, rules,
                                          home_locations,
                                          source_name=source.get('name', 'CSV'),
                                          decimal_separator=source.get('decimal_separator', '.'),
-                                         cleaning_patterns=cleaning_patterns)
+                                         transforms=transforms)
             else:
                 continue
         except Exception:
@@ -1910,13 +1927,16 @@ def cmd_diag(args):
             from .analyzer import format_currency
             print(f"  Currency format: {currency_fmt}")
             print(f"    Example: {format_currency(1234, currency_fmt)}")
-            cleaning = config.get('description_cleaning', [])
-            if cleaning:
-                print(f"  Description cleaning: {len(cleaning)} pattern(s)")
-                for pattern in cleaning:
-                    print(f"    - {pattern}")
+            # Show field transforms from merchants.rules
+            transforms = get_transforms(config.get('_merchants_file'))
+            if transforms:
+                print(f"  Field transforms: {len(transforms)} transform(s)")
+                for field_path, expr in transforms[:5]:
+                    print(f"    - {field_path} = {expr}")
+                if len(transforms) > 5:
+                    print(f"    ... and {len(transforms) - 5} more")
             else:
-                print(f"  Description cleaning: none configured")
+                print(f"  Field transforms: none configured")
         except Exception as e:
             print(f"  Loaded successfully: No")
             print(f"  Error: {e}")
@@ -2385,14 +2405,13 @@ def cmd_workflow(args):
     for cmd, desc in cmds:
         print(f"    {C.GREEN}{cmd:<24}{C.RESET} {C.DIM}{desc}{C.RESET}")
 
-    section("Description Cleaning")
+    section("Field Transforms")
     print(f"    {C.DIM}Strip payment processor prefixes before matching rules.{C.RESET}")
-    print(f"    {C.DIM}Add to {C.RESET}{C.CYAN}{path_settings}{C.RESET}{C.DIM}:{C.RESET}")
+    print(f"    {C.DIM}Add to the top of {C.RESET}{C.CYAN}{path_merchants}{C.RESET}{C.DIM}:{C.RESET}")
     print()
-    print(f"    {C.DIM}description_cleaning:")
-    print(f"      - \"^APLPAY\\\\s+\"       # Apple Pay")
-    print(f"      - \"^SQ\\\\s*\\\\*\"       # Square")
-    print(f"      - \"\\\\s+DES:.*$\"      # BOA suffix{C.RESET}")
+    print(f"    {C.DIM}field.description = regex_replace(field.description, \"^APLPAY\\\\s+\", \"\")  # Apple Pay")
+    print(f"    field.description = regex_replace(field.description, \"^SQ\\\\s*\\\\*\", \"\")   # Square")
+    print(f"    field.description = regex_replace(field.description, \"\\\\s+DES:.*$\", \"\")  # BOA suffix{C.RESET}")
 
     section("Rule Syntax Reference")
     print(f"    Run {C.GREEN}tally reference{C.RESET} for complete syntax documentation:")
@@ -2456,7 +2475,8 @@ def cmd_workflow(args):
     print()
     print(f"    {C.BOLD}9. Strip prefixes, don't catch them{C.RESET}")
     print(f"       {C.DIM}BAD:  [ApplePay] match: startswith(\"APLPAY\")  # hides real merchants{C.RESET}")
-    print(f"       {C.DIM}GOOD: Use description_cleaning to strip the prefix{C.RESET}")
+    print(f"       {C.DIM}GOOD: Use field transforms at top of merchants.rules:{C.RESET}")
+    print(f"       {C.DIM}      field.description = regex_replace(field.description, \"^APLPAY\\\\s+\", \"\"){C.RESET}")
     print(f"       {C.DIM}      \"APLPAY STARBUCKS\" → \"STARBUCKS\" → matches correctly{C.RESET}")
     print()
 
@@ -2478,7 +2498,7 @@ def cmd_workflow(args):
     print(f"    {C.DIM}• Amounts inverted? Try {{-amount}} or {{+amount}} in format{C.RESET}")
     print(f"    {C.DIM}• Rule not matching? Use{C.RESET} {C.GREEN}tally explain \"RAW DESC\"{C.RESET}")
     print(f"    {C.DIM}• Too many matches? Use startswith() or regex word boundaries{C.RESET}")
-    print(f"    {C.DIM}• Catch-all hiding merchants? Use description_cleaning instead{C.RESET}")
+    print(f"    {C.DIM}• Catch-all hiding merchants? Use field transforms instead{C.RESET}")
     print()
 
 
@@ -2631,6 +2651,42 @@ def cmd_reference(args):
   {C.DIM}[Holiday Splurge]{C.RESET}
   {C.DIM}match: is_large and is_holiday{C.RESET}
   {C.DIM}category: Shopping{C.RESET}
+""")
+
+        section("Field Transforms")
+        print(f"""
+  Mutate field values before matching. Place at the top of your file:
+
+  {C.CYAN}field.description = regex_replace(field.description, "^APLPAY\\\\s+", ""){C.RESET}
+  {C.CYAN}field.description = regex_replace(field.description, "^SQ\\\\*\\\\s*", ""){C.RESET}
+  {C.CYAN}field.memo = trim(field.memo){C.RESET}
+
+  {C.BOLD}Transform Functions:{C.RESET}
+""")
+        transform_funcs = [
+            ('regex_replace(text, pattern, repl)', 'Regex substitution (replaces all matches)',
+             'regex_replace(field.description, "^APLPAY\\\\s+", "")', '"APLPAY STARBUCKS" → "STARBUCKS"'),
+            ('uppercase(text)', 'Convert to uppercase',
+             'uppercase(field.description)', '"Starbucks" → "STARBUCKS"'),
+            ('lowercase(text)', 'Convert to lowercase',
+             'lowercase(field.description)', '"STARBUCKS" → "starbucks"'),
+            ('strip_prefix(text, prefix)', 'Remove prefix (case-insensitive)',
+             'strip_prefix(field.description, "SQ*")', '"SQ*COFFEE" → "COFFEE"'),
+            ('strip_suffix(text, suffix)', 'Remove suffix (case-insensitive)',
+             'strip_suffix(field.description, " DES:123")', '"STORE DES:123" → "STORE"'),
+            ('trim(text)', 'Remove leading/trailing whitespace',
+             'trim(field.memo)', '"  text  " → "text"'),
+        ]
+        for func, desc, example, note in transform_funcs:
+            print(f"  {C.GREEN}{func}{C.RESET}")
+            print(f"    {desc}")
+            print(f"    {C.DIM}Example: {example} → {note}{C.RESET}")
+            print()
+
+        print(f"""  {C.BOLD}Built-in fields:{C.RESET} {C.GREEN}field.description{C.RESET}, {C.GREEN}field.amount{C.RESET}, {C.GREEN}field.date{C.RESET}, {C.GREEN}field.source{C.RESET}
+  {C.BOLD}Custom fields:{C.RESET} Any field captured from CSV (e.g., {C.GREEN}field.memo{C.RESET})
+
+  {C.DIM}Original values are preserved in _raw_<field> (e.g., _raw_description){C.RESET}
 """)
 
         section("Special Tags")
@@ -2997,9 +3053,12 @@ def cmd_explain(args):
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Check for deprecated settings
+    _check_deprecated_description_cleaning(config)
+
     home_locations = config.get('home_locations', set())
     data_sources = config.get('data_sources', [])
-    cleaning_patterns = config.get('description_cleaning', [])
+    transforms = get_transforms(config.get('_merchants_file'))
 
     if not data_sources:
         print("Error: No data sources configured", file=sys.stderr)
@@ -3028,16 +3087,16 @@ def cmd_explain(args):
         try:
             if parser_type == 'amex':
                 _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations, cleaning_patterns)
+                txns = parse_amex(filepath, rules, home_locations)
             elif parser_type == 'boa':
                 _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations, cleaning_patterns)
+                txns = parse_boa(filepath, rules, home_locations)
             elif parser_type == 'generic' and format_spec:
                 txns = parse_generic_csv(filepath, format_spec, rules,
                                          home_locations,
                                          source_name=source.get('name', 'CSV'),
                                          decimal_separator=source.get('decimal_separator', '.'),
-                                         cleaning_patterns=cleaning_patterns)
+                                         transforms=transforms)
             else:
                 continue
         except Exception:
@@ -3130,7 +3189,7 @@ def cmd_explain(args):
 
                 # Try treating query as a raw description for rule matching
                 amount = getattr(args, 'amount', None)
-                trace = explain_description(merchant_query, rules, amount=amount, cleaning_patterns=cleaning_patterns)
+                trace = explain_description(merchant_query, rules, amount=amount, transforms=transforms)
                 if not trace['is_unknown']:
                     # It matched a rule - show the explanation
                     found_any = True
@@ -3322,8 +3381,8 @@ def _print_description_explanation(query, trace, output_format, verbose):
     elif output_format == 'markdown':
         print(f"## Description Trace: `{query}`")
         print()
-        if trace['cleaned'] and trace['cleaned'] != trace['original']:
-            print(f"**Cleaned:** `{trace['cleaned']}`")
+        if trace['transformed'] and trace['transformed'] != trace['original']:
+            print(f"**Transformed:** `{trace['transformed']}`")
             print()
 
         if trace['is_unknown']:
@@ -3354,8 +3413,8 @@ def _print_description_explanation(query, trace, output_format, verbose):
     else:
         # Text format
         print(f"Description: {query}")
-        if trace['cleaned'] and trace['cleaned'] != trace['original']:
-            print(f"  Cleaned: {trace['cleaned']}")
+        if trace['transformed'] and trace['transformed'] != trace['original']:
+            print(f"  Transformed: {trace['transformed']}")
 
         print()
         if trace['is_unknown']:

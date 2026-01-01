@@ -481,20 +481,20 @@ class TestFieldAccess:
         }
         with pytest.raises(ExpressionError, match="Unknown field: field.missing"):
             matches_transaction('field.missing == "X"', txn)
-        # Also verify it shows available fields
-        with pytest.raises(ExpressionError, match="Available fields: txn_type"):
+        # Also verify it shows available fields (includes built-ins + custom fields)
+        with pytest.raises(ExpressionError, match="txn_type"):
             matches_transaction('field.missing == "X"', txn)
 
     def test_field_access_no_field_dict_raises_error(self):
-        """Accessing field when no field dict exists raises error."""
+        """Accessing non-builtin field when no field dict exists raises error."""
         txn = {'description': 'TEST', 'amount': 100.00}
-        with pytest.raises(ExpressionError, match="No custom fields captured"):
+        with pytest.raises(ExpressionError, match="Unknown field: field.txn_type"):
             matches_transaction('field.txn_type == "WIRE"', txn)
 
     def test_field_access_empty_field_dict(self):
-        """Empty field dict still raises error for any access."""
+        """Empty field dict still raises error for non-builtin field access."""
         txn = {'description': 'TEST', 'amount': 100.00, 'field': {}}
-        with pytest.raises(ExpressionError, match="Available fields: none"):
+        with pytest.raises(ExpressionError, match="Unknown field: field.code"):
             matches_transaction('field.code == "X"', txn)
 
     def test_field_access_with_and_or(self):
@@ -1045,3 +1045,293 @@ class TestSourceVariable:
         txn = {'description': 'TEST', 'amount': 100.00, 'source': 'Chase'}
         assert matches_transaction('source == "Amex" or source == "Chase"', txn)
         assert not matches_transaction('source == "Amex" or source == "Discover"', txn)
+
+
+class TestBuiltinFieldAccess:
+    """Tests for accessing built-in fields with field.* syntax."""
+
+    def test_field_description_access(self):
+        """field.description returns the description."""
+        txn = {'description': 'STARBUCKS COFFEE', 'amount': 5.50}
+        assert evaluate_transaction('field.description', txn) == 'STARBUCKS COFFEE'
+
+    def test_field_amount_access(self):
+        """field.amount returns the amount."""
+        txn = {'description': 'TEST', 'amount': 123.45}
+        assert evaluate_transaction('field.amount', txn) == 123.45
+
+    def test_field_date_access(self):
+        """field.date returns the date."""
+        from datetime import date
+        txn = {'description': 'TEST', 'amount': 100.00, 'date': date(2025, 1, 15)}
+        result = evaluate_transaction('field.date', txn)
+        assert result == date(2025, 1, 15)
+
+    def test_field_source_access(self):
+        """field.source returns the source."""
+        txn = {'description': 'TEST', 'amount': 100.00, 'source': 'AmexGold'}
+        assert evaluate_transaction('field.source', txn) == 'AmexGold'
+
+    def test_field_source_empty_when_missing(self):
+        """field.source returns empty string when not set."""
+        txn = {'description': 'TEST', 'amount': 100.00}
+        assert evaluate_transaction('field.source', txn) == ''
+
+    def test_field_description_in_contains(self):
+        """field.description works with contains()."""
+        txn = {'description': 'APLPAY STARBUCKS', 'amount': 5.50}
+        assert matches_transaction('contains(field.description, "STARBUCKS")', txn)
+        assert matches_transaction('contains(field.description, "APLPAY")', txn)
+
+    def test_field_amount_in_comparison(self):
+        """field.amount works in comparisons."""
+        txn = {'description': 'TEST', 'amount': 150.00}
+        assert matches_transaction('field.amount > 100', txn)
+        assert matches_transaction('field.amount < 200', txn)
+        assert not matches_transaction('field.amount > 200', txn)
+
+    def test_builtin_and_custom_field_together(self):
+        """Built-in and custom fields work together."""
+        txn = {
+            'description': 'WIRE TRANSFER',
+            'amount': 1000.00,
+            'source': 'Chase',
+            'field': {'txn_type': 'WIRE'}
+        }
+        assert matches_transaction('field.source == "Chase" and field.txn_type == "WIRE"', txn)
+        assert matches_transaction('field.amount > 500 and field.txn_type == "WIRE"', txn)
+
+
+class TestRegexReplaceFunction:
+    """Tests for the regex_replace() function."""
+
+    def test_regex_replace_basic(self):
+        """regex_replace removes matched pattern."""
+        txn = {'description': 'APLPAY STARBUCKS', 'amount': 5.50}
+        result = evaluate_transaction('regex_replace(field.description, "^APLPAY\\\\s+", "")', txn)
+        assert result == 'STARBUCKS'
+
+    def test_regex_replace_with_replacement(self):
+        """regex_replace can replace with new text."""
+        txn = {'description': 'UBER TRIP', 'amount': 25.00}
+        result = evaluate_transaction('regex_replace(field.description, "UBER", "LYFT")', txn)
+        assert result == 'LYFT TRIP'
+
+    def test_regex_replace_multiple_matches(self):
+        """regex_replace replaces all matches."""
+        txn = {'description': 'A B A C A', 'amount': 100.00}
+        result = evaluate_transaction('regex_replace(field.description, "A", "X")', txn)
+        assert result == 'X B X C X'
+
+    def test_regex_replace_no_match(self):
+        """regex_replace returns original when no match."""
+        txn = {'description': 'STARBUCKS', 'amount': 5.50}
+        result = evaluate_transaction('regex_replace(field.description, "^APLPAY\\\\s+", "")', txn)
+        assert result == 'STARBUCKS'
+
+    def test_regex_replace_complex_pattern(self):
+        """regex_replace works with complex regex patterns."""
+        txn = {'description': 'TEST DES:1234567 INFO', 'amount': 100.00}
+        result = evaluate_transaction('regex_replace(field.description, "\\\\s+DES:\\\\d+", "")', txn)
+        assert result == 'TEST INFO'
+
+    def test_regex_replace_case_insensitive(self):
+        """regex_replace is case insensitive by default."""
+        txn = {'description': 'ApLpAy COFFEE', 'amount': 5.50}
+        # The pattern should match case-insensitively
+        result = evaluate_transaction('regex_replace(field.description, "(?i)aplpay\\\\s+", "")', txn)
+        assert result == 'COFFEE'
+
+    def test_regex_replace_on_custom_field(self):
+        """regex_replace works on custom fields."""
+        txn = {'description': 'TEST', 'amount': 100.00, 'field': {'memo': 'REF:12345 NOTE'}}
+        result = evaluate_transaction('regex_replace(field.memo, "REF:\\\\d+\\\\s*", "")', txn)
+        assert result == 'NOTE'
+
+
+class TestUppercaseFunction:
+    """Tests for the uppercase() function."""
+
+    def test_uppercase_basic(self):
+        """uppercase converts string to uppercase."""
+        txn = {'description': 'Starbucks Coffee', 'amount': 5.50}
+        assert evaluate_transaction('uppercase(field.description)', txn) == 'STARBUCKS COFFEE'
+
+    def test_uppercase_already_upper(self):
+        """uppercase works on already uppercase strings."""
+        txn = {'description': 'ALREADY UPPER', 'amount': 100.00}
+        assert evaluate_transaction('uppercase(field.description)', txn) == 'ALREADY UPPER'
+
+    def test_uppercase_mixed(self):
+        """uppercase handles mixed case."""
+        txn = {'description': 'MiXeD CaSe', 'amount': 100.00}
+        assert evaluate_transaction('uppercase(field.description)', txn) == 'MIXED CASE'
+
+    def test_uppercase_in_comparison(self):
+        """uppercase works in comparisons."""
+        txn = {'description': 'starbucks', 'amount': 5.50}
+        assert matches_transaction('uppercase(field.description) == "STARBUCKS"', txn)
+
+
+class TestLowercaseFunction:
+    """Tests for the lowercase() function."""
+
+    def test_lowercase_basic(self):
+        """lowercase converts string to lowercase."""
+        txn = {'description': 'STARBUCKS COFFEE', 'amount': 5.50}
+        assert evaluate_transaction('lowercase(field.description)', txn) == 'starbucks coffee'
+
+    def test_lowercase_already_lower(self):
+        """lowercase works on already lowercase strings."""
+        txn = {'description': 'already lower', 'amount': 100.00}
+        assert evaluate_transaction('lowercase(field.description)', txn) == 'already lower'
+
+    def test_lowercase_in_comparison(self):
+        """lowercase works in comparisons."""
+        txn = {'description': 'STARBUCKS', 'amount': 5.50}
+        assert matches_transaction('lowercase(field.description) == "starbucks"', txn)
+
+
+class TestStripPrefixFunction:
+    """Tests for the strip_prefix() function."""
+
+    def test_strip_prefix_basic(self):
+        """strip_prefix removes prefix when present."""
+        txn = {'description': 'APLPAY STARBUCKS', 'amount': 5.50}
+        result = evaluate_transaction('strip_prefix(field.description, "APLPAY ")', txn)
+        assert result == 'STARBUCKS'
+
+    def test_strip_prefix_no_match(self):
+        """strip_prefix returns original when prefix not present."""
+        txn = {'description': 'STARBUCKS', 'amount': 5.50}
+        result = evaluate_transaction('strip_prefix(field.description, "APLPAY ")', txn)
+        assert result == 'STARBUCKS'
+
+    def test_strip_prefix_case_insensitive(self):
+        """strip_prefix is case insensitive."""
+        txn = {'description': 'aplpay STARBUCKS', 'amount': 5.50}
+        result = evaluate_transaction('strip_prefix(field.description, "APLPAY ")', txn)
+        assert result == 'STARBUCKS'  # Matches despite case difference
+
+    def test_strip_prefix_partial(self):
+        """strip_prefix only matches at the beginning."""
+        txn = {'description': 'START APLPAY END', 'amount': 5.50}
+        result = evaluate_transaction('strip_prefix(field.description, "APLPAY")', txn)
+        assert result == 'START APLPAY END'  # Not at start, unchanged
+
+
+class TestStripSuffixFunction:
+    """Tests for the strip_suffix() function."""
+
+    def test_strip_suffix_basic(self):
+        """strip_suffix removes suffix when present."""
+        txn = {'description': 'STARBUCKS DES:12345', 'amount': 5.50}
+        result = evaluate_transaction('strip_suffix(field.description, " DES:12345")', txn)
+        assert result == 'STARBUCKS'
+
+    def test_strip_suffix_no_match(self):
+        """strip_suffix returns original when suffix not present."""
+        txn = {'description': 'STARBUCKS', 'amount': 5.50}
+        result = evaluate_transaction('strip_suffix(field.description, " DES:12345")', txn)
+        assert result == 'STARBUCKS'
+
+    def test_strip_suffix_partial(self):
+        """strip_suffix only matches at the end."""
+        txn = {'description': 'DES:12345 STARBUCKS', 'amount': 5.50}
+        result = evaluate_transaction('strip_suffix(field.description, "DES:12345")', txn)
+        assert result == 'DES:12345 STARBUCKS'  # Not at end, unchanged
+
+
+# =============================================================================
+# Location Field Tests
+# =============================================================================
+
+class TestLocationField:
+    """Tests for field.location access."""
+
+    def test_location_in_context(self):
+        """TransactionContext stores location."""
+        ctx = TransactionContext(
+            description="SAFEWAY #1222",
+            amount=50.00,
+            location="LAHAINA\nHI"
+        )
+        assert ctx.location == "LAHAINA\nHI"
+
+    def test_location_default_empty(self):
+        """Location defaults to empty string."""
+        ctx = TransactionContext(description="TEST", amount=100.00)
+        assert ctx.location == ""
+
+    def test_from_transaction_includes_location(self):
+        """TransactionContext.from_transaction() includes location."""
+        txn = {
+            'description': 'SAFEWAY #1222',
+            'amount': 50.00,
+            'location': 'LAHAINA\nHI'
+        }
+        ctx = TransactionContext.from_transaction(txn)
+        assert ctx.location == 'LAHAINA\nHI'
+
+    def test_from_transaction_no_location(self):
+        """TransactionContext.from_transaction() works without location."""
+        txn = {'description': 'TEST', 'amount': 100.00}
+        ctx = TransactionContext.from_transaction(txn)
+        assert ctx.location == ""
+
+    def test_field_location_access(self):
+        """field.location returns the location."""
+        txn = {'description': 'SAFEWAY', 'amount': 50.00, 'location': 'SEATTLE\nWA'}
+        result = evaluate_transaction('field.location', txn)
+        assert result == 'SEATTLE\nWA'
+
+    def test_field_location_empty_when_missing(self):
+        """field.location returns empty string when not set."""
+        txn = {'description': 'TEST', 'amount': 100.00}
+        assert evaluate_transaction('field.location', txn) == ''
+
+    def test_field_location_in_contains(self):
+        """field.location works with contains()."""
+        txn = {'description': 'SAFEWAY #1222', 'amount': 50.00, 'location': 'LAHAINA\nHI'}
+        assert matches_transaction('contains(field.location, "HI")', txn)
+        assert matches_transaction('contains(field.location, "LAHAINA")', txn)
+        assert not matches_transaction('contains(field.location, "WA")', txn)
+
+    def test_field_location_in_comparison(self):
+        """field.location works in comparisons."""
+        txn = {'description': 'TEST', 'amount': 100.00, 'location': 'SEATTLE\nWA'}
+        assert matches_transaction('field.location == "SEATTLE\\nWA"', txn)
+
+    def test_field_location_with_exists(self):
+        """exists() works with field.location."""
+        txn_with_loc = {'description': 'TEST', 'amount': 100.00, 'location': 'SEATTLE\nWA'}
+        txn_no_loc = {'description': 'TEST', 'amount': 100.00}
+        txn_empty_loc = {'description': 'TEST', 'amount': 100.00, 'location': ''}
+
+        assert matches_transaction('exists(field.location)', txn_with_loc)
+        assert not matches_transaction('exists(field.location)', txn_no_loc)
+        assert not matches_transaction('exists(field.location)', txn_empty_loc)
+
+    def test_field_location_combined_conditions(self):
+        """field.location works with combined conditions."""
+        hawaii_safeway = {
+            'description': 'SAFEWAY #1222',
+            'amount': 75.00,
+            'location': 'LAHAINA\nHI'
+        }
+        wa_safeway = {
+            'description': 'SAFEWAY #1142',
+            'amount': 50.00,
+            'location': 'KIRKLAND\nWA'
+        }
+
+        # Match Safeway in Hawaii only
+        expr = 'contains("SAFEWAY") and contains(field.location, "HI")'
+        assert matches_transaction(expr, hawaii_safeway)
+        assert not matches_transaction(expr, wa_safeway)
+
+    def test_field_location_regex(self):
+        """regex() works with field.location."""
+        txn = {'description': 'STORE', 'amount': 100.00, 'location': 'SEATTLE\nWA'}
+        assert matches_transaction(r'regex(field.location, "\\bWA$")', txn)
+        assert not matches_transaction(r'regex(field.location, "\\bHI$")', txn)

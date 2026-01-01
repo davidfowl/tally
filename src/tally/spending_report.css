@@ -837,6 +837,25 @@ th[data-tooltip] { cursor: pointer; }
     font-family: inherit;
     color: #aaa;
 }
+.match-info-popup .popup-tags-section .popup-value {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+}
+.match-info-popup .popup-tag-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1em;
+}
+.match-info-popup .popup-tag-name {
+    color: #fff;
+    font-weight: 500;
+}
+.match-info-popup .popup-tag-source {
+    color: #888;
+    font-size: 0.85em;
+    font-family: inherit;
+}
 .match-info-popup .popup-explanation {
     background: rgba(79, 172, 254, 0.15);
     color: #4facfe;

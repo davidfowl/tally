@@ -1065,3 +1065,114 @@ tags: {source}
         # Empty string
         result = get_tag_only_rules('')
         assert result == []
+
+
+class TestNormalizeMerchantWithLocation:
+    """Tests for normalize_merchant with location parameter."""
+
+    def test_location_passed_to_rule_matching(self):
+        """Location is available in rule expressions."""
+        content = """[Hawaii Store]
+match: contains("STORE") and regex(field.location, "\\\\bHI$")
+category: Travel
+subcategory: Shopping
+
+[Regular Store]
+match: contains("STORE")
+category: Shopping
+subcategory: Retail
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.rules', delete=False)
+        try:
+            f.write(content)
+            f.close()
+
+            rules = get_all_rules(f.name)
+
+            # Hawaii store should match the Hawaii rule
+            merchant, category, subcategory, _ = normalize_merchant(
+                "ABC STORE",
+                rules,
+                amount=50.00,
+                location="HONOLULU\nHI"
+            )
+            assert merchant == "Hawaii Store"
+            assert category == "Travel"
+            assert subcategory == "Shopping"
+
+            # Non-Hawaii store should match the regular rule
+            merchant, category, subcategory, _ = normalize_merchant(
+                "ABC STORE",
+                rules,
+                amount=50.00,
+                location="SEATTLE\nWA"
+            )
+            assert merchant == "Regular Store"
+            assert category == "Shopping"
+            assert subcategory == "Retail"
+
+        finally:
+            os.unlink(f.name)
+
+    def test_location_with_contains(self):
+        """contains() works with field.location."""
+        content = """[Lahaina Shop]
+match: contains(field.location, "LAHAINA")
+category: Travel
+subcategory: Shopping
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.rules', delete=False)
+        try:
+            f.write(content)
+            f.close()
+
+            rules = get_all_rules(f.name)
+
+            # Lahaina location should match
+            merchant, category, subcategory, _ = normalize_merchant(
+                "RANDOM SHOP",
+                rules,
+                amount=50.00,
+                location="LAHAINA\nHI"
+            )
+            assert merchant == "Lahaina Shop"
+            assert category == "Travel"
+
+            # Non-Lahaina should not match
+            merchant, category, subcategory, _ = normalize_merchant(
+                "RANDOM SHOP",
+                rules,
+                amount=50.00,
+                location="SEATTLE\nWA"
+            )
+            assert category == "Unknown"
+
+        finally:
+            os.unlink(f.name)
+
+    def test_location_none_doesnt_break_matching(self):
+        """Rules still work when location is None."""
+        content = """[Test Store]
+match: contains("STORE")
+category: Shopping
+subcategory: Retail
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.rules', delete=False)
+        try:
+            f.write(content)
+            f.close()
+
+            rules = get_all_rules(f.name)
+
+            # Location None should still match description-based rules
+            merchant, category, subcategory, _ = normalize_merchant(
+                "ABC STORE",
+                rules,
+                amount=50.00,
+                location=None
+            )
+            assert merchant == "Test Store"
+            assert category == "Shopping"
+
+        finally:
+            os.unlink(f.name)

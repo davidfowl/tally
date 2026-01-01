@@ -233,6 +233,79 @@ def apply_tag_rules(transaction, tag_rules):
     return additional_tags
 
 
+def get_transforms(rules_path):
+    """Get field transforms from a .rules file.
+
+    Transforms are assignments like:
+        field.description = regex_replace(field.description, "^APLPAY\\s+", "")
+
+    Returns:
+        List of (field_path, expression) tuples.
+    """
+    if not rules_path or not rules_path.endswith('.rules'):
+        return []
+
+    try:
+        from .merchant_engine import load_merchants_file
+        from pathlib import Path
+        engine = load_merchants_file(Path(rules_path))
+        return engine.transforms
+    except Exception:
+        return []
+
+
+def apply_transforms(transaction, transforms):
+    """Apply field transforms to a transaction.
+
+    Transforms mutate fields in the transaction before rule matching.
+    Original values are preserved in '_raw_{field}' keys for debugging.
+    E.g., _raw_description holds the original description.
+
+    Args:
+        transaction: Transaction dict (will be modified in place)
+        transforms: List of (field_path, expression) tuples
+
+    Returns:
+        The modified transaction dict.
+    """
+    if not transforms:
+        return transaction
+
+    from tally import expr_parser
+
+    for field_path, expr in transforms:
+        try:
+            # Build context from current transaction state
+            ctx = expr_parser.TransactionContext.from_transaction(transaction)
+
+            # Evaluate the transform expression
+            parsed = expr_parser.parse_expression(expr)
+            evaluator = expr_parser.TransactionEvaluator(ctx)
+            new_value = evaluator.evaluate(parsed)
+
+            # Update the field, preserving original in _raw_{field}
+            field_name = field_path[6:]  # Remove "field." prefix
+            raw_key = f'_raw_{field_name}'
+
+            if field_name == 'description':
+                # Save original if not already saved
+                if raw_key not in transaction:
+                    transaction[raw_key] = transaction.get('description', '')
+                transaction['description'] = str(new_value)
+            else:
+                if 'field' not in transaction:
+                    transaction['field'] = {}
+                # Save original if not already saved
+                if raw_key not in transaction:
+                    transaction[raw_key] = transaction.get('field', {}).get(field_name, '')
+                transaction['field'][field_name] = str(new_value)
+        except Exception:
+            # Skip failed transforms silently
+            continue
+
+    return transaction
+
+
 def diagnose_rules(csv_path=None):
     """Get detailed diagnostic information about rule loading.
 
@@ -347,40 +420,25 @@ def diagnose_rules(csv_path=None):
     return result
 
 
-def clean_description(description, cleaning_patterns=None):
+def clean_description(description):
     """Clean and normalize raw transaction descriptions.
 
     Args:
         description: Raw transaction description
-        cleaning_patterns: Optional list of regex patterns to strip from descriptions.
-                          Loaded from settings.yaml 'description_cleaning' key.
 
     Returns:
-        Cleaned description with patterns removed and whitespace normalized.
+        Cleaned description with whitespace normalized.
     """
-    cleaned = description
-
-    # Apply user-configured cleaning patterns
-    if cleaning_patterns:
-        for pattern in cleaning_patterns:
-            try:
-                cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-            except re.error:
-                # Invalid regex, skip
-                continue
-
     # Normalize whitespace
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-
-    return cleaned
+    return re.sub(r'\s+', ' ', description).strip()
 
 
-def extract_merchant_name(description, cleaning_patterns=None):
+def extract_merchant_name(description):
     """Extract a readable merchant name from a cleaned description.
 
     Used as fallback when no pattern matches.
     """
-    cleaned = clean_description(description, cleaning_patterns)
+    cleaned = clean_description(description)
 
     # Remove non-alphabetic characters for grouping, keep first 2-3 words
     words = re.sub(r'[^A-Za-z\s]', ' ', cleaned).split()[:3]
@@ -395,9 +453,10 @@ def normalize_merchant(
     rules: list,
     amount: Optional[float] = None,
     txn_date: Optional[date] = None,
-    cleaning_patterns: Optional[List[str]] = None,
     field: Optional[Dict[str, str]] = None,
     data_source: Optional[str] = None,
+    transforms: Optional[List[Tuple[str, str]]] = None,
+    location: Optional[str] = None,
 ) -> Tuple[str, str, str, Optional[dict]]:
     """Normalize a merchant description to (name, category, subcategory, match_info).
 
@@ -411,9 +470,9 @@ def normalize_merchant(
               or older formats with fewer elements
         amount: Optional transaction amount for modifier matching
         txn_date: Optional transaction date for modifier matching
-        cleaning_patterns: Optional list of regex patterns to strip from descriptions
         field: Optional dict of custom CSV captures (for field.name in rule expressions)
         data_source: Optional data source name (for source variable in rule expressions and dynamic tags)
+        transforms: Optional list of (field_path, expression) tuples for field transforms
 
     Returns:
         Tuple of (merchant_name, category, subcategory, match_info)
@@ -421,18 +480,24 @@ def normalize_merchant(
     """
     from tally import expr_parser
 
-    # Clean the description for better matching
-    cleaned = clean_description(description, cleaning_patterns)
-    desc_upper = description.upper()
-    cleaned_upper = cleaned.upper()
-
-    # Build transaction context once
-    transaction = {'description': description, 'amount': amount or 0, 'field': field, 'source': data_source}
+    # Build transaction context for transforms
+    transaction = {'description': description, 'amount': amount or 0, 'field': field, 'source': data_source, 'location': location}
     if txn_date:
         transaction['date'] = txn_date
-    transaction_cleaned = {'description': cleaned, 'amount': amount or 0, 'field': field, 'source': data_source}
-    if txn_date:
-        transaction_cleaned['date'] = txn_date
+
+    # Apply field transforms before matching
+    raw_values = {}  # Track _raw_* keys for propagation
+    if transforms:
+        apply_transforms(transaction, transforms)
+        description = transaction.get('description', description)
+        field = transaction.get('field', field)
+        # Collect _raw_* keys for propagation to caller
+        for key in transaction:
+            if key.startswith('_raw_'):
+                raw_values[key] = transaction[key]
+
+    # Get uppercase description for matching
+    desc_upper = description.upper()
 
     # Result from first categorization match
     result_merchant = None
@@ -443,6 +508,8 @@ def normalize_merchant(
 
     # Collect tags from ALL matching rules
     all_tags = []
+    # Track which rule added each tag: {tag: (rule_name, pattern)}
+    tag_sources = {}
 
     for rule in rules:
         # Handle various formats: 4-tuple, 5-tuple, 6-tuple, 7-tuple (with tags)
@@ -465,15 +532,10 @@ def normalize_merchant(
 
             if _is_expression_pattern(pattern):
                 # Use expression parser for expression-based rules
-                matches = (expr_parser.matches_transaction(pattern, transaction) or
-                          expr_parser.matches_transaction(pattern, transaction_cleaned))
+                matches = expr_parser.matches_transaction(pattern, transaction)
             else:
                 # Legacy regex pattern matching
-                regex_matches = (
-                    re.search(pattern, desc_upper, re.IGNORECASE) or
-                    re.search(pattern, cleaned_upper, re.IGNORECASE)
-                )
-                if regex_matches:
+                if re.search(pattern, desc_upper, re.IGNORECASE):
                     # Check modifiers if present
                     if parsed and (parsed.amount_conditions or parsed.date_conditions):
                         matches = check_all_conditions(parsed, amount, txn_date)
@@ -487,6 +549,10 @@ def normalize_merchant(
             if tags:
                 resolved_tags = _resolve_dynamic_tags(tags, transaction)
                 all_tags.extend(resolved_tags)
+                # Track which rule added each tag (first rule wins for each tag)
+                for tag in resolved_tags:
+                    if tag not in tag_sources:
+                        tag_sources[tag] = {'rule': source, 'pattern': pattern}
 
             # Use first categorization rule for merchant/category/subcategory
             # Tag-only rules have empty category
@@ -504,14 +570,23 @@ def normalize_merchant(
     # Return matched result with all collected tags (deduplicated, order preserved)
     unique_tags = list(dict.fromkeys(all_tags))
     if result_merchant is not None:
-        return (result_merchant, result_category, result_subcategory,
-                {'pattern': result_pattern, 'source': result_source, 'tags': unique_tags})
+        match_info = {'pattern': result_pattern, 'source': result_source, 'tags': unique_tags}
+        if tag_sources:
+            match_info['tag_sources'] = tag_sources
+        if raw_values:
+            match_info['raw_values'] = raw_values
+        return (result_merchant, result_category, result_subcategory, match_info)
 
     # Fallback: extract merchant name from description, categorize as Unknown
     # Still include any tags from tag-only rules that matched
-    merchant_name = extract_merchant_name(description, cleaning_patterns)
-    if unique_tags:
-        return (merchant_name, 'Unknown', 'Unknown', {'pattern': None, 'source': 'auto', 'tags': unique_tags})
+    merchant_name = extract_merchant_name(description)
+    if unique_tags or raw_values:
+        match_info = {'pattern': None, 'source': 'auto', 'tags': unique_tags}
+        if tag_sources:
+            match_info['tag_sources'] = tag_sources
+        if raw_values:
+            match_info['raw_values'] = raw_values
+        return (merchant_name, 'Unknown', 'Unknown', match_info)
     return (merchant_name, 'Unknown', 'Unknown', None)
 
 
@@ -592,14 +667,14 @@ def explain_description(
     rules: list,
     amount: Optional[float] = None,
     txn_date: Optional[date] = None,
-    cleaning_patterns: Optional[List[str]] = None,
+    transforms: Optional[List[Tuple[str, str]]] = None,
     field: Optional[Dict[str, str]] = None,
 ) -> dict:
     """Trace how a description is processed and matched.
 
     Returns a dict with detailed information about the matching process:
     - original: The original description
-    - cleaned: The cleaned description (if different)
+    - transformed: The transformed description (if different)
     - matched_rule: The rule that matched (if any)
     - merchant: Resulting merchant name
     - category: Resulting category
@@ -608,12 +683,17 @@ def explain_description(
     """
     from tally import expr_parser
 
-    # Use existing clean_description function
-    cleaned = clean_description(description, cleaning_patterns)
+    # Apply field transforms
+    transaction = {'description': description, 'amount': amount or 0, 'field': field}
+    if txn_date:
+        transaction['date'] = txn_date
+    if transforms:
+        apply_transforms(transaction, transforms)
+    transformed_desc = transaction.get('description', description)
 
     result = {
         'original': description,
-        'cleaned': cleaned if cleaned != description else None,
+        'transformed': transformed_desc if transformed_desc != description else None,
         'matched_rule': None,
         'merchant': None,
         'category': None,
@@ -621,9 +701,8 @@ def explain_description(
         'is_unknown': False,
     }
 
-    # Try pattern matching against both original and cleaned
-    desc_upper = description.upper()
-    cleaned_upper = cleaned.upper()
+    # Try pattern matching against transformed description
+    desc_upper = transformed_desc.upper()
 
     for rule in rules:
         # Handle various formats
@@ -644,25 +723,14 @@ def explain_description(
             # Determine if this is an expression pattern or a regex pattern
             if _is_expression_pattern(pattern):
                 # Use expression parser for expression-based rules
-                transaction = {'description': description, 'amount': amount or 0, 'field': field}
-                if txn_date:
-                    transaction['date'] = txn_date
-                match_on_original = expr_parser.matches_transaction(pattern, transaction)
+                # Use the already-transformed transaction
+                matches = expr_parser.matches_transaction(pattern, transaction)
 
-                # Also try with cleaned description
-                transaction_cleaned = {'description': cleaned, 'amount': amount or 0, 'field': field}
-                if txn_date:
-                    transaction_cleaned['date'] = txn_date
-                match_on_cleaned = expr_parser.matches_transaction(pattern, transaction_cleaned)
-
-                if not (match_on_original or match_on_cleaned):
+                if not matches:
                     continue
             else:
                 # Legacy regex pattern matching
-                match_on_original = re.search(pattern, desc_upper, re.IGNORECASE)
-                match_on_cleaned = re.search(pattern, cleaned_upper, re.IGNORECASE)
-
-                if not (match_on_original or match_on_cleaned):
+                if not re.search(pattern, desc_upper, re.IGNORECASE):
                     continue
 
                 # If pattern has modifiers, check them
@@ -673,7 +741,7 @@ def explain_description(
             result['matched_rule'] = {
                 'pattern': pattern,
                 'source': source,
-                'matched_on': 'original' if match_on_original else 'cleaned',
+                'matched_on': 'transformed' if transformed_desc != description else 'original',
                 'tags': tags,
             }
             result['merchant'] = merchant
@@ -686,7 +754,7 @@ def explain_description(
 
     # No match - unknown merchant
     result['is_unknown'] = True
-    result['merchant'] = extract_merchant_name(description, cleaning_patterns)
+    result['merchant'] = extract_merchant_name(transformed_desc)
     result['category'] = 'Unknown'
     result['subcategory'] = 'Unknown'
     return result

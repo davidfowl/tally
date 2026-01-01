@@ -796,3 +796,261 @@ tags: solo
 '''
         engine = parse_merchants(content)
         assert engine.rules[0].tags == {'solo'}
+
+
+class TestFieldTransforms:
+    """Tests for field transforms parsing."""
+
+    def test_simple_transform(self):
+        """Parse a simple field transform."""
+        content = '''
+field.description = regex_replace(field.description, "^APLPAY\\s+", "")
+
+[Starbucks]
+match: contains("STARBUCKS")
+category: Food
+subcategory: Coffee
+'''
+        engine = parse_merchants(content)
+        assert len(engine.transforms) == 1
+        assert engine.transforms[0][0] == 'field.description'
+        assert 'regex_replace' in engine.transforms[0][1]
+
+    def test_multiple_transforms(self):
+        """Parse multiple field transforms."""
+        content = '''
+field.description = regex_replace(field.description, "^APLPAY\\s+", "")
+field.description = regex_replace(field.description, "^SQ\\s*\\*", "")
+field.memo = trim(field.memo)
+
+[Test]
+match: true
+category: Test
+subcategory: Test
+'''
+        engine = parse_merchants(content)
+        assert len(engine.transforms) == 3
+        assert engine.transforms[0][0] == 'field.description'
+        assert engine.transforms[1][0] == 'field.description'
+        assert engine.transforms[2][0] == 'field.memo'
+
+    def test_transforms_and_variables(self):
+        """Transforms and variables can coexist."""
+        content = '''
+field.description = uppercase(field.description)
+is_large = amount > 500
+
+[Large Purchase]
+match: is_large
+category: Shopping
+subcategory: Large
+'''
+        engine = parse_merchants(content)
+        assert len(engine.transforms) == 1
+        assert 'is_large' in engine.variables
+        assert engine.transforms[0][0] == 'field.description'
+
+    def test_transform_vs_variable_distinction(self):
+        """Field transforms start with 'field.', variables don't."""
+        content = '''
+field.description = lowercase(field.description)
+my_var = amount > 100
+
+[Test]
+match: my_var
+category: Test
+subcategory: Test
+'''
+        engine = parse_merchants(content)
+        assert len(engine.transforms) == 1
+        assert len(engine.variables) == 1
+        assert 'field.description' not in engine.variables
+        assert 'my_var' in engine.variables
+
+    def test_transforms_applied_in_order(self):
+        """Transforms are stored in order they appear."""
+        content = '''
+field.description = strip_prefix(field.description, "A")
+field.description = strip_prefix(field.description, "B")
+field.description = strip_prefix(field.description, "C")
+
+[Test]
+match: true
+category: Test
+subcategory: Test
+'''
+        engine = parse_merchants(content)
+        assert len(engine.transforms) == 3
+        assert '"A"' in engine.transforms[0][1]
+        assert '"B"' in engine.transforms[1][1]
+        assert '"C"' in engine.transforms[2][1]
+
+    def test_transform_with_complex_expression(self):
+        """Transforms can have complex expressions."""
+        content = '''
+field.description = regex_replace(regex_replace(field.description, "^APLPAY\\s+", ""), "^SQ\\*", "")
+
+[Test]
+match: true
+category: Test
+subcategory: Test
+'''
+        engine = parse_merchants(content)
+        assert len(engine.transforms) == 1
+        # Should contain nested regex_replace calls
+        assert engine.transforms[0][1].count('regex_replace') == 2
+
+
+class TestApplyTransforms:
+    """Tests for apply_transforms function."""
+
+    def test_apply_single_transform(self):
+        """Apply a single description transform."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'APLPAY STARBUCKS', 'amount': 5.50}
+        transforms = [('field.description', 'regex_replace(field.description, "^APLPAY\\\\s+", "")')]
+
+        result = apply_transforms(transaction, transforms)
+        assert result['description'] == 'STARBUCKS'
+
+    def test_apply_transform_preserves_raw(self):
+        """Apply transform preserves original in _raw_description."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'APLPAY STARBUCKS', 'amount': 5.50}
+        transforms = [('field.description', 'regex_replace(field.description, "^APLPAY\\\\s+", "")')]
+
+        result = apply_transforms(transaction, transforms)
+        assert result['_raw_description'] == 'APLPAY STARBUCKS'
+        assert result['description'] == 'STARBUCKS'
+
+    def test_apply_chained_transforms(self):
+        """Apply multiple transforms in sequence."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'APLPAY SQ* STARBUCKS', 'amount': 5.50}
+        transforms = [
+            ('field.description', 'regex_replace(field.description, "^APLPAY\\\\s+", "")'),
+            ('field.description', 'regex_replace(field.description, "^SQ\\\\*\\\\s*", "")'),
+        ]
+
+        result = apply_transforms(transaction, transforms)
+        assert result['description'] == 'STARBUCKS'
+        # _raw_description should be the original before any transforms
+        assert result['_raw_description'] == 'APLPAY SQ* STARBUCKS'
+
+    def test_apply_no_transforms(self):
+        """Empty transforms list returns transaction unchanged."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'STARBUCKS', 'amount': 5.50}
+
+        result = apply_transforms(transaction, [])
+        assert result['description'] == 'STARBUCKS'
+        assert '_raw_description' not in result
+
+    def test_apply_none_transforms(self):
+        """None transforms returns transaction unchanged."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'STARBUCKS', 'amount': 5.50}
+
+        result = apply_transforms(transaction, None)
+        assert result['description'] == 'STARBUCKS'
+
+    def test_apply_transform_uppercase(self):
+        """Apply uppercase transform."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'starbucks coffee', 'amount': 5.50}
+        transforms = [('field.description', 'uppercase(field.description)')]
+
+        result = apply_transforms(transaction, transforms)
+        assert result['description'] == 'STARBUCKS COFFEE'
+
+    def test_apply_transform_lowercase(self):
+        """Apply lowercase transform."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'STARBUCKS COFFEE', 'amount': 5.50}
+        transforms = [('field.description', 'lowercase(field.description)')]
+
+        result = apply_transforms(transaction, transforms)
+        assert result['description'] == 'starbucks coffee'
+
+    def test_apply_transform_custom_field(self):
+        """Apply transform to custom field."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {
+            'description': 'TEST',
+            'amount': 100.00,
+            'field': {'memo': '  trimmed  '}
+        }
+        transforms = [('field.memo', 'trim(field.memo)')]
+
+        result = apply_transforms(transaction, transforms)
+        assert result['field']['memo'] == 'trimmed'
+        assert result['_raw_memo'] == '  trimmed  '
+
+    def test_apply_transform_no_match(self):
+        """Transform with no match leaves value unchanged."""
+        from tally.merchant_utils import apply_transforms
+
+        transaction = {'description': 'STARBUCKS', 'amount': 5.50}
+        transforms = [('field.description', 'regex_replace(field.description, "^APLPAY\\\\s+", "")')]
+
+        result = apply_transforms(transaction, transforms)
+        assert result['description'] == 'STARBUCKS'  # Unchanged
+
+
+class TestGetTransforms:
+    """Tests for get_transforms function."""
+
+    def test_get_transforms_from_rules_file(self, tmp_path):
+        """Get transforms from a .rules file."""
+        from tally.merchant_utils import get_transforms
+
+        rules_file = tmp_path / "merchants.rules"
+        rules_file.write_text('''
+field.description = regex_replace(field.description, "^APLPAY\\s+", "")
+
+[Test]
+match: true
+category: Test
+subcategory: Test
+''')
+
+        transforms = get_transforms(str(rules_file))
+        assert len(transforms) == 1
+        assert transforms[0][0] == 'field.description'
+
+    def test_get_transforms_empty_file(self, tmp_path):
+        """Empty rules file returns empty transforms."""
+        from tally.merchant_utils import get_transforms
+
+        rules_file = tmp_path / "merchants.rules"
+        rules_file.write_text('''
+[Test]
+match: true
+category: Test
+subcategory: Test
+''')
+
+        transforms = get_transforms(str(rules_file))
+        assert transforms == []
+
+    def test_get_transforms_none_path(self):
+        """None path returns empty transforms."""
+        from tally.merchant_utils import get_transforms
+
+        transforms = get_transforms(None)
+        assert transforms == []
+
+    def test_get_transforms_csv_path(self):
+        """CSV path (not .rules) returns empty transforms."""
+        from tally.merchant_utils import get_transforms
+
+        transforms = get_transforms("/path/to/merchants.csv")
+        assert transforms == []
