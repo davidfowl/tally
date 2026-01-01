@@ -487,10 +487,14 @@ class TestEdgeCasesAndCalculations:
         expect(page.get_by_test_id("income-amount")).to_contain_text("$3,000")
 
     def test_transfers_total_displayed(self, page: Page, edge_case_report_path):
-        """Transfers total shows correct amount."""
+        """Transfers total shows correct amount without negative sign.
+
+        Transfers are informational only (money moving between accounts).
+        They should not show a negative sign since they're not a deduction from cash flow.
+        """
         page.goto(f"file://{edge_case_report_path}")
-        # Transfers: $500
-        expect(page.get_by_test_id("transfers-amount")).to_contain_text("$500")
+        # Transfers: $500 (no negative sign - transfers are informational, not deductions)
+        expect(page.get_by_test_id("transfers-amount")).to_have_text("$500")
 
     def test_cash_flow_calculation(self, page: Page, edge_case_report_path):
         """Net cash flow = income - spending (transfers excluded, they just move money)."""
