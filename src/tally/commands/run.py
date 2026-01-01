@@ -54,8 +54,6 @@ def cmd_run(args):
     _check_deprecated_description_cleaning(config)
 
     year = config.get('year', 2025)
-    home_locations = config.get('home_locations', set())
-    travel_labels = config.get('travel_labels', {})
     data_sources = config.get('data_sources', [])
     transforms = get_transforms(config.get('_merchants_file'))
 
@@ -101,13 +99,12 @@ def cmd_run(args):
         try:
             if parser_type == 'amex':
                 _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations)
+                txns = parse_amex(filepath, rules)
             elif parser_type == 'boa':
                 _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations)
+                txns = parse_boa(filepath, rules)
             elif parser_type == 'generic' and format_spec:
                 txns = parse_generic_csv(filepath, format_spec, rules,
-                                         home_locations,
                                          source_name=source.get('name', 'CSV'),
                                          decimal_separator=source.get('decimal_separator', '.'),
                                          transforms=transforms)
@@ -129,38 +126,8 @@ def cmd_run(args):
         print("Error: No transactions found", file=sys.stderr)
         sys.exit(1)
 
-    # Auto-detect home location if not specified
-    if not home_locations:
-        from collections import Counter
-        # US state codes for filtering
-        us_states = {
-            'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-            'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-            'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-            'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-            'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
-            'DC', 'PR', 'VI', 'GU'
-        }
-        # Count US state locations
-        location_counts = Counter(
-            txn['location'] for txn in all_txns
-            if txn.get('location') and txn['location'] in us_states
-        )
-        if location_counts:
-            # Most common location is likely home
-            detected_home = location_counts.most_common(1)[0][0]
-            home_locations = {detected_home}
-            if not args.quiet:
-                print(f"Auto-detected home location: {detected_home}")
-            # Update is_travel on transactions now that we know home
-            from ..analyzer import is_travel_location
-            for txn in all_txns:
-                txn['is_travel'] = is_travel_location(txn.get('location'), home_locations)
-
     if not args.quiet:
         print(f"\nTotal: {len(all_txns)} transactions")
-        if home_locations:
-            print(f"Home locations: {', '.join(sorted(home_locations))}")
 
     # Analyze
     stats = analyze_transactions(all_txns)
@@ -238,7 +205,7 @@ def cmd_run(args):
 
         # Collect source names for the report subtitle
         source_names = [s.get('name', 'Unknown') for s in data_sources]
-        write_summary_file_vue(stats, output_path, year=year, home_locations=home_locations,
+        write_summary_file_vue(stats, output_path, year=year,
                                currency_format=currency_format, sources=source_names,
                                embedded_html=args.embedded_html)
         if not args.quiet:

@@ -37,9 +37,6 @@ data_sources:
   #   columns:
   #     description: "{vendor} ({txn_type})"  # Combines columns into description
 
-# Location settings
-home_state: WA  # Used for badge coloring (green for home state)
-
 # Output settings
 output_dir: output
 html_filename: spending_summary.html

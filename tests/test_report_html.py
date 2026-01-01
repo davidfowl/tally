@@ -8,15 +8,18 @@ These tests verify:
 Tests skip with a warning if Playwright is not installed.
 Run: playwright install chromium
 """
+from __future__ import annotations
+
 import os
 import subprocess
 import warnings
+from typing import TYPE_CHECKING
 
 import pytest
 
 # Skip all tests if Playwright not installed
 try:
-    from playwright.sync_api import Page, expect
+    from playwright.sync_api import expect
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -25,6 +28,9 @@ except ImportError:
         "Install with: playwright install chromium",
         UserWarning
     )
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Page
 
 pytestmark = pytest.mark.skipif(
     not PLAYWRIGHT_AVAILABLE,

@@ -46,7 +46,6 @@ def cmd_explain(args):
     # Check for deprecated settings
     _check_deprecated_description_cleaning(config)
 
-    home_locations = config.get('home_locations', set())
     data_sources = config.get('data_sources', [])
     transforms = get_transforms(config.get('_merchants_file'))
 
@@ -78,14 +77,13 @@ def cmd_explain(args):
             if parser_type == 'amex':
                 from ..cli import _warn_deprecated_parser
                 _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules, home_locations)
+                txns = parse_amex(filepath, rules)
             elif parser_type == 'boa':
                 from ..cli import _warn_deprecated_parser
                 _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules, home_locations)
+                txns = parse_boa(filepath, rules)
             elif parser_type == 'generic' and format_spec:
                 txns = parse_generic_csv(filepath, format_spec, rules,
-                                         home_locations,
                                          source_name=source.get('name', 'CSV'),
                                          decimal_separator=source.get('decimal_separator', '.'),
                                          transforms=transforms)

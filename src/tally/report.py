@@ -84,19 +84,17 @@ def generate_embeddings(items):
 # VUE-BASED HTML REPORT (Modern)
 # ============================================================================
 
-def write_summary_file_vue(stats, filepath, year=2025, home_locations=None, currency_format="${amount}", sources=None, embedded_html=True):
+def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount}", sources=None, embedded_html=True):
     """Write summary to HTML file using Vue 3 for client-side rendering.
 
     Args:
         stats: Analysis statistics dict
         filepath: Output file path
         year: Year for display in title
-        home_locations: Set of home location codes for location badge coloring
         currency_format: Format string for currency display, e.g. "${amount}" or "{amount} zl"
         sources: List of data source names (e.g., ['Amex', 'Chase'])
         embedded_html: If True (default), embed CSS/JS inline. If False, output separate files.
     """
-    home_locations = home_locations or set()
     sources = sources or []
 
     # Load template files
@@ -109,7 +107,6 @@ def write_summary_file_vue(stats, filepath, year=2025, home_locations=None, curr
     monthly_merchants = stats['monthly_merchants']
     annual_merchants = stats['annual_merchants']
     periodic_merchants = stats['periodic_merchants']
-    travel_merchants = stats['travel_merchants']
     one_off_merchants = stats['one_off_merchants']
     variable_merchants = stats['variable_merchants']
 
@@ -335,13 +332,10 @@ def write_summary_file_vue(stats, filepath, year=2025, home_locations=None, curr
                     'merchants': merchants
                 }
 
-    # Get home state for location coloring
-    home_state = list(home_locations)[0] if home_locations else 'WA'
-
     # Calculate data through date (latest transaction date)
     latest_date = ''
     for merchant_dict in [monthly_merchants, annual_merchants, periodic_merchants,
-                          travel_merchants, one_off_merchants, variable_merchants]:
+                          one_off_merchants, variable_merchants]:
         for data in merchant_dict.values():
             for txn in data.get('transactions', []):
                 if txn.get('date', '') > latest_date:
@@ -403,7 +397,6 @@ def write_summary_file_vue(stats, filepath, year=2025, home_locations=None, curr
     spending_data = {
         'year': year,
         'numMonths': num_months,
-        'homeState': home_state,
         'sources': sources,
         'dataThrough': latest_date,
         'sections': sections,

@@ -232,18 +232,23 @@ def load_config(config_dir, settings_file='settings.yaml'):
     # Store warnings for CLI to display
     config['_warnings'] = warnings
 
-    # Normalize home_locations to a set of uppercase location codes
-    # Support legacy home_state for backward compatibility
-    home_locations = config.get('home_locations', [])
-    if not home_locations and 'home_state' in config:
-        home_locations = [config['home_state']]
-    if isinstance(home_locations, str):
-        home_locations = [home_locations]
-    config['home_locations'] = {loc.upper() for loc in home_locations}
+    # Warn about removed home_locations/travel_locations feature
+    removed_settings = []
+    if 'home_locations' in config:
+        removed_settings.append('home_locations')
+    if 'home_state' in config:
+        removed_settings.append('home_state')
+    if 'travel_labels' in config:
+        removed_settings.append('travel_labels')
 
-    # Normalize travel_labels to uppercase keys
-    travel_labels = config.get('travel_labels', {})
-    config['travel_labels'] = {k.upper(): v for k, v in travel_labels.items()}
+    if removed_settings:
+        warnings.append({
+            'type': 'deprecated',
+            'source': 'settings.yaml',
+            'feature': ', '.join(removed_settings),
+            'message': f"Settings '{', '.join(removed_settings)}' have been removed.",
+            'suggestion': "Use merchant rules with a 'Travel' category instead. Remove these settings from settings.yaml.",
+        })
 
     # Store config dir for reference
     config['_config_dir'] = config_dir

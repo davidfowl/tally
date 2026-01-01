@@ -1238,9 +1238,8 @@ createApp({
         }
 
         function getLocationClass(location) {
-            const home = spendingData.value.homeState || 'WA';
-            if (location === home) return 'home';
-            if (location && location.length > 2) return 'intl'; // International
+            // Just distinguish international locations (>2 chars) from domestic
+            if (location && location.length > 2) return 'intl';
             return '';
         }
 

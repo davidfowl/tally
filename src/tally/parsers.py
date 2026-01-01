@@ -57,50 +57,11 @@ def extract_location(description):
     return None
 
 
-def is_travel_location(location, home_locations):
-    """Determine if a location represents travel (away from home).
-
-    Only international locations (outside US) are automatically considered travel.
-    Domestic out-of-state transactions can be marked as travel via merchant rules
-    (e.g., add ".*HI$,Hawaii Trip,Travel,Hawaii" to merchant_categories.csv).
-
-    Args:
-        location: 2-letter location code (state or country)
-        home_locations: Set of location codes considered "home"
-
-    Returns:
-        True if this is a travel location, False otherwise
-    """
-    if not location:
-        return False
-
-    # US state codes
-    us_states = {
-        'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-        'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-        'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-        'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-        'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
-        'DC', 'PR', 'VI', 'GU'
-    }
-
-    location = location.upper()
-
-    # International (not a US state) = travel unless explicitly in home_locations
-    if location not in us_states:
-        return location not in home_locations
-
-    # Domestic US states = NOT travel by default
-    # Users can mark specific locations as travel via merchant_categories.csv
-    return False
-
-
-def parse_amex(filepath, rules, home_locations=None):
+def parse_amex(filepath, rules):
     """Parse AMEX CSV file and return list of transactions.
 
     DEPRECATED: Use format strings instead. This parser will be removed in a future release.
     """
-    home_locations = home_locations or set()
     transactions = []
 
     with open(filepath, 'r', encoding='utf-8') as f:
@@ -128,7 +89,6 @@ def parse_amex(filepath, rules, home_locations=None):
                     'subcategory': subcategory,
                     'source': 'AMEX',
                     'location': location,
-                    'is_travel': is_travel_location(location, home_locations),
                     'match_info': match_info,
                     'tags': match_info.get('tags', []) if match_info else [],
                 })
@@ -138,12 +98,11 @@ def parse_amex(filepath, rules, home_locations=None):
     return transactions
 
 
-def parse_boa(filepath, rules, home_locations=None):
+def parse_boa(filepath, rules):
     """Parse BOA statement file and return list of transactions.
 
     DEPRECATED: Use format strings instead. This parser will be removed in a future release.
     """
-    home_locations = home_locations or set()
     transactions = []
 
     with open(filepath, 'r', encoding='utf-8') as f:
@@ -181,7 +140,6 @@ def parse_boa(filepath, rules, home_locations=None):
                     'subcategory': subcategory,
                     'source': 'BOA',
                     'location': location,
-                    'is_travel': is_travel_location(location, home_locations),
                     'tags': match_info.get('tags', []) if match_info else [],
                 })
             except ValueError:
@@ -230,7 +188,7 @@ def _iter_rows_with_delimiter(filepath, delimiter, has_header):
                 yield row
 
 
-def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_name='CSV',
+def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
                       decimal_separator='.', transforms=None):
     """
     Parse a CSV file using a custom format specification.
@@ -239,7 +197,6 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
         filepath: Path to the CSV file
         format_spec: FormatSpec defining column mappings (supports delimiter option)
         rules: Merchant categorization rules
-        home_locations: Set of location codes considered "home"
         source_name: Name to use for transaction source (default: 'CSV')
         decimal_separator: Character used as decimal separator ('.' or ',')
         transforms: Optional list of (field_path, expression) tuples for field transforms
@@ -252,7 +209,6 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
     Returns:
         List of transaction dictionaries
     """
-    home_locations = home_locations or set()
     transactions = []
 
     # Get delimiter from format spec
@@ -350,7 +306,6 @@ def parse_generic_csv(filepath, format_spec, rules, home_locations=None, source_
                 'subcategory': subcategory,
                 'source': format_spec.source_name or source_name,
                 'location': location,
-                'is_travel': is_travel_location(location, home_locations),
                 'is_credit': is_credit,
                 'match_info': match_info,
                 'tags': match_info.get('tags', []) if match_info else [],

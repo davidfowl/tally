@@ -679,27 +679,12 @@
   <span class="highlight">format:</span> <span class="string">"{date:%d.%m.%Y},{description},{amount}"</span>
   <span class="highlight">decimal_separator:</span> <span class="string">","</span>  <span class="comment"># Parses 1.234,56 correctly</span></code></pre>
 
-        <h2 id="travel"><a href="#travel" class="anchor-link">#</a>Travel Detection</h2>
-        <p>Tally can automatically detect travel-related transactions using location data from your CSVs.</p>
-
-        <h3>Capturing Location</h3>
-        <p>If your bank includes a state/country code in the CSV, capture it with <code>{location}</code>:</p>
-        <pre><code><span class="comment"># CSV: Date, Description, Amount, State</span>
-<span class="highlight">format:</span> <span class="string">"{date:%m/%d/%Y},{description},{amount},{location}"</span></code></pre>
-
-        <h3>Defining Home Locations</h3>
-        <p>Transactions outside these locations are classified as travel:</p>
-        <pre><code><span class="highlight">home_locations:</span>
-  - WA
-  - OR
-  - CA</code></pre>
-
-        <h3>Custom Travel Labels</h3>
-        <p>Map location codes to readable names in reports:</p>
-        <pre><code><span class="highlight">travel_labels:</span>
-  <span class="highlight">NY:</span> New York Trip
-  <span class="highlight">TX:</span> Austin Conference
-  <span class="highlight">GB:</span> London Vacation</code></pre>
+        <h2 id="travel"><a href="#travel" class="anchor-link">#</a>Travel Tracking</h2>
+        <p>To track travel expenses, use a <code>Travel</code> category in your merchant rules:</p>
+        <pre><code><span class="comment"># In merchants.rules:</span>
+AIRBNB -> <span class="string">"Airbnb"</span>, Travel, Lodging
+SOUTHWEST -> <span class="string">"Southwest"</span>, Travel, Flights
+UBER -> <span class="string">"Uber"</span>, Travel, Transport</code></pre>
 
         <h2 id="commands"><a href="#commands" class="anchor-link">#</a>CLI Commands</h2>
         <table>

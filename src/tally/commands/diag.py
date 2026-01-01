@@ -51,8 +51,6 @@ def cmd_diag(args):
             print(f"  Loaded successfully: Yes")
             print(f"  Year: {config.get('year', 'not set')}")
             print(f"  Output dir: {config.get('output_dir', 'not set')}")
-            home_locs = config.get('home_locations', set())
-            print(f"  Home locations: {', '.join(sorted(home_locs)) if home_locs else 'auto-detect'}")
             currency_fmt = config.get('currency_format', '${amount}')
             from ..analyzer import format_currency
             print(f"  Currency format: {currency_fmt}")

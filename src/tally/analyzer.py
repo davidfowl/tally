@@ -14,7 +14,6 @@ from . import section_engine
 from .parsers import (
     parse_amount,
     extract_location,
-    is_travel_location,
     parse_amex,
     parse_boa,
     parse_generic_csv,
@@ -88,7 +87,7 @@ def analyze_transactions(transactions):
 
         month_key = txn['date'].strftime('%Y-%m')
 
-        # Always track by merchant - is_travel flag determines classification
+        # Track by merchant
         by_merchant[txn['merchant']]['count'] += 1
         by_merchant[txn['merchant']]['total'] += txn['amount']
         by_merchant[txn['merchant']]['category'] = txn['category']
@@ -108,9 +107,6 @@ def analyze_transactions(transactions):
         # Track max payment
         if txn['amount'] > by_merchant[txn['merchant']]['max_payment']:
             by_merchant[txn['merchant']]['max_payment'] = txn['amount']
-        # Mark merchant as travel if ANY transaction is travel (location-based)
-        if txn.get('is_travel'):
-            by_merchant[txn['merchant']]['is_travel'] = True
         # Store match info (pattern that matched) - first transaction sets this
         if 'match_info' not in by_merchant[txn['merchant']] and txn.get('match_info'):
             by_merchant[txn['merchant']]['match_info'] = txn['match_info']
@@ -170,7 +166,6 @@ def analyze_transactions(transactions):
     monthly_merchants = {}
     annual_merchants = {}
     periodic_merchants = {}
-    travel_merchants = {}
     one_off_merchants = {}
     variable_merchants = dict(by_merchant)
 
@@ -178,7 +173,6 @@ def analyze_transactions(transactions):
     monthly_total = 0
     annual_total = 0
     periodic_total = 0
-    travel_total = 0
     one_off_total = 0
     variable_total = sum(d['total'] for d in variable_merchants.values())
 
@@ -202,14 +196,12 @@ def analyze_transactions(transactions):
         'monthly_merchants': monthly_merchants,
         'annual_merchants': annual_merchants,
         'periodic_merchants': periodic_merchants,
-        'travel_merchants': travel_merchants,
         'one_off_merchants': one_off_merchants,
         'variable_merchants': variable_merchants,
         # Totals (YTD)
         'monthly_total': monthly_total,
         'annual_total': annual_total,
         'periodic_total': periodic_total,
-        'travel_total': travel_total,
         'one_off_total': one_off_total,
         'variable_total': variable_total,
         # True monthly averages
@@ -422,7 +414,6 @@ def export_json(stats, verbose=0, only=None, category_filter=None, merchant_filt
                 'monthly': round(stats['monthly_total'], 2),
                 'annual': round(stats['annual_total'], 2),
                 'periodic': round(stats['periodic_total'], 2),
-                'travel': round(stats['travel_total'], 2),
                 'one_off': round(stats['one_off_total'], 2),
                 'variable': round(stats['variable_total'], 2),
             }
@@ -431,7 +422,7 @@ def export_json(stats, verbose=0, only=None, category_filter=None, merchant_filt
     }
 
     # Classification sections to process
-    all_sections = ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']
+    all_sections = ['monthly', 'annual', 'periodic', 'one_off', 'variable']
     sections = only if only else all_sections
 
     for section in sections:
@@ -477,12 +468,11 @@ def export_markdown(stats, verbose=0, only=None, category_filter=None, merchant_
     lines.append(f"- **Data Period:** {stats['num_months']} months\n")
 
     # Classification sections to process
-    all_sections = ['monthly', 'annual', 'periodic', 'travel', 'one_off', 'variable']
+    all_sections = ['monthly', 'annual', 'periodic', 'one_off', 'variable']
     section_names = {
         'monthly': 'Every Month',
         'annual': 'Once a Year',
         'periodic': 'A Few Times/Year',
-        'travel': 'Travel Expenses',
         'one_off': 'Large One-Time',
         'variable': 'Varies by Month',
     }
@@ -553,7 +543,6 @@ def print_summary(stats, year=2025, filter_category=None, currency_format="${amo
     monthly_merchants = stats['monthly_merchants']
     annual_merchants = stats['annual_merchants']
     periodic_merchants = stats['periodic_merchants']
-    travel_merchants = stats['travel_merchants']
     one_off_merchants = stats['one_off_merchants']
     variable_merchants = stats['variable_merchants']
 
@@ -578,10 +567,9 @@ def print_summary(stats, year=2025, filter_category=None, currency_format="${amo
     print("-" * 50)
     print(f"Once a Year:                 {fmt(stats['annual_total']):>14}")
     print(f"A Few Times/Year:            {fmt(stats['periodic_total']):>14}")
-    print(f"Travel Expenses:             {fmt(stats['travel_total']):>14}")
     print(f"Large One-Time:              {fmt(stats['one_off_total']):>14}")
     print(f"                             {'-'*14}")
-    print(f"Total Non-Recurring:         {fmt(stats['annual_total'] + stats['periodic_total'] + stats['travel_total'] + stats['one_off_total']):>14}")
+    print(f"Total Non-Recurring:         {fmt(stats['annual_total'] + stats['periodic_total'] + stats['one_off_total']):>14}")
     print()
     print(f"TOTAL SPENDING (YTD):        {fmt(actual_spending):>14}")
 
@@ -651,21 +639,6 @@ def print_summary(stats, year=2025, filter_category=None, currency_format="${amo
         print(f"{merchant:<28} {data['subcategory']:<15} {data['count']:>6} {fmt(data['total']):>14}")
 
     print(f"\n{'TOTAL':<28} {'':<15} {'':<6} {fmt(stats['periodic_total']):>14}")
-
-    # =========================================================================
-    # TRAVEL EXPENSES
-    # =========================================================================
-    print("\n" + "=" * 80)
-    print("TRAVEL EXPENSES")
-    print("=" * 80)
-    print(f"\n{'Merchant':<28} {'Category':<15} {'Count':>6} {'Total':>12}")
-    print("-" * 65)
-
-    sorted_travel = sorted(travel_merchants.items(), key=lambda x: x[1]['total'], reverse=True)
-    for merchant, data in sorted_travel[:15]:
-        print(f"{merchant:<28} {data['category']:<15} {data['count']:>6} {fmt(data['total']):>14}")
-
-    print(f"\n{'TOTAL TRAVEL':<28} {'':<15} {'':<6} {fmt(stats['travel_total']):>14}")
 
     # =========================================================================
     # LARGE ONE-TIME
