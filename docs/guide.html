@@ -189,6 +189,29 @@
             text-decoration: underline;
         }
 
+        h2[id], h3[id] {
+            position: relative;
+        }
+
+        h2[id] .anchor-link, h3[id] .anchor-link {
+            position: absolute;
+            left: -1.5rem;
+            color: rgba(255,255,255,0.3);
+            text-decoration: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-weight: 400;
+        }
+
+        h2[id]:hover .anchor-link, h3[id]:hover .anchor-link {
+            opacity: 1;
+        }
+
+        h2[id] .anchor-link:hover, h3[id] .anchor-link:hover {
+            color: #4ade80;
+            text-decoration: none;
+        }
+
         .callout {
             background: rgba(74, 222, 128, 0.05);
             border: 1px solid rgba(74, 222, 128, 0.15);
@@ -355,7 +378,7 @@
         <h1>Guide</h1>
         <p class="subtitle">Using Tally with AI assistants</p>
 
-        <h2 id="how-it-works">How It Works</h2>
+        <h2 id="how-it-works"><a href="#how-it-works" class="anchor-link">#</a>How It Works</h2>
         <p>Tally is a <strong>rule engine</strong> that classifies transactions. The AI assistant is the <strong>operator</strong> that writes the rules. Together they create a feedback loop:</p>
         <ol>
             <li>Tally finds uncategorized transactions</li>
@@ -364,7 +387,7 @@
             <li>Repeat until everything is categorized</li>
         </ol>
 
-        <h2 id="supported-ai-assistants">Supported AI Assistants</h2>
+        <h2 id="supported-ai-assistants"><a href="#supported-ai-assistants" class="anchor-link">#</a>Supported AI Assistants</h2>
         <div class="agent-list">
             <div class="agent-item">
                 <strong>Claude Code</strong>
@@ -385,7 +408,7 @@
         </div>
         <p>Any AI agent that can run command-line tools will work with Tally.</p>
 
-        <h2 id="starting-a-session">Starting a Session</h2>
+        <h2 id="starting-a-session"><a href="#starting-a-session" class="anchor-link">#</a>Starting a Session</h2>
         <p>After <a href="quickstart.html">setting up your budget folder</a>, open it in your AI assistant and tell it what to do:</p>
 
         <div class="user-msg">"Use tally to configure my Chase credit card CSV"</div>
@@ -394,7 +417,7 @@
 
         <p>The agent will run <code>tally workflow</code> to understand the current state and follow the instructions.</p>
 
-        <h2 id="workflow-command">The Workflow Command</h2>
+        <h2 id="workflow-command"><a href="#workflow-command" class="anchor-link">#</a>The Workflow Command</h2>
         <p>The <code>tally workflow</code> command is context-aware. It detects your setup state and shows relevant next steps:</p>
 
         <h3>No data sources configured</h3>
@@ -424,7 +447,7 @@ All transactions categorized!
 Run: tally run
 </span></code></pre>
 
-        <h2 id="key-commands">Key Commands for AI Agents</h2>
+        <h2 id="key-commands"><a href="#key-commands" class="anchor-link">#</a>Key Commands for AI Agents</h2>
 
         <h3>Discover unknown merchants</h3>
         <pre><code><span class="cmd">tally discover --format json</span></code></pre>
@@ -446,7 +469,7 @@ Run: tally run
         <pre><code><span class="cmd">tally run --format json -v</span></code></pre>
         <p>Returns complete analysis with classification reasoning.</p>
 
-        <h2 id="writing-rules">Writing Rules</h2>
+        <h2 id="writing-rules"><a href="#writing-rules" class="anchor-link">#</a>Writing Rules</h2>
         <p>When the AI finds unknown transactions, it adds rules to <code>config/merchants.rules</code>:</p>
         <pre><code><span class="highlight">[Netflix]</span>
 match: contains("NETFLIX")
@@ -466,7 +489,7 @@ subcategory: Grocery</code></pre>
             <p>Tell the AI your preferences: "Coffee shops should be Food > Coffee, not Food > Restaurant" or "Tag all Uber rides as business, reimbursable".</p>
         </div>
 
-        <h2 id="customizing-categories">Customizing Categories</h2>
+        <h2 id="customizing-categories"><a href="#customizing-categories" class="anchor-link">#</a>Customizing Categories</h2>
         <p>Tally doesn't have predefined categories. You define them in your rules:</p>
         <ul>
             <li><strong>Category</strong> - Primary grouping (Food, Transportation, Bills)</li>
@@ -475,7 +498,7 @@ subcategory: Grocery</code></pre>
         </ul>
         <p>Tell the AI your preferred structure and it will use it consistently.</p>
 
-        <h2 id="generating-reports">Generating Reports</h2>
+        <h2 id="generating-reports"><a href="#generating-reports" class="anchor-link">#</a>Generating Reports</h2>
         <p>Once transactions are categorized:</p>
         <pre><code><span class="cmd">tally run</span></code></pre>
         <p>This generates an HTML report with:</p>
@@ -486,7 +509,7 @@ subcategory: Grocery</code></pre>
             <li>Transaction search and filtering</li>
         </ul>
 
-        <h2 id="iterating">Iterating</h2>
+        <h2 id="iterating"><a href="#iterating" class="anchor-link">#</a>Iterating</h2>
         <p>As you review the report, you might want changes:</p>
         <div class="user-msg">"Move Starbucks from Restaurant to Coffee"</div>
         <div class="user-msg">"Split Amazon purchases - anything over $100 should be Shopping > Electronics"</div>

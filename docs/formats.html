@@ -149,6 +149,29 @@
             padding-top: 0;
         }
 
+        h2[id] {
+            position: relative;
+        }
+
+        h2[id] .anchor-link {
+            position: absolute;
+            left: -1.5rem;
+            color: rgba(255,255,255,0.3);
+            text-decoration: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-weight: 400;
+        }
+
+        h2[id]:hover .anchor-link {
+            opacity: 1;
+        }
+
+        h2[id] .anchor-link:hover {
+            color: #4ade80;
+            text-decoration: none;
+        }
+
         h3 {
             font-size: 1.1rem;
             font-weight: 600;
@@ -415,7 +438,7 @@
             <a href="#commands">CLI Commands</a>
         </div>
 
-        <h2 id="settings-yaml">settings.yaml</h2>
+        <h2 id="settings-yaml"><a href="#settings-yaml" class="anchor-link">#</a>settings.yaml</h2>
         <p>The main configuration file. Created by <code>tally init</code>.</p>
 
         <pre><code><span class="highlight">year:</span> 2025
@@ -434,7 +457,7 @@
     <span class="highlight">file:</span> data/bofa.csv
     <span class="highlight">format:</span> <span class="string">"{date:%m/%d/%Y},{description},{amount}"</span></code></pre>
 
-        <h2 id="data-sources">Data Sources</h2>
+        <h2 id="data-sources"><a href="#data-sources" class="anchor-link">#</a>Data Sources</h2>
         <p>Each data source represents a CSV file from a bank or credit card.</p>
 
         <table>
@@ -496,7 +519,7 @@
   <span class="highlight">has_header:</span> false</code></pre>
         <p>Regex delimiters use capture groups <code>()</code> to extract columns. Each group becomes a column matched by the format string.</p>
 
-        <h2 id="format-strings">Format Strings</h2>
+        <h2 id="format-strings"><a href="#format-strings" class="anchor-link">#</a>Format Strings</h2>
         <p>Format strings describe how to parse each CSV column. They map your CSV structure to the fields Tally needs.</p>
 
         <h3>Basic Tokens</h3>
@@ -595,7 +618,7 @@
   <span class="highlight">columns:</span>
     <span class="highlight">description:</span> <span class="string">"{vendor} ({txn_type})"</span></code></pre>
 
-        <h2 id="date-formats">Date Formats</h2>
+        <h2 id="date-formats"><a href="#date-formats" class="anchor-link">#</a>Date Formats</h2>
         <p>Common date format specifiers:</p>
 
         <table>
@@ -631,7 +654,7 @@
             </tr>
         </table>
 
-        <h2 id="currency">Currency Format</h2>
+        <h2 id="currency"><a href="#currency" class="anchor-link">#</a>Currency Format</h2>
         <p>Display amounts in your local currency:</p>
 
         <pre><code><span class="comment"># US Dollars (default)</span>
@@ -656,7 +679,7 @@
   <span class="highlight">format:</span> <span class="string">"{date:%d.%m.%Y},{description},{amount}"</span>
   <span class="highlight">decimal_separator:</span> <span class="string">","</span>  <span class="comment"># Parses 1.234,56 correctly</span></code></pre>
 
-        <h2 id="travel">Travel Detection</h2>
+        <h2 id="travel"><a href="#travel" class="anchor-link">#</a>Travel Detection</h2>
         <p>Tally can automatically detect travel-related transactions using location data from your CSVs.</p>
 
         <h3>Capturing Location</h3>
@@ -678,7 +701,7 @@
   <span class="highlight">TX:</span> Austin Conference
   <span class="highlight">GB:</span> London Vacation</code></pre>
 
-        <h2 id="commands">CLI Commands</h2>
+        <h2 id="commands"><a href="#commands" class="anchor-link">#</a>CLI Commands</h2>
         <table>
             <tr>
                 <th>Command</th>

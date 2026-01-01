@@ -217,6 +217,29 @@
             text-decoration: underline;
         }
 
+        h2[id] {
+            position: relative;
+        }
+
+        h2[id] .anchor-link {
+            position: absolute;
+            left: -1.5rem;
+            color: rgba(255,255,255,0.3);
+            text-decoration: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-weight: 400;
+        }
+
+        h2[id]:hover .anchor-link {
+            opacity: 1;
+        }
+
+        h2[id] .anchor-link:hover {
+            color: #4ade80;
+            text-decoration: none;
+        }
+
         .next-steps {
             background: rgba(74, 222, 128, 0.05);
             border: 1px solid rgba(74, 222, 128, 0.15);
@@ -407,7 +430,7 @@
         <h1>Quick Start</h1>
         <p class="subtitle">Get Tally running in 5 minutes</p>
 
-        <h2 id="install"><span class="step-number">1</span> Install Tally</h2>
+        <h2 id="install"><a href="#install" class="anchor-link">#</a><span class="step-number">1</span> Install Tally</h2>
         <p>Choose your platform:</p>
         <div class="install-cards">
             <div class="install-card">
@@ -432,7 +455,7 @@
             </div>
         </div>
 
-        <h2 id="create-folder"><span class="step-number">2</span> Create a Budget Folder</h2>
+        <h2 id="create-folder"><a href="#create-folder" class="anchor-link">#</a><span class="step-number">2</span> Create a Budget Folder</h2>
         <p>Initialize a new folder to hold your configuration and data:</p>
         <pre><code><span class="cmd">tally init ./my-budget</span>
 <span class="cmd">cd my-budget</span></code></pre>
@@ -444,10 +467,10 @@
             <li><code>AGENTS.md</code> - Instructions for AI assistants</li>
         </ul>
 
-        <h2 id="add-csvs"><span class="step-number">3</span> Add Your Bank CSVs</h2>
+        <h2 id="add-csvs"><a href="#add-csvs" class="anchor-link">#</a><span class="step-number">3</span> Add Your Bank CSVs</h2>
         <p>Download transaction exports from your bank and credit cards, then copy them to the <code>data/</code> folder.</p>
 
-        <h2 id="configure-sources"><span class="step-number">4</span> Configure Data Sources</h2>
+        <h2 id="configure-sources"><a href="#configure-sources" class="anchor-link">#</a><span class="step-number">4</span> Configure Data Sources</h2>
         <p>Edit <code>settings.yaml</code> to point to your CSV files:</p>
         <pre><code><span class="highlight">year:</span> 2025
 
@@ -461,12 +484,12 @@
     <span class="highlight">format:</span> "{date:%m/%d/%Y},{description},{amount}"</code></pre>
         <p>Use <code>tally inspect data/yourfile.csv</code> to see the CSV structure and get format suggestions.</p>
 
-        <h2 id="run-workflow"><span class="step-number">5</span> Run the Workflow</h2>
+        <h2 id="run-workflow"><a href="#run-workflow" class="anchor-link">#</a><span class="step-number">5</span> Run the Workflow</h2>
         <p>Check what to do next:</p>
         <pre><code><span class="cmd">tally workflow</span></code></pre>
         <p>This command detects your setup state and shows context-aware instructions. If you have an AI assistant (Claude Code, Copilot, Cursor), it will guide it through categorizing your transactions.</p>
 
-        <h2 id="generate-report"><span class="step-number">6</span> Generate Your Report</h2>
+        <h2 id="generate-report"><a href="#generate-report" class="anchor-link">#</a><span class="step-number">6</span> Generate Your Report</h2>
         <p>Once transactions are categorized:</p>
         <pre><code><span class="cmd">tally run</span></code></pre>
         <p>This generates an HTML spending report with all your transactions organized by category, recurring expenses identified, and monthly trends visualized.</p>

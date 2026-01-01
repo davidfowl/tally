@@ -258,6 +258,29 @@
             text-decoration: underline;
         }
 
+        h2[id] {
+            position: relative;
+        }
+
+        h2[id] .anchor-link {
+            position: absolute;
+            left: -1.5rem;
+            color: rgba(255,255,255,0.3);
+            text-decoration: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-weight: 400;
+        }
+
+        h2[id]:hover .anchor-link {
+            opacity: 1;
+        }
+
+        h2[id] .anchor-link:hover {
+            color: #4ade80;
+            text-decoration: none;
+        }
+
         .note {
             background: rgba(96, 165, 250, 0.1);
             border: 1px solid rgba(96, 165, 250, 0.2);
@@ -414,7 +437,7 @@
             </div>
         </div>
 
-        <h2 id="merchants-rules">Merchants Rules</h2>
+        <h2 id="merchants-rules"><a href="#merchants-rules" class="anchor-link">#</a>Merchants Rules</h2>
         <p>File: <code>config/merchants.rules</code></p>
         <p>Categorize transactions by matching descriptions to patterns.</p>
 
@@ -442,7 +465,7 @@
 <span class="keyword">category:</span> Shopping
 <span class="keyword">subcategory:</span> Wholesale</code></pre>
 
-        <h2 id="match-functions">Match Functions</h2>
+        <h2 id="match-functions"><a href="#match-functions" class="anchor-link">#</a>Match Functions</h2>
         <p>All match functions search <code>description</code> by default. Add an optional first argument to search a custom field.</p>
 
         <table>
@@ -499,7 +522,7 @@
 <span class="comment"># Search custom field</span>
 <span class="keyword">match:</span> contains(field.memo, <span class="string">"REF"</span>)</code></pre>
 
-        <h2 id="conditions">Amount &amp; Date Conditions</h2>
+        <h2 id="conditions"><a href="#conditions" class="anchor-link">#</a>Amount &amp; Date Conditions</h2>
         <table>
             <tr>
                 <th>Condition</th>
@@ -547,7 +570,7 @@
             </tr>
         </table>
 
-        <h2 id="combining">Combining Conditions</h2>
+        <h2 id="combining"><a href="#combining" class="anchor-link">#</a>Combining Conditions</h2>
         <table>
             <tr>
                 <th>Operator</th>
@@ -576,7 +599,7 @@
             </tr>
         </table>
 
-        <h2 id="custom-fields">Custom CSV Fields</h2>
+        <h2 id="custom-fields"><a href="#custom-fields" class="anchor-link">#</a>Custom CSV Fields</h2>
         <p>Access fields captured from CSV format strings using <code>field.&lt;name&gt;</code>:</p>
         <pre><code><span class="comment"># In settings.yaml:</span>
 <span class="keyword">format:</span> <span class="string">"{date},{txn_type},{memo},{vendor},{amount}"</span>
@@ -595,7 +618,7 @@
         <p>Use <code>exists(field.name)</code> to safely check if a field exists:</p>
         <pre><code><span class="keyword">match:</span> exists(field.memo) and contains(field.memo, <span class="string">"REF"</span>)</code></pre>
 
-        <h2 id="extraction">Extraction Functions</h2>
+        <h2 id="extraction"><a href="#extraction" class="anchor-link">#</a>Extraction Functions</h2>
         <table>
             <tr>
                 <th>Function</th>
@@ -623,7 +646,7 @@
             </tr>
         </table>
 
-        <h2 id="variables">Variables</h2>
+        <h2 id="variables"><a href="#variables" class="anchor-link">#</a>Variables</h2>
         <p>Define reusable conditions at the top of your file:</p>
         <pre><code><span class="comment"># Define variables</span>
 is_large = amount &gt; 500
@@ -635,7 +658,7 @@ is_coffee = anyof(<span class="string">"STARBUCKS"</span>, <span class="string">
 <span class="keyword">match:</span> is_large and is_holiday
 <span class="keyword">category:</span> Shopping</code></pre>
 
-        <h2 id="transforms">Field Transforms</h2>
+        <h2 id="transforms"><a href="#transforms" class="anchor-link">#</a>Field Transforms</h2>
         <p>Mutate field values before matching. Place at the top of your file:</p>
         <pre><code><span class="comment"># Strip common prefixes</span>
 field.description = regex_replace(field.description, <span class="string">"^APLPAY\\s+"</span>, <span class="string">""</span>)
@@ -678,7 +701,7 @@ field.memo = trim(field.memo)</code></pre>
             <p>Original values are preserved in <code>_raw_&lt;field&gt;</code> (e.g., <code>_raw_description</code>).</p>
         </div>
 
-        <h2 id="special-tags">Special Tags</h2>
+        <h2 id="special-tags"><a href="#special-tags" class="anchor-link">#</a>Special Tags</h2>
         <p>These tags have special meaning in the spending report:</p>
         <table>
             <tr>
@@ -699,7 +722,7 @@ field.memo = trim(field.memo)</code></pre>
             </tr>
         </table>
 
-        <h2 id="dynamic-tags">Dynamic Tags</h2>
+        <h2 id="dynamic-tags"><a href="#dynamic-tags" class="anchor-link">#</a>Dynamic Tags</h2>
         <p>Use <code>{expression}</code> to create tags from field values:</p>
         <pre><code><span class="highlight">[Bank Transaction]</span>
 <span class="keyword">match:</span> contains(<span class="string">"BANK"</span>)
@@ -710,7 +733,7 @@ field.memo = trim(field.memo)</code></pre>
 <span class="keyword">match:</span> *
 <span class="keyword">tags:</span> {source}                      <span class="comment"># → "alice-amex", "bob-chase", etc.</span></code></pre>
 
-        <h2 id="tag-only-rules">Tag-Only Rules</h2>
+        <h2 id="tag-only-rules"><a href="#tag-only-rules" class="anchor-link">#</a>Tag-Only Rules</h2>
         <p>Rules without <code>category:</code> add tags without affecting categorization:</p>
         <pre><code><span class="highlight">[Large Purchase]</span>
 <span class="keyword">match:</span> amount &gt; 500
@@ -725,7 +748,7 @@ field.memo = trim(field.memo)</code></pre>
             <p>First rule with <code>category:</code> sets the category. Tags are collected from ALL matching rules.</p>
         </div>
 
-        <h2 id="rule-priority">Rule Priority</h2>
+        <h2 id="rule-priority"><a href="#rule-priority" class="anchor-link">#</a>Rule Priority</h2>
         <p>First categorization rule wins. Put specific patterns before general ones:</p>
         <pre><code><span class="highlight">[Uber Eats]</span>                    <span class="comment"># More specific, checked first</span>
 <span class="keyword">match:</span> contains(<span class="string">"UBER EATS"</span>)
@@ -735,7 +758,7 @@ field.memo = trim(field.memo)</code></pre>
 <span class="keyword">match:</span> contains(<span class="string">"UBER"</span>)
 <span class="keyword">category:</span> Transportation</code></pre>
 
-        <h2 id="practical-examples">Practical Examples</h2>
+        <h2 id="practical-examples"><a href="#practical-examples" class="anchor-link">#</a>Practical Examples</h2>
         
         <h3>Weekday vs Weekend Tagging</h3>
         <p>Tag the same merchant differently based on day of week (e.g., work lunches Monday-Friday):</p>
@@ -751,7 +774,7 @@ field.memo = trim(field.memo)</code></pre>
 <span class="keyword">subcategory:</span> Coffee
 <span class="comment"># No work tag for weekends</span></code></pre>
 
-        <h2 id="views-rules">Views Rules</h2>
+        <h2 id="views-rules"><a href="#views-rules" class="anchor-link">#</a>Views Rules</h2>
         <p>File: <code>config/views.rules</code></p>
         <p>Create custom sections in the spending report.</p>
 
@@ -804,7 +827,7 @@ field.memo = trim(field.memo)</code></pre>
             </tr>
         </table>
 
-        <h2 id="view-functions">View Functions</h2>
+        <h2 id="view-functions"><a href="#view-functions" class="anchor-link">#</a>View Functions</h2>
         <table>
             <tr>
                 <th>Function</th>
