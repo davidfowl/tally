@@ -9,7 +9,7 @@ import csv
 import os
 import re
 from datetime import date
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, TYPE_CHECKING
 
 from .modifier_parser import (
     parse_pattern_with_modifiers,
@@ -17,6 +17,26 @@ from .modifier_parser import (
     ParsedPattern,
     ModifierParseError,
 )
+
+if TYPE_CHECKING:
+    from .merchant_engine import MerchantEngine
+
+# Module-level cache for MerchantEngine when using .rules files
+# This allows normalize_merchant() to use the full engine features
+_cached_engine: Optional["MerchantEngine"] = None
+_cached_engine_path: Optional[str] = None
+
+
+def get_cached_engine() -> Optional["MerchantEngine"]:
+    """Get the cached MerchantEngine if available."""
+    return _cached_engine
+
+
+def clear_engine_cache():
+    """Clear the cached engine (useful for testing)."""
+    global _cached_engine, _cached_engine_path
+    _cached_engine = None
+    _cached_engine_path = None
 
 
 
@@ -120,7 +140,13 @@ def get_all_rules(rules_path=None):
     Returns:
         List of (pattern, merchant, category, subcategory, parsed_pattern, source, tags) tuples.
         Source is always 'user' for rules from the file.
+
+    Note:
+        When loading .rules files, the MerchantEngine is cached so that
+        normalize_merchant() can use the full engine features (let:, field:).
     """
+    global _cached_engine, _cached_engine_path
+
     user_rules_with_source = []
     if rules_path:
         # Check if it's the new .rules format
@@ -129,6 +155,11 @@ def get_all_rules(rules_path=None):
                 from .merchant_engine import load_merchants_file
                 from pathlib import Path
                 engine = load_merchants_file(Path(rules_path))
+
+                # Cache the engine for use by normalize_merchant()
+                _cached_engine = engine
+                _cached_engine_path = rules_path
+
                 # Convert MerchantRule objects to the tuple format used by parsing code
                 # Only include categorization rules (skip tag-only rules)
                 for rule in engine.rules:  # Include ALL rules (categorization + tag-only)
@@ -457,6 +488,7 @@ def normalize_merchant(
     data_source: Optional[str] = None,
     transforms: Optional[List[Tuple[str, str]]] = None,
     location: Optional[str] = None,
+    data_sources: Optional[Dict[str, List[Dict]]] = None,
 ) -> Tuple[str, str, str, Optional[dict]]:
     """Normalize a merchant description to (name, category, subcategory, match_info).
 
@@ -473,10 +505,14 @@ def normalize_merchant(
         field: Optional dict of custom CSV captures (for field.name in rule expressions)
         data_source: Optional data source name (for source variable in rule expressions and dynamic tags)
         transforms: Optional list of (field_path, expression) tuples for field transforms
+        location: Optional transaction location
+        data_sources: Optional dict mapping source names to list of row dicts (for cross-source queries)
 
     Returns:
         Tuple of (merchant_name, category, subcategory, match_info)
-        match_info is a dict with 'pattern', 'source', 'tags', or None if no match
+        match_info is a dict with 'pattern', 'source', 'tags', or None if no match.
+        When using .rules files with let:/field: directives, match_info
+        also includes 'extra_fields' from the matched rule.
     """
     from tally import expr_parser
 
@@ -496,6 +532,38 @@ def normalize_merchant(
             if key.startswith('_raw_'):
                 raw_values[key] = transaction[key]
 
+    # If we have a cached MerchantEngine, use it for full feature support
+    # This enables let: and field: directives
+    if _cached_engine is not None:
+        result = _cached_engine.match(transaction, data_sources=data_sources)
+
+        if result.merchant:
+            match_info = {
+                'pattern': result.matched_rule.match_expr if result.matched_rule else None,
+                'source': 'user',
+                'tags': list(result.tags),
+            }
+            if result.tag_sources:
+                match_info['tag_sources'] = result.tag_sources
+            if raw_values:
+                match_info['raw_values'] = raw_values
+            # Include extra_fields from field: directives
+            if result.extra_fields:
+                match_info['extra_fields'] = result.extra_fields
+            return (result.merchant, result.category, result.subcategory, match_info)
+
+        # No match from engine - fallback to extract merchant name
+        merchant_name = extract_merchant_name(description)
+        if result.tags or raw_values:
+            match_info = {'pattern': None, 'source': 'auto', 'tags': list(result.tags)}
+            if result.tag_sources:
+                match_info['tag_sources'] = result.tag_sources
+            if raw_values:
+                match_info['raw_values'] = raw_values
+            return (merchant_name, 'Unknown', 'Unknown', match_info)
+        return (merchant_name, 'Unknown', 'Unknown', None)
+
+    # Legacy path: no cached engine, use tuple-based matching
     # Get uppercase description for matching
     desc_upper = description.upper()
 
@@ -532,7 +600,7 @@ def normalize_merchant(
 
             if _is_expression_pattern(pattern):
                 # Use expression parser for expression-based rules
-                matches = expr_parser.matches_transaction(pattern, transaction)
+                matches = expr_parser.matches_transaction(pattern, transaction, data_sources=data_sources)
             else:
                 # Legacy regex pattern matching
                 if re.search(pattern, desc_upper, re.IGNORECASE):

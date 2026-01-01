@@ -1054,3 +1054,282 @@ subcategory: Test
 
         transforms = get_transforms("/path/to/merchants.csv")
         assert transforms == []
+
+
+class TestLetBindings:
+    """Tests for rule-level let: bindings."""
+
+    def test_parse_let_binding(self):
+        """Parse rule with let binding."""
+        content = """
+[Amazon Verified]
+let: matched = amount > 100
+match: contains("AMAZON") and matched
+category: Shopping
+subcategory: Large
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        assert len(engine.rules) == 1
+        rule = engine.rules[0]
+        assert len(rule.let_bindings) == 1
+        assert rule.let_bindings[0] == ('matched', 'amount > 100')
+
+    def test_parse_multiple_let_bindings(self):
+        """Parse rule with multiple let bindings."""
+        content = """
+[Amazon Verified]
+let: is_large = amount > 100
+let: is_amazon = contains("AMAZON")
+match: is_amazon and is_large
+category: Shopping
+subcategory: Large
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        rule = engine.rules[0]
+        assert len(rule.let_bindings) == 2
+        assert rule.let_bindings[0] == ('is_large', 'amount > 100')
+        assert rule.let_bindings[1] == ('is_amazon', 'contains("AMAZON")')
+
+    def test_let_binding_evaluated_in_match(self):
+        """Let binding is available in match expression."""
+        content = """
+[Large Purchase]
+let: is_large = amount > 100
+match: is_large
+category: Shopping
+subcategory: Large
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        # Should match large amounts
+        result = engine.match({'description': 'TEST', 'amount': 150.0})
+        assert result.matched
+        assert result.category == 'Shopping'
+
+        # Should not match small amounts
+        result = engine.match({'description': 'TEST', 'amount': 50.0})
+        assert not result.matched
+
+    def test_let_binding_chains(self):
+        """Later let bindings can reference earlier ones."""
+        content = """
+[Verified Large]
+let: threshold = 100
+let: is_large = amount > threshold
+match: is_large
+category: Shopping
+subcategory: Large
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        result = engine.match({'description': 'TEST', 'amount': 150.0})
+        assert result.matched
+
+    def test_let_binding_with_data_sources(self):
+        """Let bindings work with supplemental data sources."""
+        content = """
+[Amazon Verified]
+let: orders = [r for r in amazon_orders if r.amount == amount]
+let: has_order = len(orders) > 0
+match: contains("AMAZON") and has_order
+category: Shopping
+subcategory: Verified
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        data_sources = {
+            'amazon_orders': [
+                {'item': 'Book', 'amount': 45.99},
+                {'item': 'Cable', 'amount': 30.00},
+            ]
+        }
+
+        # Should match when amount matches an order
+        result = engine.match(
+            {'description': 'AMAZON MARKETPLACE', 'amount': 45.99},
+            data_sources=data_sources
+        )
+        assert result.matched
+        assert result.subcategory == 'Verified'
+
+        # Should not match when amount doesn't match
+        result = engine.match(
+            {'description': 'AMAZON MARKETPLACE', 'amount': 99.99},
+            data_sources=data_sources
+        )
+        assert not result.matched
+
+    def test_invalid_let_syntax_error(self):
+        """Invalid let syntax raises error."""
+        content = """
+[Test]
+let: invalid syntax here
+match: true
+category: Test
+subcategory: Test
+"""
+        engine = MerchantEngine()
+        with pytest.raises(MerchantParseError, match="Invalid let syntax"):
+            engine.parse(content)
+
+    def test_invalid_let_expression_error(self):
+        """Invalid let expression raises error."""
+        content = """
+[Test]
+let: x = import os
+match: true
+category: Test
+subcategory: Test
+"""
+        engine = MerchantEngine()
+        with pytest.raises(MerchantParseError, match="Invalid let expression"):
+            engine.parse(content)
+
+
+class TestFieldDirective:
+    """Tests for field: directive to add extra fields to transactions."""
+
+    def test_parse_field_directive(self):
+        """Parse rule with field directive."""
+        content = """
+[Amazon]
+match: contains("AMAZON")
+category: Shopping
+field: item_count = 5
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        assert len(engine.rules) == 1
+        rule = engine.rules[0]
+        assert 'item_count' in rule.fields
+        assert rule.fields['item_count'] == '5'
+
+    def test_parse_multiple_field_directives(self):
+        """Parse rule with multiple field directives."""
+        content = """
+[Amazon]
+match: contains("AMAZON")
+category: Shopping
+field: items = "test items"
+field: order_id = "ABC123"
+field: count = 3
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        rule = engine.rules[0]
+        assert len(rule.fields) == 3
+        assert 'items' in rule.fields
+        assert 'order_id' in rule.fields
+        assert 'count' in rule.fields
+
+    def test_field_evaluated_on_match(self):
+        """Field expressions are evaluated when rule matches."""
+        content = """
+[Large Purchase]
+match: amount > 100
+category: Shopping
+field: is_large = true
+field: doubled = amount * 2
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        result = engine.match({'description': 'TEST', 'amount': 150.0})
+        assert result.matched
+        assert result.extra_fields['is_large'] is True
+        assert result.extra_fields['doubled'] == 300.0
+
+    def test_field_with_let_bindings(self):
+        """Field can reference let binding variables."""
+        content = """
+[Amazon]
+let: multiplier = 2
+match: contains("AMAZON")
+category: Shopping
+field: calculated = amount * multiplier
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        result = engine.match({'description': 'AMAZON', 'amount': 50.0})
+        assert result.matched
+        assert result.extra_fields['calculated'] == 100.0
+
+    def test_field_with_data_sources(self):
+        """Field can query supplemental data sources."""
+        content = """
+[Amazon]
+let: orders = [r for r in amazon_orders if r.amount == amount]
+match: contains("AMAZON") and len(orders) > 0
+category: Shopping
+field: items = [r.item for r in orders]
+field: order_count = len(orders)
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        data_sources = {
+            'amazon_orders': [
+                {'item': 'Book', 'amount': 45.99},
+                {'item': 'Cable', 'amount': 45.99},
+                {'item': 'Other', 'amount': 30.00},
+            ]
+        }
+
+        result = engine.match(
+            {'description': 'AMAZON MARKETPLACE', 'amount': 45.99},
+            data_sources=data_sources
+        )
+        assert result.matched
+        assert result.extra_fields['items'] == ['Book', 'Cable']
+        assert result.extra_fields['order_count'] == 2
+
+    def test_field_not_evaluated_when_no_match(self):
+        """Fields are not evaluated when rule doesn't match."""
+        content = """
+[Large Purchase]
+match: amount > 100
+category: Shopping
+field: calculated = amount * 2
+"""
+        engine = MerchantEngine()
+        engine.parse(content)
+
+        result = engine.match({'description': 'TEST', 'amount': 50.0})
+        assert not result.matched
+        assert result.extra_fields == {}
+
+    def test_invalid_field_syntax_error(self):
+        """Invalid field syntax raises error."""
+        content = """
+[Test]
+match: true
+category: Test
+field: invalid syntax here
+"""
+        engine = MerchantEngine()
+        with pytest.raises(MerchantParseError, match="Invalid field syntax"):
+            engine.parse(content)
+
+    def test_invalid_field_expression_error(self):
+        """Invalid field expression raises error."""
+        content = """
+[Test]
+match: true
+category: Test
+field: x = import os
+"""
+        engine = MerchantEngine()
+        with pytest.raises(MerchantParseError, match="Invalid field expression"):
+            engine.parse(content)
+
+

@@ -112,6 +112,7 @@ def resolve_source_format(source, warnings=None):
     For custom formats, also supports:
     - columns.description: Template for combining custom captures
       Example: "{merchant} ({type})" when format uses {type}, {merchant}
+    - supplemental: true (data source is query-only, doesn't generate transactions)
 
     Args:
         source: Data source configuration dict
@@ -120,6 +121,7 @@ def resolve_source_format(source, warnings=None):
     Returns the source dict with additional keys:
     - '_parser_type': 'amex', 'boa', or 'generic'
     - '_format_spec': FormatSpec object (for generic parser) or None
+    - '_supplemental': True if this is a supplemental (query-only) source
     """
     source = source.copy()
     source_name = source.get('name', 'unknown')
@@ -195,6 +197,9 @@ def resolve_source_format(source, warnings=None):
             f"Data source '{source.get('name', 'unknown')}' must specify "
             "'format'. Use 'tally inspect <file>' to determine the format."
         )
+
+    # Mark supplemental sources (query-only, don't generate transactions)
+    source['_supplemental'] = source.get('supplemental', False)
 
     return source
 
@@ -319,3 +324,122 @@ def load_config(config_dir, settings_file='settings.yaml'):
         config['_views_file'] = None
 
     return config
+
+
+def load_supplemental_sources(config, config_dir):
+    """
+    Load supplemental data sources as queryable row dictionaries.
+
+    Supplemental sources (marked with supplemental: true) are loaded into memory
+    but don't generate transactions. They can be queried from rule expressions
+    using list comprehensions.
+
+    Args:
+        config: Config dict from load_config()
+        config_dir: Path to config directory
+
+    Returns:
+        Dict mapping source names to list of row dicts.
+        Each row dict has fields from the source's format string.
+        Example: {'amazon_orders': [{'date': date(...), 'item': 'Book', 'amount': 12.99}, ...]}
+    """
+    import csv
+    from datetime import datetime
+
+    data_sources = {}
+
+    for source in config.get('data_sources', []):
+        if not source.get('_supplemental', False):
+            continue
+
+        source_name = source.get('name', '').lower()
+        if not source_name:
+            continue
+
+        # Find the file
+        filepath = os.path.join(config_dir, '..', source['file'])
+        filepath = os.path.normpath(filepath)
+        if not os.path.exists(filepath):
+            filepath = os.path.join(os.path.dirname(config_dir), source['file'])
+        if not os.path.exists(filepath):
+            continue
+
+        format_spec = source.get('_format_spec')
+        if not format_spec:
+            continue
+
+        # Parse the CSV file into row dicts
+        rows = []
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                # Handle delimiter: None means comma (default)
+                delimiter = format_spec.delimiter
+                if delimiter == 'tab':
+                    delimiter = '\t'
+                elif delimiter == 'whitespace' or delimiter is None:
+                    delimiter = ','
+
+                reader = csv.reader(f, delimiter=delimiter)
+
+                # Skip header if specified
+                if format_spec.has_header:
+                    next(reader, None)
+
+                # Build column map from format_spec
+                # custom_captures: {'symbol': 1, 'action': 2, ...}
+                column_map = {}
+                if format_spec.custom_captures:
+                    for name, col_idx in format_spec.custom_captures.items():
+                        column_map[name.lower()] = col_idx
+
+                # Add standard columns
+                column_map['date'] = format_spec.date_column
+                column_map['amount'] = format_spec.amount_column
+                if format_spec.description_column is not None:
+                    column_map['description'] = format_spec.description_column
+                if format_spec.location_column is not None:
+                    column_map['location'] = format_spec.location_column
+
+                for line in reader:
+                    if not line or all(not cell.strip() for cell in line):
+                        continue
+
+                    # Parse row according to column map
+                    row = {}
+                    for field_name, col_idx in column_map.items():
+                        if col_idx >= len(line):
+                            continue
+
+                        value = line[col_idx].strip()
+
+                        # Type conversion
+                        if field_name == 'date':
+                            try:
+                                row[field_name] = datetime.strptime(value, format_spec.date_format).date()
+                            except ValueError:
+                                row[field_name] = value
+                        elif field_name in ('amount', 'item_amount', 'price', 'total', 'proceeds', 'costbasis', 'gainloss', 'grosspay', 'federal', 'state', 'socialsec', 'medicare', '401k', 'hsa', 'netpay', 'shares'):
+                            try:
+                                # Handle decimal separator
+                                decimal_sep = source.get('decimal_separator', '.')
+                                if decimal_sep != '.':
+                                    value = value.replace(decimal_sep, '.')
+                                # Remove currency symbols
+                                value = value.replace('$', '').replace(',', '').strip()
+                                row[field_name] = float(value) if value else 0.0
+                            except ValueError:
+                                row[field_name] = 0.0
+                        else:
+                            row[field_name] = value
+
+                    if row:
+                        rows.append(row)
+
+        except Exception:
+            # Skip sources that can't be loaded
+            continue
+
+        if rows:
+            data_sources[source_name] = rows
+
+    return data_sources

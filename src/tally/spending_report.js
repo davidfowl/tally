@@ -29,6 +29,7 @@ const MerchantSection = defineComponent({
         collapsedSections: { type: Object, required: true },
         sortConfig: { type: Object, required: true },
         expandedItems: { type: Object, required: true },
+        extraFieldMatches: { type: Object, default: () => new Set() },
         toggleSection: { type: Function, required: true },
         toggleSort: { type: Function, required: true },
         formatCurrency: { type: Function, required: true },
@@ -171,11 +172,26 @@ const MerchantSection = defineComponent({
                                     class="txn-row"
                                     :class="{ hidden: !isExpanded(item.id || idx) }">
                                     <td :colspan="totalColSpan">
-                                        <div class="txn-detail">
+                                        <div class="txn-detail" :class="{ 'has-extra': txn.extra_fields && Object.keys(txn.extra_fields).length }">
+                                            <span v-if="txn.extra_fields && Object.keys(txn.extra_fields).length"
+                                                  class="extra-fields-trigger"
+                                                  :class="{ 'match-highlight': extraFieldMatches.has(txn.id) }"
+                                                  @click.stop="togglePopup($event)">+{{ Object.keys(txn.extra_fields).length }}
+                                                <span class="match-info-popup">
+                                                    <button class="popup-close" @click="closePopup($event)">&times;</button>
+                                                    <div class="popup-header">Transaction Details</div>
+                                                    <div v-for="(value, key) in txn.extra_fields" :key="key" class="popup-row">
+                                                        <span class="popup-label">{{ formatFieldKey(key) }}</span>
+                                                        <span v-if="Array.isArray(value)" class="popup-value popup-list">
+                                                            <span v-for="(item, i) in value" :key="i" class="popup-list-item">{{ item }}</span>
+                                                        </span>
+                                                        <span v-else class="popup-value">{{ formatFieldValue(value) }}</span>
+                                                    </div>
+                                                </span>
+                                            </span>
                                             <span class="txn-date">{{ formatDate(txn.date) }}</span>
                                             <span class="txn-desc"><span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span> <span v-html="highlightDescription(txn.description)"></span></span>
                                             <span class="txn-badges">
-                                                <span v-if="categoryMode && txn.amount < 0" class="txn-badge refund">REFUND</span>
                                                 <span v-if="txn.location && getLocationClass"
                                                       class="txn-location clickable"
                                                       :class="getLocationClass(txn.location)"
@@ -297,6 +313,19 @@ const MerchantSection = defineComponent({
             }
             return this.formatCurrency(txn.amount);
         },
+        formatFieldKey(key) {
+            // Convert snake_case to Title Case
+            return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        },
+        formatFieldValue(value) {
+            if (typeof value === 'number') {
+                return Number.isInteger(value) ? value : value.toFixed(2);
+            }
+            if (Array.isArray(value)) {
+                return value.join(', ');
+            }
+            return String(value);
+        },
         getMatchTooltip(item) {
             const matchInfo = item.matchInfo;
             if (!matchInfo) return '';
@@ -331,6 +360,7 @@ createApp({
         // ========== STATE ==========
         const activeFilters = ref([]);
         const expandedMerchants = reactive(new Set());
+        const extraFieldMatches = reactive(new Set()); // Track transaction IDs that matched via extra_fields
         const collapsedSections = reactive(new Set());
         const searchQuery = ref('');
         const showAutocomplete = ref(false);
@@ -1129,11 +1159,24 @@ createApp({
                 case 'tag':
                     return (txn.tags || []).some(t => t.toLowerCase() === text);
                 case 'text':
-                    // Search transaction description
-                    return (txn.description || '').toLowerCase().includes(text);
+                    // Search transaction description and extra_fields
+                    if ((txn.description || '').toLowerCase().includes(text)) return true;
+                    return matchesExtraFields(txn, text);
                 default:
                     return false;
             }
+        }
+
+        function matchesExtraFields(txn, searchText) {
+            if (!txn.extra_fields) return false;
+            for (const value of Object.values(txn.extra_fields)) {
+                if (Array.isArray(value)) {
+                    if (value.some(item => String(item).toLowerCase().includes(searchText))) return true;
+                } else if (String(value).toLowerCase().includes(searchText)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         function monthMatches(txnMonth, filterText) {
@@ -1604,6 +1647,30 @@ createApp({
         watch(activeFilters, filtersToHash, { deep: true });
         watch(chartAggregations, updateCharts);
 
+        // Track extra_field matches and auto-expand merchants
+        watch(activeFilters, () => {
+            extraFieldMatches.clear();
+            const textFilters = activeFilters.value.filter(f => f.type === 'text' && f.mode === 'include');
+            if (textFilters.length === 0) return;
+
+            const categoryView = spendingData.value.categoryView || {};
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const [merchantId, merchant] of Object.entries(subcat.merchants || {})) {
+                        for (const txn of merchant.transactions || []) {
+                            for (const filter of textFilters) {
+                                const searchText = filter.text.toLowerCase();
+                                if (matchesExtraFields(txn, searchText)) {
+                                    extraFieldMatches.add(txn.id);
+                                    expandedMerchants.add(merchantId);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }, { deep: true, immediate: true });
+
         // ========== LIFECYCLE ==========
 
         onMounted(() => {
@@ -1643,7 +1710,7 @@ createApp({
 
         return {
             // State
-            activeFilters, expandedMerchants, collapsedSections, searchQuery,
+            activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
             showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
             showExcluded, currentView, sortConfig,
             // Refs

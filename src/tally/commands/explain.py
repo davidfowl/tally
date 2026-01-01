@@ -500,6 +500,42 @@ def _get_function_explanations(pattern):
             f'(catches typos like "MARKEPLACE" vs "MARKETPLACE")'
         )
 
+    # Check for list comprehension (cross-source query)
+    list_comp = re.search(r'\[.*\bfor\b\s+\w+\s+\bin\b\s+(\w+)', pattern)
+    if list_comp:
+        source = list_comp.group(1)
+        explanations.append(
+            f'[... for x in {source}] - queries the "{source}" data source to find matching records'
+        )
+
+    # Check for aggregation functions with generators (cross-source query)
+    for func in ['any', 'sum', 'len', 'next']:
+        func_match = re.search(rf'\b{func}\s*\(.*\bfor\b\s+\w+\s+\bin\b\s+(\w+)', pattern)
+        if func_match:
+            source = func_match.group(1)
+            if func == 'any':
+                explanations.append(
+                    f'any(... for x in {source}) - checks if any record in "{source}" matches the condition'
+                )
+            elif func == 'sum':
+                explanations.append(
+                    f'sum(... for x in {source}) - sums values from matching records in "{source}"'
+                )
+            elif func == 'len':
+                explanations.append(
+                    f'len([... for x in {source}]) - counts matching records in "{source}"'
+                )
+            elif func == 'next':
+                explanations.append(
+                    f'next((... for x in {source}), default) - gets first matching record from "{source}"'
+                )
+
+    # Check for txn. namespace usage
+    if 'txn.' in pattern:
+        explanations.append(
+            'txn.* - explicit reference to current transaction fields (txn.amount, txn.date, etc.)'
+        )
+
     return explanations
 
 

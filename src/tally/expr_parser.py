@@ -71,9 +71,20 @@ ALLOWED_NODES = {
     ast.Constant,
     ast.Name,
     ast.Load,
+    ast.Store,  # For loop variable assignment in comprehensions
 
     # For attribute access like payment.amount (optional)
     ast.Attribute,
+
+    # List comprehensions and generators
+    ast.ListComp,       # [expr for x in iter if cond]
+    ast.comprehension,  # for x in iter if cond
+    ast.GeneratorExp,   # (expr for x in iter)
+    ast.Subscript,      # list[0] access
+    ast.Index,          # Index wrapper (Python 3.8 compat)
+
+    # Walrus operator for variable binding
+    ast.NamedExpr,      # (x := value)
 }
 
 
@@ -154,10 +165,11 @@ class TransactionContext:
     - field: Custom fields captured from CSV format string (dict)
     - source: Data source name (string)
     - location: Transaction location (string)
+    - data_sources: Dict mapping source names to list of row dicts (for queries)
     """
 
     __slots__ = ('description', 'amount', 'date', 'variables', 'field', 'source',
-                 'month', 'year', 'day', 'weekday', 'location')
+                 'month', 'year', 'day', 'weekday', 'location', 'data_sources')
 
     # Class-level function name mapping (looked up dynamically)
     _FUNCTION_NAMES: Set[str] = {
@@ -176,6 +188,7 @@ class TransactionContext:
         field: Optional[Dict[str, str]] = None,
         source: Optional[str] = None,
         location: Optional[str] = None,
+        data_sources: Optional[Dict[str, List[Dict]]] = None,
     ):
         self.description = description
         self.amount = amount  # Preserve sign - use abs(amount) in rules if needed
@@ -184,6 +197,7 @@ class TransactionContext:
         self.field = field  # Custom captures from CSV format string (None if not available)
         self.source = source or ""  # Data source name (e.g., "Amex", "Chase")
         self.location = location or ""  # Transaction location (e.g., "Seattle, WA")
+        self.data_sources = data_sources or {}  # Source name -> list of row dicts
 
         # Extract date components
         if date:
@@ -475,7 +489,12 @@ class TransactionContext:
         return text
 
     @classmethod
-    def from_transaction(cls, txn: Dict, variables: Optional[Dict[str, Any]] = None) -> 'TransactionContext':
+    def from_transaction(
+        cls,
+        txn: Dict,
+        variables: Optional[Dict[str, Any]] = None,
+        data_sources: Optional[Dict[str, List[Dict]]] = None,
+    ) -> 'TransactionContext':
         """Create context from a transaction dictionary."""
         return cls(
             description=txn.get('description', txn.get('raw_description', '')),
@@ -485,6 +504,7 @@ class TransactionContext:
             field=txn.get('field'),
             source=txn.get('source'),
             location=txn.get('location'),
+            data_sources=data_sources,
         )
 
 
@@ -862,10 +882,15 @@ class TransactionEvaluator:
 
     Handles transaction-level primitives (description, amount, date, etc.)
     and supports date comparisons with string literals.
+
+    Supports list comprehensions for querying data sources:
+        [r.item for r in amazon_orders if r.amount == txn.amount]
     """
 
     def __init__(self, ctx: TransactionContext):
         self.ctx = ctx
+        # Scope stack for loop variables and walrus assignments
+        self._scope: Dict[str, Any] = {}
 
     def evaluate(self, node: ast.AST) -> Any:
         """Evaluate an AST node and return its value."""
@@ -883,7 +908,11 @@ class TransactionEvaluator:
     def _eval_Name(self, node: ast.Name) -> Any:
         name = node.id.lower()
 
-        # Check user-defined variables first
+        # Check loop variable scope first (for list comprehensions)
+        if name in self._scope:
+            return self._scope[name]
+
+        # Check user-defined variables (from let: bindings)
         if name in self.ctx.variables:
             return self.ctx.variables[name]
 
@@ -908,6 +937,10 @@ class TransactionEvaluator:
             return True
         if name == 'false':
             return False
+
+        # Check data sources (for list comprehension iteration)
+        if name in self.ctx.data_sources:
+            return self.ctx.data_sources[name]
 
         raise ExpressionError(f"Unknown variable: {node.id}")
 
@@ -1013,8 +1046,38 @@ class TransactionEvaluator:
         return True
 
     def _eval_Attribute(self, node: ast.Attribute) -> Any:
-        """Handle attribute access like field.txn_type or field.description."""
-        # Handle field.name access
+        """Handle attribute access like field.txn_type, txn.amount, or r.item."""
+        # Handle txn.name access (explicit transaction context)
+        if isinstance(node.value, ast.Name) and node.value.id.lower() == 'txn':
+            attr_name = node.attr.lower()
+
+            if attr_name == 'description':
+                return self.ctx.description
+            elif attr_name == 'amount':
+                return self.ctx.amount
+            elif attr_name == 'date':
+                return self.ctx.date
+            elif attr_name == 'source':
+                return getattr(self.ctx, 'source', '')
+            elif attr_name == 'location':
+                return getattr(self.ctx, 'location', '')
+            elif attr_name == 'month':
+                return self.ctx.month
+            elif attr_name == 'year':
+                return self.ctx.year
+            elif attr_name == 'day':
+                return self.ctx.day
+            elif attr_name == 'weekday':
+                return self.ctx.weekday
+            else:
+                available = ['description', 'amount', 'date', 'source', 'location',
+                             'month', 'year', 'day', 'weekday']
+                raise ExpressionError(
+                    f"Unknown txn attribute: txn.{node.attr}. "
+                    f"Available: {', '.join(available)}"
+                )
+
+        # Handle field.name access (custom CSV fields)
         if isinstance(node.value, ast.Name) and node.value.id.lower() == 'field':
             field_name = node.attr.lower()
 
@@ -1043,9 +1106,56 @@ class TransactionEvaluator:
                 f"Available fields: {', '.join(available)}"
             )
 
+        # Handle row.attr access for list comprehension loop variables or subscript access
+        # Examples: r.name, orders[0].name, merchant.item
+        try:
+            value = self.evaluate(node.value)
+            # If value is a dict (row from data source), access the attribute as key
+            if isinstance(value, dict):
+                attr_name = node.attr.lower()
+                if attr_name in value:
+                    return value[attr_name]
+                raise ExpressionError(
+                    f"Unknown attribute: {node.attr}. "
+                    f"Available: {', '.join(sorted(value.keys()))}"
+                )
+        except ExpressionError:
+            pass
+
         raise ExpressionError(f"Unsupported attribute access: {ast.dump(node)}")
 
     def _eval_Call(self, node: ast.Call) -> Any:
+        # Handle method calls like str.lower(), str.upper(), etc.
+        if isinstance(node.func, ast.Attribute):
+            obj = self.evaluate(node.func.value)
+            method_name = node.func.attr.lower()
+
+            # String methods
+            if isinstance(obj, str):
+                if method_name == 'lower':
+                    return obj.lower()
+                elif method_name == 'upper':
+                    return obj.upper()
+                elif method_name == 'strip':
+                    return obj.strip()
+                elif method_name == 'startswith':
+                    if len(node.args) != 1:
+                        raise ExpressionError("startswith() requires 1 argument")
+                    return obj.startswith(self.evaluate(node.args[0]))
+                elif method_name == 'endswith':
+                    if len(node.args) != 1:
+                        raise ExpressionError("endswith() requires 1 argument")
+                    return obj.endswith(self.evaluate(node.args[0]))
+                elif method_name == 'replace':
+                    if len(node.args) != 2:
+                        raise ExpressionError("replace() requires 2 arguments")
+                    return obj.replace(
+                        self.evaluate(node.args[0]),
+                        self.evaluate(node.args[1])
+                    )
+
+            raise ExpressionError(f"Unsupported method call: {method_name}")
+
         # Get function name
         if isinstance(node.func, ast.Name):
             func_name = node.func.id.lower()
@@ -1064,6 +1174,48 @@ class TransactionEvaluator:
                 # Field doesn't exist - return False
                 return False
 
+        # Python built-in functions for list comprehensions
+        if func_name == 'len':
+            if len(node.args) != 1:
+                raise ExpressionError("len() requires exactly 1 argument")
+            return len(self.evaluate(node.args[0]))
+
+        if func_name == 'sum':
+            if len(node.args) < 1 or len(node.args) > 2:
+                raise ExpressionError("sum() requires 1 or 2 arguments")
+            iterable = self.evaluate(node.args[0])
+            start = self.evaluate(node.args[1]) if len(node.args) == 2 else 0
+            return sum(iterable, start)
+
+        if func_name == 'any':
+            if len(node.args) != 1:
+                raise ExpressionError("any() requires exactly 1 argument")
+            return any(self.evaluate(node.args[0]))
+
+        if func_name == 'all':
+            if len(node.args) != 1:
+                raise ExpressionError("all() requires exactly 1 argument")
+            return all(self.evaluate(node.args[0]))
+
+        if func_name == 'next':
+            if len(node.args) < 1 or len(node.args) > 2:
+                raise ExpressionError("next() requires 1 or 2 arguments")
+            iterator = self.evaluate(node.args[0])
+            if len(node.args) == 2:
+                default = self.evaluate(node.args[1])
+                return next(iterator, default)
+            return next(iterator)
+
+        if func_name == 'min':
+            if len(node.args) == 1:
+                return min(self.evaluate(node.args[0]))
+            return min(self.evaluate(arg) for arg in node.args)
+
+        if func_name == 'max':
+            if len(node.args) == 1:
+                return max(self.evaluate(node.args[0]))
+            return max(self.evaluate(arg) for arg in node.args)
+
         func = self.ctx.get_function(func_name)
         if func is None:
             raise ExpressionError(f"Unknown function: {func_name}")
@@ -1080,6 +1232,123 @@ class TransactionEvaluator:
             return self.evaluate(node.body)
         else:
             return self.evaluate(node.orelse)
+
+    def _eval_ListComp(self, node: ast.ListComp) -> List[Any]:
+        """Evaluate [expr for x in iter if cond].
+
+        Example: [r.item for r in amazon_orders if r.amount == txn.amount]
+        """
+        result = []
+        self._eval_comprehension_loop(node.generators, 0, node.elt, result)
+        return result
+
+    def _eval_comprehension_loop(
+        self,
+        generators: List[ast.comprehension],
+        index: int,
+        element_expr: ast.AST,
+        result: List[Any],
+    ) -> None:
+        """Recursively evaluate nested comprehension loops."""
+        if index >= len(generators):
+            # All loops done, evaluate the element expression
+            result.append(self.evaluate(element_expr))
+            return
+
+        comp = generators[index]
+        iterable = self.evaluate(comp.iter)
+
+        # Get loop variable name (handle simple Name for now)
+        if isinstance(comp.target, ast.Name):
+            var_name = comp.target.id.lower()
+        else:
+            raise ExpressionError("Only simple loop variables supported (not tuple unpacking)")
+
+        for item in iterable:
+            # Set loop variable in scope
+            old_value = self._scope.get(var_name)
+            self._scope[var_name] = item
+
+            # Check all if conditions
+            conditions_pass = all(self.evaluate(if_clause) for if_clause in comp.ifs)
+
+            if conditions_pass:
+                # Recurse to next generator or evaluate element
+                self._eval_comprehension_loop(generators, index + 1, element_expr, result)
+
+            # Restore old scope value
+            if old_value is None:
+                self._scope.pop(var_name, None)
+            else:
+                self._scope[var_name] = old_value
+
+    def _eval_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
+        """Evaluate (expr for x in iter if cond).
+
+        Used by sum(), any(), next(), len() etc.
+        Returns a generator that yields values.
+        """
+        def generator():
+            yield from self._generator_helper(node.generators, 0, node.elt)
+        return generator()
+
+    def _generator_helper(
+        self,
+        generators: List[ast.comprehension],
+        index: int,
+        element_expr: ast.AST,
+    ):
+        """Recursively yield values from nested generator loops."""
+        if index >= len(generators):
+            yield self.evaluate(element_expr)
+            return
+
+        comp = generators[index]
+        iterable = self.evaluate(comp.iter)
+
+        if isinstance(comp.target, ast.Name):
+            var_name = comp.target.id.lower()
+        else:
+            raise ExpressionError("Only simple loop variables supported")
+
+        for item in iterable:
+            old_value = self._scope.get(var_name)
+            self._scope[var_name] = item
+
+            conditions_pass = all(self.evaluate(if_clause) for if_clause in comp.ifs)
+
+            if conditions_pass:
+                yield from self._generator_helper(generators, index + 1, element_expr)
+
+            if old_value is None:
+                self._scope.pop(var_name, None)
+            else:
+                self._scope[var_name] = old_value
+
+    def _eval_Subscript(self, node: ast.Subscript) -> Any:
+        """Evaluate list[index] access."""
+        value = self.evaluate(node.value)
+        # Handle both Python 3.8 (Index wrapper) and 3.9+ (direct slice)
+        if isinstance(node.slice, ast.Index):
+            index = self.evaluate(node.slice.value)
+        else:
+            index = self.evaluate(node.slice)
+
+        try:
+            return value[index]
+        except (IndexError, KeyError) as e:
+            raise ExpressionError(f"Index error: {e}")
+
+    def _eval_NamedExpr(self, node: ast.NamedExpr) -> Any:
+        """Evaluate walrus operator (x := value).
+
+        Example: (matches := [r for r in orders if ...]) and len(matches) > 0
+        """
+        value = self.evaluate(node.value)
+        var_name = node.target.id.lower()
+        # Store in scope for later access
+        self._scope[var_name] = value
+        return value
 
 
 # =============================================================================
@@ -1153,6 +1422,7 @@ def evaluate_transaction(
     expr: str,
     transaction: Dict,
     variables: Optional[Dict[str, Any]] = None,
+    data_sources: Optional[Dict[str, List[Dict]]] = None,
 ) -> Any:
     """
     Evaluate an expression against a single transaction.
@@ -1161,12 +1431,13 @@ def evaluate_transaction(
         expr: Expression string (e.g., 'contains("NETFLIX") and amount > 10')
         transaction: Transaction dict with 'description', 'amount', 'date' keys
         variables: Optional user-defined variables
+        data_sources: Optional dict mapping source names to list of row dicts
 
     Returns:
         Result of the expression evaluation (typically bool for match expressions)
     """
     tree = parse_expression(expr)
-    ctx = TransactionContext.from_transaction(transaction, variables)
+    ctx = TransactionContext.from_transaction(transaction, variables, data_sources)
     evaluator = TransactionEvaluator(ctx)
     return evaluator.evaluate(tree)
 
@@ -1175,9 +1446,10 @@ def evaluate_transaction_ast(
     tree: ast.Expression,
     transaction: Dict,
     variables: Optional[Dict[str, Any]] = None,
+    data_sources: Optional[Dict[str, List[Dict]]] = None,
 ) -> Any:
     """Evaluate a pre-parsed AST against a transaction."""
-    ctx = TransactionContext.from_transaction(transaction, variables)
+    ctx = TransactionContext.from_transaction(transaction, variables, data_sources)
     evaluator = TransactionEvaluator(ctx)
     return evaluator.evaluate(tree)
 
@@ -1186,6 +1458,7 @@ def matches_transaction(
     expr: str,
     transaction: Dict,
     variables: Optional[Dict[str, Any]] = None,
+    data_sources: Optional[Dict[str, List[Dict]]] = None,
 ) -> bool:
     """
     Check if a transaction matches an expression.
@@ -1196,11 +1469,12 @@ def matches_transaction(
         expr: Match expression (e.g., 'contains("NETFLIX")')
         transaction: Transaction dict
         variables: Optional variables
+        data_sources: Optional dict mapping source names to list of row dicts
 
     Returns:
         True if the transaction matches, False otherwise
     """
-    return bool(evaluate_transaction(expr, transaction, variables))
+    return bool(evaluate_transaction(expr, transaction, variables, data_sources))
 
 
 def create_transaction_context(

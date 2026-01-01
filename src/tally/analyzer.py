@@ -67,7 +67,7 @@ def analyze_transactions(transactions):
             excluded_reason = 'tagged-' + next(iter(txn_tags & EXCLUDE_TAGS))
 
         if excluded_reason:
-            excluded_transactions.append({
+            excluded_txn = {
                 'date': txn['date'].strftime('%m/%d'),
                 'month': txn['date'].strftime('%Y-%m'),
                 'description': txn.get('raw_description', txn['description']),
@@ -79,7 +79,11 @@ def analyze_transactions(transactions):
                 'location': txn.get('location'),
                 'tags': txn.get('tags', []),
                 'excluded_reason': excluded_reason,
-            })
+            }
+            # Include extra_fields from field: directives
+            if txn.get('extra_fields'):
+                excluded_txn['extra_fields'] = txn['extra_fields']
+            excluded_transactions.append(excluded_txn)
             continue  # Don't include in spending totals
         key = (txn['category'], txn['subcategory'])
         by_category[key]['count'] += 1
@@ -95,7 +99,7 @@ def analyze_transactions(transactions):
         by_merchant[txn['merchant']]['months'].add(month_key)
         by_merchant[txn['merchant']]['monthly_amounts'][month_key] += txn['amount']
         by_merchant[txn['merchant']]['payments'].append(txn['amount'])
-        by_merchant[txn['merchant']]['transactions'].append({
+        txn_data = {
             'date': txn['date'].strftime('%m/%d'),
             'month': month_key,
             'description': txn.get('raw_description', txn['description']),
@@ -103,7 +107,11 @@ def analyze_transactions(transactions):
             'source': txn['source'],
             'location': txn.get('location'),
             'tags': txn.get('tags', [])
-        })
+        }
+        # Include extra_fields from field: directives
+        if txn.get('extra_fields'):
+            txn_data['extra_fields'] = txn['extra_fields']
+        by_merchant[txn['merchant']]['transactions'].append(txn_data)
         # Track max payment
         if txn['amount'] > by_merchant[txn['merchant']]['max_payment']:
             by_merchant[txn['merchant']]['max_payment'] = txn['amount']

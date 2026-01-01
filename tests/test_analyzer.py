@@ -1990,3 +1990,205 @@ class TestSourceDynamicTags:
         resolved = _resolve_dynamic_tags(tags, txn)
 
         assert resolved == ['amex']
+
+
+class TestRuleDirectivesIntegration:
+    """Integration tests for let:, field:, and transform: directives.
+
+    These tests verify that the directives work end-to-end through the
+    full parsing flow (get_all_rules -> normalize_merchant -> transaction).
+    """
+
+    def test_let_directive_evaluated_in_full_flow(self):
+        """let: directive is evaluated when matching via normalize_merchant."""
+        from tally.merchant_utils import get_all_rules, normalize_merchant, clear_engine_cache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Amazon Prime]
+let: is_prime = amount == 14.99
+match: contains("AMAZON") and is_prime
+category: Subscriptions
+subcategory: Prime
+tags: amazon, prime
+
+[Amazon]
+match: contains("AMAZON")
+category: Shopping
+subcategory: General
+tags: amazon
+""")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+
+            # Transaction that matches the let: condition
+            merchant, category, subcategory, match_info = normalize_merchant(
+                "AMAZON PRIME MEMBERSHIP",
+                rules,
+                amount=14.99
+            )
+
+            assert merchant == "Amazon Prime"
+            assert category == "Subscriptions"
+            assert subcategory == "Prime"
+            assert 'prime' in match_info['tags']
+
+            # Transaction that doesn't match the let: condition
+            merchant, category, subcategory, match_info = normalize_merchant(
+                "AMAZON MARKETPLACE",
+                rules,
+                amount=50.00
+            )
+
+            assert merchant == "Amazon"
+            assert category == "Shopping"
+            assert 'prime' not in match_info['tags']
+
+            clear_engine_cache()
+
+    def test_field_directive_evaluated_in_full_flow(self):
+        """field: directive adds extra_fields to match_info."""
+        from tally.merchant_utils import get_all_rules, normalize_merchant, clear_engine_cache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Netflix]
+match: contains("NETFLIX")
+category: Subscriptions
+subcategory: Streaming
+field: subscription_type = "monthly"
+field: service = "video"
+""")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+
+            merchant, category, subcategory, match_info = normalize_merchant(
+                "NETFLIX.COM",
+                rules,
+                amount=15.99
+            )
+
+            assert merchant == "Netflix"
+            assert category == "Subscriptions"
+            assert 'extra_fields' in match_info
+            assert match_info['extra_fields']['subscription_type'] == "monthly"
+            assert match_info['extra_fields']['service'] == "video"
+
+            clear_engine_cache()
+
+    def test_let_with_data_sources_in_full_flow(self):
+        """let: directive can query supplemental data sources."""
+        from tally.merchant_utils import get_all_rules, normalize_merchant, clear_engine_cache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Amazon - Verified]
+let: orders = [r for r in amazon_orders if r.amount == amount]
+let: has_order = len(orders) > 0
+match: contains("AMAZON") and has_order
+category: Shopping
+subcategory: Verified
+tags: verified
+field: matched_orders = len(orders)
+
+[Amazon]
+match: contains("AMAZON")
+category: Shopping
+subcategory: Unknown
+""")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+
+            # Supplemental data source
+            data_sources = {
+                'amazon_orders': [
+                    {'amount': 25.00, 'item': 'Book'},
+                    {'amount': 50.00, 'item': 'Electronics'},
+                ]
+            }
+
+            # Transaction that matches an order
+            merchant, category, subcategory, match_info = normalize_merchant(
+                "AMAZON.COM",
+                rules,
+                amount=25.00,
+                data_sources=data_sources
+            )
+
+            assert merchant == "Amazon - Verified"
+            assert subcategory == "Verified"
+            assert 'verified' in match_info['tags']
+            assert match_info['extra_fields']['matched_orders'] == 1
+
+            # Transaction that doesn't match any order
+            merchant, category, subcategory, match_info = normalize_merchant(
+                "AMAZON.COM",
+                rules,
+                amount=99.00,
+                data_sources=data_sources
+            )
+
+            assert merchant == "Amazon"
+            assert subcategory == "Unknown"
+
+            clear_engine_cache()
+
+    def test_full_parser_flow_with_directives(self):
+        """Full flow: CSV parsing with rules that have let/field/transform."""
+        from tally.merchant_utils import get_all_rules, clear_engine_cache
+        from tally.parsers import parse_generic_csv
+        from tally.format_parser import parse_format_string
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create rules file
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Streaming Service]
+let: is_subscription = amount < 20
+match: anyof("NETFLIX", "HULU", "DISNEY") and is_subscription
+category: Entertainment
+subcategory: Streaming
+field: service_type = "subscription"
+tags: streaming
+
+[Other Entertainment]
+match: anyof("NETFLIX", "HULU", "DISNEY")
+category: Entertainment
+subcategory: Other
+""")
+
+            # Create CSV file (use MM/DD/YYYY format to match default parser)
+            csv_file = os.path.join(tmpdir, 'transactions.csv')
+            with open(csv_file, 'w') as f:
+                f.write("Date,Description,Amount\n")
+                f.write("01/15/2025,NETFLIX.COM,15.99\n")
+                f.write("01/16/2025,DISNEY PLUS GIFT CARD,50.00\n")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+            format_spec = parse_format_string("{date},{description},{amount}")
+
+            txns = parse_generic_csv(csv_file, format_spec, rules)
+
+            # First transaction: matches let: condition
+            assert txns[0]['merchant'] == "Streaming Service"
+            assert txns[0]['subcategory'] == "Streaming"
+            assert 'streaming' in txns[0]['tags']
+            assert txns[0].get('extra_fields', {}).get('service_type') == "subscription"
+
+            # Second transaction: doesn't match let: condition
+            assert txns[1]['merchant'] == "Other Entertainment"
+            assert txns[1]['subcategory'] == "Other"
+            assert 'streaming' not in txns[1]['tags']
+
+            clear_engine_cache()

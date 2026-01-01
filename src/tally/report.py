@@ -236,7 +236,7 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
             # Build transactions array with unique IDs
             txns = []
             for i, txn in enumerate(data.get('transactions', [])):
-                txns.append({
+                txn_json = {
                     'id': f"{merchant_id}_{i}",
                     'date': txn.get('date', ''),
                     'month': txn.get('month', ''),
@@ -245,7 +245,11 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
                     'source': txn.get('source', ''),
                     'location': txn.get('location'),
                     'tags': txn.get('tags', [])
-                })
+                }
+                # Include extra_fields from field: directives
+                if txn.get('extra_fields'):
+                    txn_json['extra_fields'] = txn['extra_fields']
+                txns.append(txn_json)
 
             # Build match info for tooltip
             match_info = data.get('match_info')
