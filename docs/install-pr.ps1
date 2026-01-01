@@ -56,7 +56,9 @@ Write-Info "Found workflow run: $RunId"
 
 # Download artifact
 $Platform = "windows-amd64"
-$TempDir = Join-Path $env:TEMP "tally-pr-$PID"
+# Resolve $env:TEMP to long path (fixes 8.3 short path issues like C:\Users\TERRY~1.ANE)
+$TempBase = (Get-Item $env:TEMP).FullName
+$TempDir = Join-Path $TempBase "tally-pr-$PID"
 New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
 
 $ArtifactName = "tally-$Platform"

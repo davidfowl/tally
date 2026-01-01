@@ -39,7 +39,9 @@ try {
 # Download
 $Filename = "tally-windows-amd64.zip"
 $Url = "https://github.com/$Repo/releases/download/$Version/$Filename"
-$TempDir = Join-Path $env:TEMP "tally-install-$PID"
+# Resolve $env:TEMP to long path (fixes 8.3 short path issues like C:\Users\TERRY~1.ANE)
+$TempBase = (Get-Item $env:TEMP).FullName
+$TempDir = Join-Path $TempBase "tally-install-$PID"
 $ZipPath = Join-Path $TempDir $Filename
 
 Write-Info "Downloading $Url..."
