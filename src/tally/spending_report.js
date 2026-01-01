@@ -1063,7 +1063,7 @@ createApp({
                 case 'month':
                     return monthMatches(txn.month, filter.text);
                 case 'tag':
-                    return (merchant.tags || []).some(t => t.toLowerCase() === text);
+                    return (txn.tags || []).some(t => t.toLowerCase() === text);
                 case 'text':
                     // Search transaction description
                     return (txn.description || '').toLowerCase().includes(text);
