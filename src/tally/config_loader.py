@@ -249,8 +249,7 @@ def load_config(config_dir, settings_file='settings.yaml'):
     # Currency format for display (default: USD)
     config['currency_format'] = config.get('currency_format', '${amount}')
 
-    # Classification rules use minimal fallback (everything is variable)
-    # Users define views in views.rules for custom report sections
+    # All merchants classified as 'variable' - views.rules handles custom sections
     config['classification_rules'] = get_fallback_rules_parsed()
 
     # Load merchants file (optional - merchants_file in settings.yaml)

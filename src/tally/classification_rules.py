@@ -1,8 +1,8 @@
 """
-Classification rule parser and evaluator.
+Classification rule engine (internal).
 
-Parses rules like: category=Bills[months>=6] -> monthly,avg
-Evaluates them against merchant statistics to determine bucket and calc_type.
+All merchants are classified as 'variable' with /12 calc type.
+Custom report sections are defined via views.rules instead.
 """
 
 import re
@@ -11,10 +11,8 @@ from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 
 
-# Minimal fallback - everything is variable, spread over 12 months
-# Users can create classification_rules.txt for custom bucketing
-FALLBACK_RULES = """# Default fallback: all spending is variable
-* -> variable,/12
+# Everything is variable - custom bucketing done via views.rules
+FALLBACK_RULES = """* -> variable,/12
 """
 
 
