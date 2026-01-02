@@ -1033,3 +1033,173 @@ class TestAutocompleteCategories:
         # Shopping should NOT appear as subcategory
         subcategory_items = autocomplete.locator(".autocomplete-item:has(.type.subcategory)", has_text="Shopping").all()
         assert len(subcategory_items) == 0
+
+
+# =============================================================================
+# Category 5: Extra Fields Search Tests
+# =============================================================================
+
+@pytest.fixture(scope="module")
+def extra_fields_report_path(tmp_path_factory):
+    """Generate a report with extra_fields data for search testing.
+
+    Uses supplemental data source pattern (like investment trades) to add
+    extra_fields via let: + field: directives.
+    """
+    tmp_dir = tmp_path_factory.mktemp("extra_fields_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    # Main transactions CSV
+    csv_content = """Date,Description,Amount
+01/15/2024,COSTCO WHOLESALE,287.45
+01/20/2024,TARGET STORE,156.78
+02/01/2024,AMAZON MARKETPLACE,89.99
+"""
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    # Supplemental data: receipt items matched by amount
+    items_content = """date,amount,item
+01/15/2024,287.45,Kirkland Paper Towels
+01/15/2024,287.45,Organic Eggs
+01/15/2024,287.45,Rotisserie Chicken
+01/20/2024,156.78,Diapers
+01/20/2024,156.78,Baby Wipes
+01/20/2024,156.78,Coffee K-Cups
+"""
+    (data_dir / "items.csv").write_text(items_content)
+
+    # Create settings with supplemental source
+    settings_content = """year: 2024
+
+data_sources:
+  - name: Test
+    file: data/transactions.csv
+    format: "{date},{description},{amount}"
+
+  - name: items
+    file: data/items.csv
+    format: "{date},{amount},{item}"
+    columns:
+      description: "{item}"
+    supplemental: true
+
+merchants_file: config/merchants.rules
+"""
+    (config_dir / "settings.yaml").write_text(settings_content)
+
+    # Rules that query supplemental data to add extra_fields
+    rules_content = """[Costco]
+let: matched_items = [r.item for r in items if r.amount == txn.amount]
+match: contains("COSTCO")
+category: Shopping
+subcategory: Warehouse
+field: items = matched_items
+field: item_count = len(matched_items)
+
+[Target]
+let: matched_items = [r.item for r in items if r.amount == txn.amount]
+match: contains("TARGET")
+category: Shopping
+subcategory: Retail
+field: items = matched_items
+
+[Amazon]
+match: contains("AMAZON")
+category: Shopping
+subcategory: Online
+"""
+    (config_dir / "merchants.rules").write_text(rules_content)
+
+    # Generate the report
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+
+    return str(report_file)
+
+
+class TestExtraFieldsSearch:
+    """Tests for searching extra_fields values.
+
+    Uses URL hash #s:text to trigger text search filters.
+    """
+
+    def test_search_finds_extra_field_value(self, page: Page, extra_fields_report_path):
+        """Searching for a value in extra_fields finds the transaction."""
+        # Navigate with #s:kirkland to trigger text search filter
+        page.goto(f"file://{extra_fields_report_path}#s:kirkland")
+
+        # Wait for filter to be applied
+        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+
+        # Costco merchant should be visible (matches via extra_fields)
+        expect(page.get_by_test_id("merchant-row-Costco")).to_be_visible()
+
+    def test_search_auto_expands_merchant(self, page: Page, extra_fields_report_path):
+        """Merchant auto-expands when search matches extra_fields."""
+        page.goto(f"file://{extra_fields_report_path}#s:kirkland")
+
+        # Wait for filter to be applied
+        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+
+        # Wait for Vue to process the watch and expand merchants
+        page.wait_for_timeout(500)
+
+        # Transaction row should be visible (merchant expanded)
+        # The description appears in the expanded transaction detail
+        expect(page.locator(".txn-desc >> text=COSTCO WHOLESALE").first).to_be_visible()
+
+    def test_search_highlights_extra_fields_trigger(self, page: Page, extra_fields_report_path):
+        """Extra fields trigger shows highlight when search matches."""
+        page.goto(f"file://{extra_fields_report_path}#s:kirkland")
+
+        # Wait for filter to be applied
+        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+
+        # Wait for Vue to process the watch and expand merchants
+        page.wait_for_timeout(500)
+
+        # The extra-fields trigger should have match-highlight class
+        trigger = page.locator(".extra-fields-trigger.match-highlight")
+        expect(trigger).to_be_visible()
+
+    def test_search_excludes_non_matching(self, page: Page, extra_fields_report_path):
+        """Search filters out merchants without matching transactions."""
+        page.goto(f"file://{extra_fields_report_path}#s:kirkland")
+
+        # Wait for filter to be applied
+        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+
+        # Amazon should not be visible (no matching transactions)
+        expect(page.get_by_test_id("merchant-row-Amazon")).not_to_be_visible()
+
+    def test_clear_search_shows_all_merchants(self, page: Page, extra_fields_report_path):
+        """Clearing search restores all merchants."""
+        page.goto(f"file://{extra_fields_report_path}#s:kirkland")
+
+        # Wait for filter to be applied
+        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+
+        # Clear filter
+        page.get_by_test_id("filter-chip-remove").first.click()
+
+        # Wait for filter to be cleared
+        page.wait_for_timeout(300)
+
+        # All merchants should be visible again
+        expect(page.get_by_test_id("merchant-row-Costco")).to_be_visible()
+        expect(page.get_by_test_id("merchant-row-Target")).to_be_visible()
+        expect(page.get_by_test_id("merchant-row-Amazon")).to_be_visible()

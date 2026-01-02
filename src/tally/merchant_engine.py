@@ -40,6 +40,8 @@ class MerchantRule:
     merchant: str = ""  # Display name (defaults to rule name)
     tags: Set[str] = field(default_factory=set)
     line_number: int = 0  # For error reporting
+    let_bindings: List[Tuple[str, str]] = field(default_factory=list)  # [(var_name, expr), ...]
+    fields: Dict[str, str] = field(default_factory=dict)  # {field_name: expr} extra fields to add
 
     def __post_init__(self):
         if not self.merchant:
@@ -62,6 +64,8 @@ class MatchResult:
     tags: Set[str] = field(default_factory=set)
     matched_rule: Optional[MerchantRule] = None
     tag_rules: List[MerchantRule] = field(default_factory=list)
+    extra_fields: Dict[str, Any] = field(default_factory=dict)  # Evaluated fields from matching rule
+    tag_sources: Dict[str, Dict] = field(default_factory=dict)  # {tag: {rule: name, pattern: expr}}
 
 
 class MerchantParseError(Exception):
@@ -153,7 +157,31 @@ class MerchantEngine:
                 key = key.strip().lower()
                 value = value.strip()
 
-                if key == 'match':
+                if key == 'let':
+                    # let: var_name = expression
+                    let_match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$', value)
+                    if not let_match:
+                        raise MerchantParseError(
+                            f"Invalid let syntax. Expected: let: name = expression",
+                            line_num, line
+                        )
+                    var_name, expr = let_match.groups()
+                    if 'let_bindings' not in current_rule:
+                        current_rule['let_bindings'] = []
+                    current_rule['let_bindings'].append((var_name.lower(), expr))
+                elif key == 'field':
+                    # field: name = expression (adds extra field to transaction)
+                    field_match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$', value)
+                    if not field_match:
+                        raise MerchantParseError(
+                            f"Invalid field syntax. Expected: field: name = expression",
+                            line_num, line
+                        )
+                    field_name, expr = field_match.groups()
+                    if 'fields' not in current_rule:
+                        current_rule['fields'] = {}
+                    current_rule['fields'][field_name.lower()] = expr
+                elif key == 'match':
                     current_rule['match_expr'] = value
                 elif key == 'category':
                     current_rule['category'] = value
@@ -219,6 +247,28 @@ class MerchantEngine:
                 line_number
             )
 
+        # Pre-parse let expressions for validation
+        let_bindings = rule_data.get('let_bindings', [])
+        for var_name, expr in let_bindings:
+            try:
+                expr_parser.parse_expression(expr)
+            except expr_parser.ExpressionError as e:
+                raise MerchantParseError(
+                    f"Invalid let expression '{var_name}' in '{rule_data['name']}': {e}",
+                    line_number
+                )
+
+        # Pre-parse field expressions for validation
+        fields = rule_data.get('fields', {})
+        for field_name, expr in fields.items():
+            try:
+                expr_parser.parse_expression(expr)
+            except expr_parser.ExpressionError as e:
+                raise MerchantParseError(
+                    f"Invalid field expression '{field_name}' in '{rule_data['name']}': {e}",
+                    line_number
+                )
+
         # Pre-parse the match expression for validation
         try:
             expr_parser.parse_expression(rule_data['match_expr'])
@@ -236,15 +286,17 @@ class MerchantEngine:
             merchant=rule_data.get('merchant', ''),
             tags=rule_data.get('tags', set()),
             line_number=line_number,
+            let_bindings=let_bindings,
+            fields=fields,
         )
         self.rules.append(rule)
 
-    def _evaluate_variables(self, transaction: Dict) -> Dict[str, Any]:
+    def _evaluate_variables(self, transaction: Dict, data_sources: Optional[Dict] = None) -> Dict[str, Any]:
         """Evaluate variable expressions against a transaction."""
         evaluated = {}
         for name, expr in self.variables.items():
             try:
-                result = expr_parser.evaluate_transaction(expr, transaction)
+                result = expr_parser.evaluate_transaction(expr, transaction, data_sources=data_sources)
                 evaluated[name] = result
             except expr_parser.ExpressionError:
                 # If variable can't be evaluated, skip it
@@ -252,34 +304,158 @@ class MerchantEngine:
                 pass
         return evaluated
 
-    def match(self, transaction: Dict) -> MatchResult:
+    def _evaluate_let_bindings(
+        self,
+        rule: MerchantRule,
+        transaction: Dict,
+        base_variables: Dict[str, Any],
+        data_sources: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Evaluate rule-level let bindings in order.
+
+        Let bindings are evaluated sequentially so later bindings can
+        reference earlier ones. Returns dict of evaluated variables.
+        """
+        variables = base_variables.copy()
+        for var_name, expr in rule.let_bindings:
+            try:
+                result = expr_parser.evaluate_transaction(
+                    expr, transaction, variables=variables, data_sources=data_sources
+                )
+                variables[var_name] = result
+            except expr_parser.ExpressionError:
+                # If binding fails, set to None so match can still work
+                variables[var_name] = None
+        return variables
+
+    def _evaluate_fields(
+        self,
+        rule: MerchantRule,
+        transaction: Dict,
+        variables: Dict[str, Any],
+        data_sources: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Evaluate field expressions for a matching rule.
+
+        Returns dict of field_name -> evaluated_value.
+        """
+        evaluated = {}
+        for field_name, expr in rule.fields.items():
+            try:
+                result = expr_parser.evaluate_transaction(
+                    expr, transaction, variables=variables, data_sources=data_sources
+                )
+                evaluated[field_name] = result
+            except expr_parser.ExpressionError:
+                # If field evaluation fails, skip it
+                pass
+        return evaluated
+
+    def _resolve_tags(
+        self,
+        rule: MerchantRule,
+        transaction: Dict,
+        variables: Dict,
+        data_sources: Optional[Dict] = None,
+    ) -> Set[str]:
+        """
+        Resolve dynamic tags from a rule, evaluating any {expression} placeholders.
+
+        Supports dynamic tag values from field access, let bindings, or expressions:
+            ["wire", "banking"]           -> {"wire", "banking"}
+            ["{field.txn_type}"]          -> {"ach"} (if field.txn_type == "ACH")
+            ["{trade[0]['term']}"]        -> {"long"} (if trade is from let binding)
+
+        Args:
+            rule: The matched rule with tags
+            transaction: Transaction dict
+            variables: Dict of let bindings and global variables
+            data_sources: Optional dict of supplemental sources
+
+        Returns:
+            Set of resolved tag strings (lowercased)
+        """
+        resolved = set()
+        for tag in rule.tags:
+            tag = tag.strip()
+            if not tag:
+                continue
+
+            if tag.startswith('{') and tag.endswith('}'):
+                # Dynamic tag - evaluate expression
+                expr = tag[1:-1].strip()
+                if not expr:
+                    continue
+
+                try:
+                    result = expr_parser.evaluate_transaction(
+                        expr, transaction, variables=variables, data_sources=data_sources
+                    )
+                    if result:
+                        # Handle list results (e.g., from list comprehensions)
+                        if isinstance(result, list):
+                            for item in result:
+                                if item:
+                                    resolved.add(str(item).strip().lower())
+                        else:
+                            stripped = str(result).strip()
+                            if stripped:
+                                resolved.add(stripped.lower())
+                except expr_parser.ExpressionError:
+                    # Skip invalid expressions silently
+                    pass
+            else:
+                # Static tag
+                resolved.add(tag.lower())
+
+        return resolved
+
+    def match(self, transaction: Dict, data_sources: Optional[Dict] = None) -> MatchResult:
         """
         Match a transaction against all rules.
 
         Two-pass evaluation:
         1. Find first categorization rule that matches (sets merchant/category/subcategory)
         2. Collect tags from ALL matching rules (including tag-only rules)
+
+        Args:
+            transaction: Transaction dict with description, amount, date, etc.
+            data_sources: Optional dict mapping source names to list of row dicts
         """
         result = MatchResult()
         all_tags: Set[str] = set()
+        tag_sources: Dict[str, Dict] = {}
 
-        # Evaluate variables for this transaction
-        variables = self._evaluate_variables(transaction)
+        # Evaluate global variables for this transaction
+        global_variables = self._evaluate_variables(transaction, data_sources)
 
         # Pass 1: Find categorization (first match wins)
         # Pass 2: Collect all tags (runs through all rules)
         for rule in self.rules:
             try:
+                # Evaluate rule-level let bindings (can reference global variables)
+                if rule.let_bindings:
+                    variables = self._evaluate_let_bindings(
+                        rule, transaction, global_variables, data_sources
+                    )
+                else:
+                    variables = global_variables
+
                 matches = expr_parser.matches_transaction(
-                    rule.match_expr, transaction, variables
+                    rule.match_expr, transaction, variables, data_sources
                 )
             except expr_parser.ExpressionError:
                 # Skip rules that can't be evaluated
                 continue
 
             if matches:
-                # Collect tags from ALL matching rules
-                all_tags.update(rule.tags)
+                # Collect tags from ALL matching rules (resolve dynamic expressions)
+                resolved_tags = self._resolve_tags(rule, transaction, variables, data_sources)
+                for tag in resolved_tags:
+                    if tag not in all_tags:
+                        all_tags.add(tag)
+                        # Track which rule added this tag (first rule wins)
+                        tag_sources[tag] = {'rule': rule.name, 'pattern': rule.match_expr}
                 result.tag_rules.append(rule)
 
                 # Categorization: first rule with category wins
@@ -290,7 +466,14 @@ class MerchantEngine:
                     result.subcategory = rule.subcategory
                     result.matched_rule = rule
 
+                    # Evaluate extra fields for the matching categorization rule
+                    if rule.fields:
+                        result.extra_fields = self._evaluate_fields(
+                            rule, transaction, variables, data_sources
+                        )
+
         result.tags = all_tags
+        result.tag_sources = tag_sources
         return result
 
     def match_all(self, transactions: List[Dict]) -> List[MatchResult]:

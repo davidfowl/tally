@@ -233,6 +233,74 @@ def cmd_reference(args):
   {C.DIM}All tags are lowercased for consistency.{C.RESET}
 """)
 
+        section("Supplemental Data Sources")
+        print(f"""
+  Query external data (receipts, orders, etc.) to enrich transactions.
+
+  {C.BOLD}In settings.yaml:{C.RESET}
+  {C.CYAN}data_sources:{C.RESET}
+    {C.CYAN}- name: amazon_orders{C.RESET}
+      {C.CYAN}file: data/amazon-orders.csv{C.RESET}
+      {C.CYAN}format: "{{date}},{{item}},{{amount}}"{C.RESET}
+      {C.CYAN}supplemental: true{C.RESET}    {C.DIM}# Query-only, no transactions generated{C.RESET}
+
+  {C.BOLD}Query with list comprehensions:{C.RESET}
+  {C.CYAN}[r for r in source_name if condition]{C.RESET}
+
+  {C.BOLD}Built-in functions:{C.RESET}
+  {C.GREEN}len(list){C.RESET}         Number of items
+  {C.GREEN}sum(generator){C.RESET}    Sum of values
+  {C.GREEN}any(generator){C.RESET}    True if any match
+  {C.GREEN}next(gen, default){C.RESET} First match or default
+
+  {C.BOLD}Example: Match Amazon orders by amount{C.RESET}
+  {C.DIM}[Amazon - Verified]{C.RESET}
+  {C.DIM}let: orders = [r for r in amazon_orders if r.amount == txn.amount]{C.RESET}
+  {C.DIM}match: contains("AMAZON") and len(orders) > 0{C.RESET}
+  {C.DIM}category: Shopping{C.RESET}
+  {C.DIM}tags: verified{C.RESET}
+""")
+
+        section("Rule-Level Directives")
+        print(f"""
+  {C.BOLD}let:{C.RESET} Cache expensive expressions for reuse
+  {C.CYAN}let: orders = [r for r in amazon_orders if r.amount == txn.amount]{C.RESET}
+  {C.CYAN}let: total = sum(r.amount for r in orders){C.RESET}
+  {C.CYAN}let: matched = total == txn.amount{C.RESET}
+
+  {C.BOLD}field:{C.RESET} Add extra fields to transaction (available in reports)
+  {C.CYAN}field: items = [r.item for r in orders]{C.RESET}
+  {C.CYAN}field: order_count = len(orders){C.RESET}
+
+  {C.BOLD}Complete example:{C.RESET}
+  {C.DIM}[PayPal - Enriched]{C.RESET}
+  {C.DIM}let: m = [r for r in paypal if r.amount == txn.amount]{C.RESET}
+  {C.DIM}match: contains("PAYPAL") and len(m) > 0{C.RESET}
+  {C.DIM}category: Shopping{C.RESET}
+  {C.DIM}field: merchant_name = m[0].merchant{C.RESET}
+  {C.DIM}tags: paypal{C.RESET}
+""")
+
+        section("Transaction Context (txn.)")
+        print(f"""
+  Use {C.GREEN}txn.{C.RESET} prefix for explicit transaction field access:
+
+  {C.GREEN}txn.amount{C.RESET}        Transaction amount
+  {C.GREEN}txn.date{C.RESET}          Transaction date
+  {C.GREEN}txn.description{C.RESET}   Transaction description
+  {C.GREEN}txn.source{C.RESET}        Data source name
+  {C.GREEN}txn.location{C.RESET}      Transaction location
+
+  {C.BOLD}Useful in list comprehensions to avoid ambiguity:{C.RESET}
+  {C.DIM}# Find orders within 3 days of transaction{C.RESET}
+  {C.CYAN}[r for r in orders if abs(r.date - txn.date) <= 3]{C.RESET}
+
+  {C.DIM}# Match by amount{C.RESET}
+  {C.CYAN}any(r for r in orders if r.amount == txn.amount){C.RESET}
+
+  {C.DIM}Bare names (amount, date) also work when unambiguous.{C.RESET}
+""")
+
         section("Tag-Only Rules")
         print(f"""
   Rules without {C.GREEN}category:{C.RESET} add tags without affecting categorization:

@@ -189,7 +189,7 @@ def _iter_rows_with_delimiter(filepath, delimiter, has_header):
 
 
 def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
-                      decimal_separator='.', transforms=None):
+                      decimal_separator='.', transforms=None, data_sources=None):
     """
     Parse a CSV file using a custom format specification.
 
@@ -200,6 +200,7 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
         source_name: Name to use for transaction source (default: 'CSV')
         decimal_separator: Character used as decimal separator ('.' or ',')
         transforms: Optional list of (field_path, expression) tuples for field transforms
+        data_sources: Optional dict mapping source names to list of row dicts (for cross-source queries)
 
     Supported delimiters (via format_spec.delimiter):
         - None or ',': Standard CSV (comma-delimited)
@@ -294,6 +295,7 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
                 data_source=format_spec.source_name or source_name,
                 transforms=transforms,
                 location=location,
+                data_sources=data_sources,
             )
 
             txn = {
@@ -316,6 +318,9 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
             if match_info and match_info.get('raw_values'):
                 for key, value in match_info['raw_values'].items():
                     txn[key] = value
+            # Add extra_fields from field: directives in .rules files
+            if match_info and match_info.get('extra_fields'):
+                txn['extra_fields'] = match_info['extra_fields']
             transactions.append(txn)
 
         except (ValueError, IndexError):

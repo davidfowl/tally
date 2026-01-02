@@ -5,7 +5,7 @@ Tally 'run' command - Analyze transactions and generate reports.
 import os
 import sys
 
-from ..config_loader import load_config
+from ..config_loader import load_config, load_supplemental_sources
 from ..merchant_utils import get_transforms
 from ..analyzer import (
     parse_amex,
@@ -76,10 +76,19 @@ def cmd_run(args):
     # Load merchant rules (with migration check for CSV -> .rules)
     rules = _check_merchant_migration(config, config_dir, args.quiet, getattr(args, 'migrate', False))
 
-    # Parse transactions from configured data sources
+    # Load supplemental data sources for cross-source queries
+    supplemental_data = load_supplemental_sources(config, config_dir)
+    if not args.quiet and supplemental_data:
+        print(f"  Supplemental sources: {', '.join(supplemental_data.keys())}")
+
+    # Parse transactions from configured data sources (skip supplemental)
     all_txns = []
 
     for source in data_sources:
+        # Skip supplemental sources - they don't generate transactions
+        if source.get('_supplemental', False):
+            continue
+
         filepath = os.path.join(config_dir, '..', source['file'])
         filepath = os.path.normpath(filepath)
 
@@ -107,7 +116,8 @@ def cmd_run(args):
                 txns = parse_generic_csv(filepath, format_spec, rules,
                                          source_name=source.get('name', 'CSV'),
                                          decimal_separator=source.get('decimal_separator', '.'),
-                                         transforms=transforms)
+                                         transforms=transforms,
+                                         data_sources=supplemental_data)
             else:
                 if not args.quiet:
                     print(f"  {source['name']}: Unknown parser type '{parser_type}'")
@@ -203,8 +213,8 @@ def cmd_run(args):
             os.makedirs(output_dir, exist_ok=True)
             output_path = os.path.join(output_dir, config.get('html_filename', 'spending_summary.html'))
 
-        # Collect source names for the report subtitle
-        source_names = [s.get('name', 'Unknown') for s in data_sources]
+        # Collect source names for the report subtitle (exclude supplemental)
+        source_names = [s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)]
         write_summary_file_vue(stats, output_path, year=year,
                                currency_format=currency_format, sources=source_names,
                                embedded_html=args.embedded_html)

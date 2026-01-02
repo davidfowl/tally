@@ -816,6 +816,7 @@ th[data-tooltip] { cursor: pointer; }
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    padding-right: 2em;
 }
 .match-info-popup .popup-row {
     display: flex;
@@ -919,10 +920,14 @@ th[data-tooltip] { cursor: pointer; }
 }
 .txn-detail {
     display: grid;
-    grid-template-columns: 3.5rem 1fr auto 4rem;
+    grid-template-columns: 2rem 3.5rem 1fr auto 4rem;
     align-items: center;
     justify-items: start;
     gap: 0.3rem;
+}
+.txn-detail:not(.has-extra)::before {
+    content: '';
+    width: 2rem;
 }
 .txn-date {
     color: var(--text-muted);
@@ -961,6 +966,60 @@ th[data-tooltip] { cursor: pointer; }
     gap: 0.3rem;
     justify-self: end;
 }
+/* Extra fields trigger and popup */
+.extra-fields-trigger {
+    position: relative;
+    font-size: 0.7rem;
+    color: var(--accent-blue);
+    cursor: pointer;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    background: rgba(79, 172, 254, 0.15);
+    font-weight: 600;
+}
+.extra-fields-trigger:hover {
+    background: rgba(79, 172, 254, 0.25);
+}
+.extra-fields-trigger.match-highlight {
+    background: rgba(250, 204, 21, 0.3);
+    color: #facc15;
+    animation: pulse-glow 1.5s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 4px rgba(250, 204, 21, 0.4); }
+    50% { box-shadow: 0 0 10px rgba(250, 204, 21, 0.7); }
+}
+.extra-fields-trigger .match-info-popup {
+    min-width: 300px;
+    max-width: 500px;
+}
+.extra-fields-trigger .match-info-popup .popup-label {
+    min-width: 90px;
+}
+.extra-fields-trigger .match-info-popup .popup-value {
+    word-break: break-word;
+    white-space: normal;
+}
+.extra-fields-trigger .match-info-popup .popup-header {
+    text-align: center;
+    padding-right: 0;
+    margin-bottom: 1em;
+}
+.extra-fields-trigger .match-info-popup .popup-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15em;
+    align-items: flex-start;
+}
+.extra-fields-trigger .match-info-popup .popup-list-item {
+    font-size: 0.9em;
+    text-align: left;
+}
+.extra-fields-trigger .match-info-popup.visible .popup-list-item::before {
+    content: '•';
+    margin-right: 0.4em;
+    color: #666;
+}
 .txn-badge {
     font-size: 0.65rem;
     padding: 0.1rem 0.3rem;
@@ -968,10 +1027,6 @@ th[data-tooltip] { cursor: pointer; }
     font-weight: bold;
     min-width: 3.5rem;
     text-align: center;
-}
-.txn-badge.refund {
-    background: var(--accent-green);
-    color: #000;
 }
 .txn-source {
     font-size: 0.7rem;

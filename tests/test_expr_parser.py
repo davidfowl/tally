@@ -153,9 +153,11 @@ class TestParsingErrors:
         with pytest.raises(UnsafeNodeError):
             parse("lambda x: x")
 
-    def test_unsafe_list_comp(self):
-        with pytest.raises(UnsafeNodeError):
-            parse("[x for x in range(10)]")
+    def test_list_comp_allowed(self):
+        """List comprehensions are now allowed for data source queries."""
+        # Should parse without error
+        tree = parse("[r for r in source if r > 0]")
+        assert tree is not None
 
     def test_unsafe_dict(self):
         with pytest.raises(UnsafeNodeError):
@@ -898,3 +900,365 @@ class TestScalarMaxMin:
         # max_val(2, 3 * 0.5) = max_val(2, 1.5) = 2
         result = evaluate("max_val(2, period('month') * 0.5)", ctx)
         assert result == 2
+
+
+# =============================================================================
+# List Comprehension and Data Source Tests
+# =============================================================================
+
+class TestListComprehensions:
+    """Test list comprehensions for data source queries."""
+
+    def test_simple_list_comp(self):
+        """Simple list comprehension over data source."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        result = evaluate_transaction(
+            "[r.item for r in orders]",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == ['Book', 'Cable']
+
+    def test_list_comp_with_filter(self):
+        """List comprehension with if condition."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+                {'item': 'Toy', 'amount': 10.0},
+            ]
+        }
+
+        result = evaluate_transaction(
+            "[r.item for r in orders if r.amount > 15]",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == ['Book', 'Cable']
+
+    def test_sum_with_generator(self):
+        """sum() with generator expression."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        result = evaluate_transaction(
+            "sum(r.amount for r in orders)",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == 50.0
+
+    def test_any_with_generator(self):
+        """any() with generator expression."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        # At least one order with amount > 25
+        result = evaluate_transaction(
+            "any(r.amount > 25 for r in orders)",
+            txn,
+            data_sources=data_sources
+        )
+        assert result is True
+
+        # No order with amount > 100
+        result = evaluate_transaction(
+            "any(r.amount > 100 for r in orders)",
+            txn,
+            data_sources=data_sources
+        )
+        assert result is False
+
+    def test_len_with_list_comp(self):
+        """len() with list comprehension."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+                {'item': 'Toy', 'amount': 10.0},
+            ]
+        }
+
+        result = evaluate_transaction(
+            "len([r for r in orders if r.amount >= 20])",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == 2
+
+    def test_next_with_default(self):
+        """next() with generator and default."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        # First matching item
+        result = evaluate_transaction(
+            "next((r.item for r in orders if r.amount > 25), 'None')",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == 'Cable'
+
+        # No match, return default
+        result = evaluate_transaction(
+            "next((r.item for r in orders if r.amount > 100), 'None')",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == 'None'
+
+    def test_subscript_access(self):
+        """List subscript access [0]."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        result = evaluate_transaction(
+            "[r.item for r in orders][0]",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == 'Book'
+
+
+class TestTxnNamespace:
+    """Test txn. namespace for explicit transaction context."""
+
+    def test_txn_amount(self):
+        """txn.amount accesses transaction amount."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        result = evaluate_transaction("txn.amount > 40", txn)
+        assert result is True
+
+    def test_txn_date(self):
+        """txn.date accesses transaction date."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        result = evaluate_transaction('txn.date >= "2025-01-01"', txn)
+        assert result is True
+
+    def test_txn_in_list_comp(self):
+        """txn. can be used inside list comprehension filter."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0, 'date': date(2025, 1, 14)},
+                {'item': 'Cable', 'amount': 30.0, 'date': date(2025, 1, 15)},
+                {'item': 'Toy', 'amount': 10.0, 'date': date(2025, 2, 1)},
+            ]
+        }
+
+        # Match orders on same date as transaction
+        result = evaluate_transaction(
+            "[r.item for r in orders if r.date == txn.date]",
+            txn,
+            data_sources=data_sources
+        )
+        assert result == ['Cable']
+
+    def test_txn_amount_match(self):
+        """Match orders where sum equals transaction amount."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        result = evaluate_transaction(
+            "sum(r.amount for r in orders) == txn.amount",
+            txn,
+            data_sources=data_sources
+        )
+        assert result is True
+
+
+class TestWalrusOperator:
+    """Test walrus operator for variable binding."""
+
+    def test_walrus_basic(self):
+        """Basic walrus operator usage."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        # Capture result and use it
+        result = evaluate_transaction(
+            "(items := [r.item for r in orders]) and len(items) > 0",
+            txn,
+            data_sources=data_sources
+        )
+        assert result is True
+
+    def test_walrus_reuse(self):
+        """Walrus captures value for reuse."""
+        from tally.expr_parser import evaluate_transaction
+
+        txn = {'description': 'AMAZON', 'amount': 50.00, 'date': date(2025, 1, 15)}
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.0},
+                {'item': 'Cable', 'amount': 30.0},
+            ]
+        }
+
+        # Capture and check length, then access first element
+        result = evaluate_transaction(
+            "(items := [r.item for r in orders]) and len(items) == 2 and items[0] == 'Book'",
+            txn,
+            data_sources=data_sources
+        )
+        assert result is True
+
+
+class TestSupplementalDataIntegration:
+    """Test supplemental data sources with rule matching."""
+
+    def test_normalize_merchant_with_data_sources(self):
+        """normalize_merchant passes data_sources to expression evaluator."""
+        from tally.merchant_utils import normalize_merchant
+
+        # Create supplemental data for cross-source matching
+        data_sources = {
+            'amazon_orders': [
+                {'item': 'Book', 'amount': 45.99, 'date': date(2025, 1, 15)},
+                {'item': 'Cable', 'amount': 10.00, 'date': date(2025, 1, 15)},
+            ]
+        }
+
+        # Rule that uses data_sources in match expression
+        rules = [(
+            'contains("AMAZON") and any(r for r in amazon_orders if r.amount == amount)',
+            'Amazon',
+            'Shopping',
+            'Online',
+            None,
+            'user',
+            ['amazon']
+        )]
+
+        # Transaction matching an order amount
+        merchant, category, subcategory, match_info = normalize_merchant(
+            'AMAZON MARKETPLACE',
+            rules,
+            amount=45.99,
+            txn_date=date(2025, 1, 15),
+            data_sources=data_sources
+        )
+
+        assert merchant == 'Amazon'
+        assert category == 'Shopping'
+        assert 'amazon' in match_info['tags']
+
+    def test_normalize_merchant_no_data_sources_fallback(self):
+        """normalize_merchant works without data_sources for non-cross-source rules."""
+        from tally.merchant_utils import normalize_merchant
+
+        # Simple rule without data source access
+        rules = [(
+            'contains("NETFLIX")',
+            'Netflix',
+            'Subscriptions',
+            'Streaming',
+            None,
+            'user',
+            ['entertainment']
+        )]
+
+        merchant, category, subcategory, match_info = normalize_merchant(
+            'NETFLIX.COM',
+            rules,
+            amount=15.99,
+        )
+
+        assert merchant == 'Netflix'
+        assert category == 'Subscriptions'
+
+    def test_matches_transaction_with_data_sources(self):
+        """matches_transaction accepts data_sources parameter."""
+        from tally.expr_parser import matches_transaction
+
+        txn = {
+            'description': 'AMAZON MARKETPLACE',
+            'amount': 50.00,  # Use clean amounts to avoid float precision issues
+            'date': date(2025, 1, 15)
+        }
+        data_sources = {
+            'orders': [
+                {'item': 'Book', 'amount': 20.00},
+                {'item': 'Cable', 'amount': 30.00},
+            ]
+        }
+
+        # Match where sum of order amounts equals transaction amount
+        result = matches_transaction(
+            'contains("AMAZON") and sum(r.amount for r in orders) == amount',
+            txn,
+            data_sources=data_sources
+        )
+        assert result is True
+
+        # No match when amounts don't equal
+        txn['amount'] = 100.00
+        result = matches_transaction(
+            'contains("AMAZON") and sum(r.amount for r in orders) == amount',
+            txn,
+            data_sources=data_sources
+        )
+        assert result is False

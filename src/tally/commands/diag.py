@@ -182,19 +182,49 @@ def cmd_diag(args):
     if config and config.get('data_sources'):
         print("DATA SOURCES")
         print("-" * 70)
+
+        # Count primary vs supplemental
+        primary_sources = [s for s in config['data_sources'] if not s.get('supplemental')]
+        supplemental_sources = [s for s in config['data_sources'] if s.get('supplemental')]
+
+        if supplemental_sources:
+            print(f"  {C.BOLD}Primary sources:{C.RESET} {len(primary_sources)}  {C.BOLD}Supplemental sources:{C.RESET} {len(supplemental_sources)}")
+            print()
+
         for i, source in enumerate(config['data_sources'], 1):
             filepath = os.path.join(config_dir, '..', source['file'])
             filepath = os.path.normpath(filepath)
             if not os.path.exists(filepath):
                 filepath = os.path.join(os.path.dirname(config_dir), source['file'])
 
-            print(f"  {i}. {source.get('name', 'unnamed')}")
+            # Show supplemental badge
+            is_supplemental = source.get('supplemental', False)
+            badge = f" {C.CYAN}[supplemental]{C.RESET}" if is_supplemental else ""
+            print(f"  {i}. {source.get('name', 'unnamed')}{badge}")
             print(f"     File: {source['file']}")
-            print(f"     Exists: {os.path.exists(filepath)}")
+
+            # Show file exists + row count
+            if os.path.exists(filepath):
+                try:
+                    import csv
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        reader = csv.reader(f)
+                        next(reader, None)  # Skip header
+                        row_count = sum(1 for _ in reader)
+                    print(f"     Exists: True ({row_count} rows)")
+                except Exception:
+                    print(f"     Exists: True")
+            else:
+                print(f"     Exists: False")
+
             if source.get('type'):
                 print(f"     Type: {source['type']}")
             if source.get('format'):
                 print(f"     Format: {source['format']}")
+
+            # Explain what supplemental means
+            if is_supplemental:
+                print(f"     {C.DIM}Purpose: Query-only (no transactions generated){C.RESET}")
 
             # Show format spec details if available
             format_spec = source.get('_format_spec')
@@ -236,6 +266,7 @@ def cmd_diag(args):
             try:
                 from ..merchant_engine import load_merchants_file
                 from pathlib import Path
+                import re
                 engine = load_merchants_file(Path(merchants_file))
                 print(f"  Rules loaded: {len(engine.rules)}")
 
@@ -244,6 +275,16 @@ def cmd_diag(args):
                 all_tags = set()
                 for r in engine.rules:
                     all_tags.update(r.tags)
+
+                # Cross-source query detection (list comprehensions referencing data sources)
+                def uses_cross_source(expr):
+                    """Check if expression uses list comprehension syntax."""
+                    return bool(re.search(r'\[.*\bfor\b.*\bin\b.*\]', expr) or
+                                re.search(r'\b(any|sum|len|next)\s*\(.*\bfor\b.*\bin\b', expr))
+
+                rules_with_cross_source = [r for r in engine.rules if uses_cross_source(r.match_expr)]
+                rules_with_let = [r for r in engine.rules if r.let_bindings]
+                rules_with_field = [r for r in engine.rules if r.fields]
 
                 # Special tags that affect spending analysis
                 SPECIAL_TAGS = {'income', 'refund', 'transfer'}
@@ -263,6 +304,21 @@ def cmd_diag(args):
                                 tag_strs.append(tag)
                         print(f"  Unique tags: {', '.join(tag_strs)}")
 
+                # Show advanced feature usage
+                if rules_with_cross_source or rules_with_let or rules_with_field:
+                    print()
+                    print(f"  {C.BOLD}Advanced Features:{C.RESET}")
+                    if rules_with_cross_source:
+                        print(f"    {C.GREEN}✓{C.RESET} Cross-source queries: {len(rules_with_cross_source)} rule(s)")
+                        for r in rules_with_cross_source[:3]:
+                            print(f"      {C.DIM}[{r.name}]{C.RESET}")
+                        if len(rules_with_cross_source) > 3:
+                            print(f"      {C.DIM}... and {len(rules_with_cross_source) - 3} more{C.RESET}")
+                    if rules_with_let:
+                        print(f"    {C.GREEN}✓{C.RESET} let: bindings: {len(rules_with_let)} rule(s)")
+                    if rules_with_field:
+                        print(f"    {C.GREEN}✓{C.RESET} field: directives: {len(rules_with_field)} rule(s)")
+
                 # Show special tag usage
                 print()
                 print(f"  {C.BOLD}Special Tags:{C.RESET} (affect spending analysis)")
@@ -275,9 +331,24 @@ def cmd_diag(args):
                 print()
                 print("  MERCHANT RULES (all):")
                 for rule in engine.rules:
-                    print(f"    [{rule.name}]")
+                    # Show badges for advanced features
+                    badges = []
+                    if uses_cross_source(rule.match_expr):
+                        badges.append(f"{C.CYAN}cross-source{C.RESET}")
+                    if rule.let_bindings:
+                        badges.append(f"{C.CYAN}let{C.RESET}")
+                    if rule.fields:
+                        badges.append(f"{C.CYAN}field{C.RESET}")
+                    badge_str = f" [{', '.join(badges)}]" if badges else ""
+                    print(f"    [{rule.name}]{badge_str}")
                     print(f"      match: {rule.match_expr}")
                     print(f"      category: {rule.category} > {rule.subcategory}")
+                    if rule.let_bindings:
+                        for var, expr in rule.let_bindings:
+                            print(f"      let: {var} = {expr}")
+                    if rule.fields:
+                        for name, expr in rule.fields.items():
+                            print(f"      field: {name} = {expr}")
                     if rule.tags:
                         print(f"      tags: {', '.join(rule.tags)}")
             except Exception as e:
