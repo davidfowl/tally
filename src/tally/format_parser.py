@@ -29,7 +29,7 @@ class FormatSpec:
 
 
 # Reserved field names that cannot be used for custom captures
-RESERVED_NAMES = {'date', 'amount', 'location', 'description', '_', 'field'}
+RESERVED_NAMES = {'date', 'amount', 'location', 'description', '_', '*', 'field'}
 
 
 def parse_format_string(format_str: str, description_template: Optional[str] = None) -> FormatSpec:

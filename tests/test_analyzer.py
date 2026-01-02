@@ -608,6 +608,9 @@ class TestCustomCaptures:
             assert txns[0]['amount'] == 30.00
         finally:
             os.unlink(f.name)
+
+
+class TestCurrencyFormatting:
     """Tests for currency formatting functions."""
 
     def test_format_currency_default(self):
