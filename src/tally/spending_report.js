@@ -275,7 +275,13 @@ const MerchantSection = defineComponent({
             return item.tags || [];
         },
         getTransactions(item) {
-            return item.filteredTxns || item.transactions || [];
+            const txns = item.filteredTxns || item.transactions || [];
+            // Sort by date descending (month YYYY-MM + day from date MM/DD)
+            return [...txns].sort((a, b) => {
+                const dateA = `${a.month || '0000-00'}-${(a.date || '00/00').slice(3, 5)}`;
+                const dateB = `${b.month || '0000-00'}-${(b.date || '00/00').slice(3, 5)}`;
+                return dateB.localeCompare(dateA);
+            });
         },
         getAmountClass(item) {
             if (this.creditMode) return 'credit-amount';

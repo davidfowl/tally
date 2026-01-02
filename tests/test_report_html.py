@@ -167,6 +167,23 @@ class TestUINavigation:
         # Should see transaction details
         expect(page.locator("text=AMAZON MARKETPLACE").first).to_be_visible()
 
+    def test_transactions_sorted_by_date_descending(self, page: Page, report_path):
+        """Transactions within a merchant are sorted by date descending (newest first)."""
+        page.goto(f"file://{report_path}")
+        # Expand Amazon to see transactions
+        amazon_row = page.get_by_test_id("merchant-row-Amazon")
+        amazon_row.click()
+        # Wait for expansion
+        page.wait_for_timeout(200)
+        # Get transaction rows for Amazon (they contain AMAZON MARKETPLACE in description)
+        amazon_txns = page.locator(".txn-row:has-text('AMAZON MARKETPLACE')")
+        dates = amazon_txns.locator(".txn-date").all_text_contents()
+        # Amazon has transactions on: Jan 5, Jan 10, Feb 1, Mar 1
+        # Should be sorted descending: Mar 1, Feb 1, Jan 10, Jan 5
+        assert len(dates) == 4, f"Expected 4 Amazon transactions, got {len(dates)}: {dates}"
+        # Verify descending order
+        assert dates == ["Mar 1", "Feb 1", "Jan 10", "Jan 5"], f"Expected descending order, got {dates}"
+
     def test_tag_click_adds_filter(self, page: Page, report_path):
         """Clicking a tag adds it as a filter."""
         page.goto(f"file://{report_path}")
