@@ -567,8 +567,47 @@ class TestCustomCaptures:
         finally:
             os.unlink(f.name)
 
+    def test_asterisk_skip_column_alias(self):
+        """Test that {*} works as an alias for {_} to skip columns."""
+        csv_content = """Date,Amount,Ignored1,Ignored2,Description
+01/15/2025,25.50,*,,STARBUCKS COFFEE
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
 
-class TestCurrencyFormatting:
+            rules = get_all_rules()
+            # Use {*} instead of {_} to skip columns - should work
+            format_spec = parse_format_string('{date:%m/%d/%Y},{amount},{*},{*},{description}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 1
+            assert txns[0]['raw_description'] == 'STARBUCKS COFFEE'
+            assert txns[0]['amount'] == 25.50
+        finally:
+            os.unlink(f.name)
+
+    def test_mixed_asterisk_and_underscore_skip(self):
+        """Test that {*} and {_} can be mixed in the same format string."""
+        csv_content = """Date,Amount,Skip1,Skip2,Description
+01/15/2025,30.00,ignored,also_ignored,MERCHANT NAME
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            # Mix {*} and {_} - both should skip
+            format_spec = parse_format_string('{date:%m/%d/%Y},{amount},{*},{_},{description}')
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 1
+            assert txns[0]['raw_description'] == 'MERCHANT NAME'
+            assert txns[0]['amount'] == 30.00
+        finally:
+            os.unlink(f.name)
     """Tests for currency formatting functions."""
 
     def test_format_currency_default(self):

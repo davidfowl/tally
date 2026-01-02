@@ -42,6 +42,7 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
         {-amount}         - Negate amount (flip sign, credits become debits)
         {+amount}         - Absolute value (all amounts become positive)
         {_}               - Skip this column
+        {*}               - Skip this column (alias for {_})
 
     Two modes:
         Mode 1 (simple): Use {description} to capture a single column
@@ -65,8 +66,9 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
     Raises:
         ValueError: If format string is invalid or missing required fields
     """
-    # Pattern to match {field}, {-field}, {+field}, or {field:format}
-    field_pattern = re.compile(r'\{([-+]?)(\w+)(?::([^}]+))?\}')
+    # Pattern to match {field}, {-field}, {+field}, {field:format}, or {*}
+    # Note: * is an alias for _ (skip column), common from AI-generated configs
+    field_pattern = re.compile(r'\{([-+]?)(\w+|\*)(?::([^}]+))?\}')
 
     # Split by comma and parse each column
     parts = [p.strip() for p in format_str.split(',')]
@@ -89,8 +91,8 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
         field_name = match.group(2).lower()
         format_spec = match.group(3)  # May be None
 
-        # Skip placeholder columns
-        if field_name == '_':
+        # Skip placeholder columns: {_} or {*} (alias)
+        if field_name == '_' or field_name == '*':
             continue
 
         # Check if it's a reserved field or custom capture
