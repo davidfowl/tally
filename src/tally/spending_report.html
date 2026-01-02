@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html :lang="language">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Spending Report</title>
+    <title>{{ t('reportTitle', { year: spendingData.year }) }}</title>
     <style>/* CSS_PLACEHOLDER */</style>
 </head>
 <body>
@@ -13,7 +13,7 @@
             <header>
                 <h1 data-testid="report-title">{{ title }}</h1>
                 <p class="subtitle">{{ subtitle }}</p>
-                <button class="theme-toggle" data-testid="theme-toggle" @click="toggleTheme" :title="isDarkTheme ? 'Switch to light mode' : 'Switch to dark mode'">
+                <button class="theme-toggle" data-testid="theme-toggle" @click="toggleTheme" :title="isDarkTheme ? t('switchToLight') : t('switchToDark')">
                     {{ isDarkTheme ? '☀️' : '🌙' }}
                 </button>
             </header>
@@ -26,7 +26,7 @@
                            @input="onSearchInput"
                            @focus="showAutocomplete = true"
                            @keydown="onSearchKeydown"
-                           placeholder="Search merchants, categories, locations...">
+                           :placeholder="t('searchPlaceholder')">
                     <div class="autocomplete-list" :class="{ show: showAutocomplete && filteredAutocomplete.length > 0 }">
                         <div v-for="(item, index) in filteredAutocomplete"
                              :key="item.id"
@@ -39,8 +39,8 @@
                     </div>
                 </div>
                 <select class="date-range-select" @change="addMonthFilter($event.target.value); $event.target.value = ''">
-                    <option value="">+ Date filter</option>
-                    <optgroup label="Individual Months">
+                    <option value="">{{ t('dateFilter') }}</option>
+                    <optgroup :label="t('months')">
                         <option v-for="m in availableMonths" :key="m.key" :value="m.key">{{ m.label }}</option>
                     </optgroup>
                 </select>
@@ -55,71 +55,71 @@
                         <span class="chip-text">{{ filter.displayText || filter.text }}</span>
                         <span class="chip-remove" data-testid="filter-chip-remove" @click.stop="removeFilter(index)">&times;</span>
                     </div>
-                    <button v-if="activeFilters.length > 1" class="clear-all-btn" data-testid="clear-filters" @click="clearFilters">Clear all</button>
+                    <button v-if="activeFilters.length > 1" class="clear-all-btn" data-testid="clear-filters" @click="clearFilters">{{ t('clearAll') }}</button>
                 </div>
             </div>
 
             <!-- Help Section -->
             <div class="help-section" :class="{ collapsed: helpCollapsed }">
                 <div class="help-section-header" @click="helpCollapsed = !helpCollapsed">
-                    <h3>How to Read This Report</h3>
+                    <h3>{{ t('helpTitle') }}</h3>
                     <span class="toggle">{{ helpCollapsed ? '▶' : '▼' }}</span>
                 </div>
                 <div class="help-section-content">
-                    <span class="label">Categories:</span>
-                    <span class="value">Merchants are grouped by their assigned category from merchant_categories.csv</span>
-                    <span class="label">Terms:</span>
-                    <span class="value"><code>YTD</code> year-to-date total · <code>Count</code> number of transactions</span>
-                    <span class="label">Filters:</span>
-                    <span class="value">Click on categories, tags, or locations to filter. Use search to find specific merchants.</span>
+                    <span class="label">{{ t('helpCategories') }}</span>
+                    <span class="value">{{ t('helpCategoriesDesc') }}</span>
+                    <span class="label">{{ t('helpTerms') }}</span>
+                    <span class="value"><code>YTD</code> {{ t('helpYtdDesc') }} · <code>Count</code> {{ t('helpCountDesc') }}</span>
+                    <span class="label">{{ t('helpFilters') }}</span>
+                    <span class="value">{{ t('helpFiltersDesc') }}</span>
                 </div>
             </div>
 
             <!-- Summary Cards -->
             <div class="summary-grid">
                 <div class="card total" data-testid="total-spending-card">
-                    <h2>Total Spending (YTD)</h2>
+                    <h2>{{ t('totalSpending') }}</h2>
                     <div class="amount" data-testid="total-spending-amount">{{ formatCurrency(grandTotal) }}</div>
                     <div class="breakdown">
                         <div class="breakdown-item" v-if="creditsTotal > 0">
-                            <span class="name credit-label">Credits Applied</span>
+                            <span class="name credit-label">{{ t('creditsApplied') }}</span>
                             <span class="value">+{{ formatCurrency(creditsTotal) }}</span>
                         </div>
                         <div class="breakdown-item" v-if="uncategorizedTotal > 0">
-                            <span class="name">Uncategorized</span>
+                            <span class="name">{{ t('uncategorized') }}</span>
                             <span class="value">{{ formatCurrency(uncategorizedTotal) }} ({{ formatPct(uncategorizedTotal, grandTotal) }})</span>
                         </div>
                     </div>
                 </div>
                 <!-- Cash Flow card - show when there's income -->
                 <div class="card cashflow" v-if="incomeCount > 0" data-testid="cashflow-card">
-                    <h2>Cash Flow</h2>
+                    <h2>{{ t('cashFlow') }}</h2>
                     <div class="amount" data-testid="cashflow-amount" :class="{ positive: netCashFlow >= 0, negative: netCashFlow < 0 }">
                         {{ netCashFlow >= 0 ? '+' : '' }}{{ formatCurrency(netCashFlow) }}
                     </div>
                     <div class="breakdown">
                         <div class="breakdown-item clickable" @click="addFilter('income', 'tag')">
-                            <span class="name income-label">Income</span>
+                            <span class="name income-label">{{ t('income') }}</span>
                             <span class="value" data-testid="income-amount">+{{ formatCurrency(Math.abs(incomeTotal)) }}</span>
                         </div>
                         <div class="breakdown-item">
-                            <span class="name">Spending</span>
+                            <span class="name">{{ t('spending') }}</span>
                             <span class="value" data-testid="spending-in-cashflow">-{{ formatCurrency(grandTotal) }}</span>
                         </div>
                         <div class="breakdown-item clickable" v-if="transfersCount > 0" @click="addFilter('transfer', 'tag')">
-                            <span class="name transfers-label">Transfers</span>
+                            <span class="name transfers-label">{{ t('transfers') }}</span>
                             <span class="value" data-testid="transfers-amount">{{ formatCurrency(Math.abs(transfersTotal)) }}</span>
                         </div>
                     </div>
                 </div>
                 <!-- Excluded card - show when there are excluded but no income -->
                 <div class="card excluded-summary" v-else-if="filteredExcludedCount > 0" data-testid="excluded-card">
-                    <h2>Excluded</h2>
+                    <h2>{{ t('excluded') }}</h2>
                     <div class="amount" data-testid="excluded-total">{{ formatCurrency(excludedTotal) }}</div>
                     <div class="breakdown">
                         <div class="breakdown-item clickable" data-testid="show-excluded-link" @click="scrollToExcluded">
-                            <span class="name">Not included in spending</span>
-                            <span class="value" data-testid="excluded-count">{{ filteredExcludedCount }} transactions</span>
+                            <span class="name">{{ t('notIncludedInSpending') }}</span>
+                            <span class="value" data-testid="excluded-count">{{ t('transactionCount', { count: filteredExcludedCount }) }}</span>
                         </div>
                     </div>
                 </div>
@@ -130,26 +130,26 @@
                 <div class="section-header" @click="chartsCollapsed = !chartsCollapsed">
                     <h2>
                         <span class="toggle">{{ chartsCollapsed ? '▶' : '▼' }}</span>
-                        Spending Trends
+                        {{ t('spendingTrends') }}
                     </h2>
                 </div>
                 <div class="section-content" :class="{ collapsed: chartsCollapsed }">
                     <div class="charts-grid">
                         <div class="chart-container">
-                            <h3>Monthly Spending Trend</h3>
+                            <h3>{{ t('monthlyTrend') }}</h3>
                             <div class="chart-wrapper">
                                 <canvas ref="monthlyChart"></canvas>
                             </div>
                         </div>
                         <div class="chart-container">
-                            <h3>Spending by Category</h3>
+                            <h3>{{ t('byCategory') }}</h3>
                             <div class="chart-wrapper">
                                 <canvas ref="categoryPieChart"></canvas>
                             </div>
                         </div>
                     </div>
                     <div class="chart-container" style="margin-top: 2rem;">
-                        <h3>Category Trends by Month</h3>
+                        <h3>{{ t('categoryTrends') }}</h3>
                         <div class="chart-wrapper" style="height: 350px;">
                             <canvas ref="categoryByMonthChart"></canvas>
                         </div>
@@ -160,10 +160,10 @@
             <!-- View Toggle -->
             <div class="view-toggle" v-if="hasSections">
                 <button :class="{ active: currentView === 'category' }" @click="currentView = 'category'">
-                    By Category
+                    {{ t('byCategory') }}
                 </button>
                 <button :class="{ active: currentView === 'section' }" @click="currentView = 'section'">
-                    By View
+                    {{ t('byView') }}
                 </button>
             </div>
 
@@ -232,12 +232,12 @@
             <merchant-section
                 v-if="creditMerchants.length > 0"
                 section-key="credits"
-                title="Credits Applied"
+                :title="t('creditsApplied')"
                 :items="creditMerchants"
                 :show-total="true"
                 :total-amount="creditsTotal"
-                total-label="Total Credits"
-                subtitle="(reduced spending)"
+                :total-label="t('totalCredits')"
+                :subtitle="t('reducedSpending')"
                 :credit-mode="true"
                 :collapsed-sections="collapsedSections"
                 :sort-config="sortConfig"
@@ -256,9 +256,9 @@
             <merchant-section
                 v-if="groupedExcluded.length > 0"
                 section-key="excluded"
-                title="Excluded"
+                :title="t('excluded')"
                 :items="groupedExcluded"
-                subtitle="(not included in spending)"
+                :subtitle="t('notIncludedInSpending')"
                 :collapsed-sections="collapsedSections"
                 :sort-config="sortConfig"
                 :expanded-items="expandedExcluded"
@@ -274,7 +274,7 @@
 
             <!-- Footer -->
             <footer>
-                <p>Generated by tally &middot; Data through {{ spendingData.dataThrough || 'present' }}</p>
+                <p>{{ t('generatedBy') }} &middot; {{ t('dataThrough', { date: spendingData.dataThrough || t('present') }) }}</p>
             </footer>
         </div>
     </div>
@@ -285,6 +285,9 @@
 
     <!-- Data (injected by Python) -->
     <script>/* DATA_PLACEHOLDER */</script>
+
+    <!-- i18n (internationalization) -->
+    <script>/* I18N_PLACEHOLDER */</script>
 
     <!-- Vue App -->
     <script>/* JS_PLACEHOLDER */</script>

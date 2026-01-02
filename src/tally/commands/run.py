@@ -181,6 +181,7 @@ def cmd_run(args):
     verbose = args.verbose if hasattr(args, 'verbose') else 0
 
     currency_format = config.get('currency_format', '${amount}')
+    language = config.get('language', 'en')
 
     if output_format == 'json':
         # JSON output with reasoning
@@ -217,7 +218,7 @@ def cmd_run(args):
         source_names = [s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)]
         write_summary_file_vue(stats, output_path, year=year,
                                currency_format=currency_format, sources=source_names,
-                               embedded_html=args.embedded_html)
+                               embedded_html=args.embedded_html, language=language)
         if not args.quiet:
             # Make the path clickable using OSC 8 hyperlink escape sequence
             abs_path = os.path.abspath(output_path)

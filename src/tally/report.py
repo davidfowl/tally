@@ -84,7 +84,7 @@ def generate_embeddings(items):
 # VUE-BASED HTML REPORT (Modern)
 # ============================================================================
 
-def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount}", sources=None, embedded_html=True):
+def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount}", sources=None, embedded_html=True, language='en'):
     """Write summary to HTML file using Vue 3 for client-side rendering.
 
     Args:
@@ -94,14 +94,17 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
         currency_format: Format string for currency display, e.g. "${amount}" or "{amount} zl"
         sources: List of data source names (e.g., ['Amex', 'Chase'])
         embedded_html: If True (default), embed CSS/JS inline. If False, output separate files.
+        language: Language code for UI localization ('en' or 'tr'). Defaults to 'en'.
     """
     sources = sources or []
+    language = language or 'en'
 
     # Load template files
     template_dir = get_template_dir()
     html_template = (template_dir / 'spending_report.html').read_text(encoding='utf-8')
     css_content = (template_dir / 'spending_report.css').read_text(encoding='utf-8')
     js_content = (template_dir / 'spending_report.js').read_text(encoding='utf-8')
+    i18n_content = (template_dir / 'i18n.js').read_text(encoding='utf-8')
 
     # Get number of months for averaging
     num_months = stats['num_months']
@@ -395,6 +398,7 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
         'numMonths': num_months,
         'sources': sources,
         'dataThrough': latest_date,
+        'language': language,
         'sections': sections,
         'categoryView': category_view,
         # Excluded transactions for transparency
@@ -419,6 +423,10 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
         js_path = output_dir / 'spending_report.js'
         js_path.write_text(js_content, encoding='utf-8')
 
+        # Write i18n file
+        i18n_path = output_dir / 'i18n.js'
+        i18n_path.write_text(i18n_content, encoding='utf-8')
+
         # Write data file
         data_path = output_dir / 'spending_data.js'
         data_path.write_text(data_script, encoding='utf-8')
@@ -431,6 +439,9 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
             '<script>/* DATA_PLACEHOLDER */</script>',
             '<script src="spending_data.js"></script>'
         ).replace(
+            '<script>/* I18N_PLACEHOLDER */</script>',
+            '<script src="i18n.js"></script>'
+        ).replace(
             '<script>/* JS_PLACEHOLDER */</script>',
             '<script src="spending_report.js"></script>'
         )
@@ -440,6 +451,8 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
             '/* CSS_PLACEHOLDER */', css_content
         ).replace(
             '/* DATA_PLACEHOLDER */', data_script
+        ).replace(
+            '/* I18N_PLACEHOLDER */', i18n_content
         ).replace(
             '/* JS_PLACEHOLDER */', js_content
         )

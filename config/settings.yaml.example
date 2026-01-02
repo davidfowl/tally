@@ -6,6 +6,10 @@
 year: 2025
 title: "Spending Analysis"
 
+# Language for report UI (default: "en")
+# Supported: "en" (English), "tr" (Turkish)
+# language: en
+
 # Currency display format (default: "${amount}")
 # Use {amount} as placeholder for the formatted number
 # currency_format: "${amount}"      # US Dollar (prefix)

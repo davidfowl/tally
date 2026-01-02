@@ -3,6 +3,13 @@
 
 const { createApp, ref, reactive, computed, watch, onMounted, nextTick, defineComponent } = Vue;
 
+// ========== I18N HELPERS ==========
+const t = window.i18n?.t || ((key) => key);
+const language = window.spendingData?.language || 'en';
+const getMonthShort = window.i18n?.getMonthShort || ((month) => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][month]);
+const formatCurrencyI18n = window.i18n?.formatCurrency || ((amount) => '$' + Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const getPerMonth = window.i18n?.getPerMonth || ((formatted) => formatted + '/mo');
+
 // ========== REUSABLE COMPONENTS ==========
 
 // Sortable merchant/group section component
@@ -13,7 +20,7 @@ const MerchantSection = defineComponent({
         sectionKey: { type: String, required: true },
         title: { type: String, required: true },
         items: { type: Array, required: true },
-        totalLabel: { type: String, default: 'Total' },
+        totalLabel: { type: String, default: '' },
         showTotal: { type: Boolean, default: false },
         totalAmount: { type: Number, default: 0 },
         subtitle: { type: String, default: '' },
@@ -60,7 +67,7 @@ const MerchantSection = defineComponent({
                 </h2>
                 <span class="section-total">
                     <template v-if="categoryMode">
-                        <span class="section-monthly">{{ formatCurrency(totalAmount / numMonths) }}/mo</span> ·
+                        <span class="section-monthly">{{ getPerMonth(formatCurrency(totalAmount / numMonths)) }}</span> ·
                         <span class="section-ytd">{{ formatCurrency(totalAmount) }}</span>
                         <span class="section-pct">({{ formatPct(totalAmount, grossSpending) }})</span>
                     </template>
@@ -76,17 +83,17 @@ const MerchantSection = defineComponent({
                         <thead>
                             <tr>
                                 <th @click.stop="toggleSort(sectionKey, 'merchant')"
-                                    :class="getSortClass('merchant')">{{ creditMode ? 'Source' : 'Merchant' }}</th>
+                                    :class="getSortClass('merchant')">{{ creditMode ? t('source') : t('merchant') }}</th>
                                 <th @click.stop="toggleSort(sectionKey, 'subcategory')"
-                                    :class="getSortClass('subcategory')">{{ categoryMode ? 'Subcategory' : 'Category' }}</th>
+                                    :class="getSortClass('subcategory')">{{ categoryMode ? t('subcategory') : t('category') }}</th>
                                 <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
                                 <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
-                                    :class="getSortClass('count')">Count</th>
-                                <th>Tags</th>
+                                    :class="getSortClass('count')">{{ t('count') }}</th>
+                                <th>{{ t('tags') }}</th>
                                 <th v-if="!categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
-                                    :class="getSortClass('count')">Count</th>
+                                    :class="getSortClass('count')">{{ t('count') }}</th>
                                 <th class="money" @click.stop="toggleSort(sectionKey, 'total')"
-                                    :class="getSortClass('total')">{{ creditMode ? 'Amount' : 'Total' }}</th>
+                                    :class="getSortClass('total')">{{ creditMode ? t('amount') : t('total') }}</th>
                                 <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'total')"
                                     :class="getSortClass('total')">%</th>
                             </tr>
@@ -106,25 +113,25 @@ const MerchantSection = defineComponent({
                                                       @click.stop="togglePopup($event)">info
                                             <span class="match-info-popup" ref="popup">
                                                 <button class="popup-close" @click="closePopup($event)">&times;</button>
-                                                <div class="popup-header">Why This Matched</div>
+                                                <div class="popup-header">{{ t('whyThisMatched') }}</div>
                                                 <template v-if="item.matchInfo">
                                                     <div v-if="item.matchInfo.explanation" class="popup-explanation">{{ item.matchInfo.explanation }}</div>
                                                     <div class="popup-section">
-                                                        <div class="popup-section-header">Merchant Pattern</div>
+                                                        <div class="popup-section-header">{{ t('merchantPattern') }}</div>
                                                         <div class="popup-code">{{ item.matchInfo.pattern }}</div>
                                                     </div>
                                                     <div class="popup-section">
-                                                        <div class="popup-section-header">Assigned To</div>
+                                                        <div class="popup-section-header">{{ t('assignedTo') }}</div>
                                                         <div class="popup-row">
-                                                            <span class="popup-label">Merchant:</span>
+                                                            <span class="popup-label">{{ t('merchant') }}:</span>
                                                             <span class="popup-value">{{ item.matchInfo.assignedMerchant }}</span>
                                                         </div>
                                                         <div class="popup-row">
-                                                            <span class="popup-label">Category:</span>
+                                                            <span class="popup-label">{{ t('category') }}:</span>
                                                             <span class="popup-value">{{ item.matchInfo.assignedCategory }} / {{ item.matchInfo.assignedSubcategory }}</span>
                                                         </div>
                                                         <div v-if="item.matchInfo.assignedTags && item.matchInfo.assignedTags.length" class="popup-row popup-tags-section">
-                                                            <span class="popup-label">Tags:</span>
+                                                            <span class="popup-label">{{ t('tags') }}:</span>
                                                             <span class="popup-value">
                                                                 <template v-if="item.matchInfo.tagSources && Object.keys(item.matchInfo.tagSources).length">
                                                                     <div v-for="tag in item.matchInfo.assignedTags" :key="tag" class="popup-tag-item">
@@ -179,7 +186,7 @@ const MerchantSection = defineComponent({
                                                   @click.stop="togglePopup($event)">+{{ Object.keys(txn.extra_fields).length }}
                                                 <span class="match-info-popup">
                                                     <button class="popup-close" @click="closePopup($event)">&times;</button>
-                                                    <div class="popup-header">Transaction Details</div>
+                                                    <div class="popup-header">{{ t('transactionDetails') }}</div>
                                                     <div v-for="(value, key) in txn.extra_fields" :key="key" class="popup-row">
                                                         <span class="popup-label">{{ formatFieldKey(key) }}</span>
                                                         <span v-if="Array.isArray(value)" class="popup-value popup-list">
@@ -226,6 +233,8 @@ const MerchantSection = defineComponent({
         </section>
     `,
     methods: {
+        t,
+        getPerMonth,
         getSortClass(column) {
             const cfg = this.sortConfig[this.sectionKey];
             return {
@@ -394,11 +403,11 @@ createApp({
         const spendingData = computed(() => window.spendingData || { sections: {}, year: 2025, numMonths: 12 });
 
         // Report title and subtitle
-        const title = computed(() => `${spendingData.value.year} Spending Report`);
+        const title = computed(() => t('reportTitle', { year: spendingData.value.year }));
         const subtitle = computed(() => {
             const data = spendingData.value;
             const sources = data.sources || [];
-            return sources.length > 0 ? `Data from ${sources.join(', ')}` : '';
+            return sources.length > 0 ? t('dataFrom', { sources: sources.join(', ') }) : '';
         });
 
         // Core filtering - returns sections with filtered merchants and transactions
@@ -1286,12 +1295,12 @@ createApp({
 
         // Formatting helpers
         function formatCurrency(amount) {
-            if (amount === undefined || amount === null) return '$0';
+            if (amount === undefined || amount === null) return formatCurrencyI18n(0);
             const rounded = Math.round(amount);
             if (rounded < 0) {
-                return '-$' + Math.abs(rounded).toLocaleString('en-US');
+                return '-' + formatCurrencyI18n(Math.abs(rounded));
             }
-            return '$' + rounded.toLocaleString('en-US');
+            return formatCurrencyI18n(rounded);
         }
 
         function formatDate(dateStr) {
@@ -1299,19 +1308,17 @@ createApp({
             // Handle MM/DD format from Python
             if (dateStr.match(/^\d{1,2}\/\d{1,2}$/)) {
                 const [month, day] = dateStr.split('/');
-                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                return `${months[parseInt(month)-1]} ${parseInt(day)}`;
+                return `${getMonthShort(parseInt(month)-1)} ${parseInt(day)}`;
             }
             // Handle YYYY-MM-DD format
             const d = new Date(dateStr + 'T12:00:00');
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return `${getMonthShort(d.getMonth())} ${d.getDate()}`;
         }
 
         function formatMonthLabel(key) {
             if (!key) return '';
             const [year, month] = key.split('-');
-            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            return `${months[parseInt(month)-1]} ${year}`;
+            return `${getMonthShort(parseInt(month)-1)} ${year}`;
         }
 
         function formatPct(value, total) {
@@ -1715,6 +1722,8 @@ createApp({
         // ========== RETURN ==========
 
         return {
+            // I18n
+            t, getMonthShort, getPerMonth, language,
             // State
             activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
             showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
