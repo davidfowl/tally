@@ -407,8 +407,8 @@ def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
             'transfers_total': round(transfers_total, 2),
             'net_cash_flow': round(income_total - stats['total'], 2) if income_total > 0 else None,  # transfers excluded
         },
-        'by_month': {month: {'total': round(data['total'], 2), 'count': data['count']}
-                     for month, data in sorted(by_month.items())},
+        'by_month': {month: {'total': round(total, 2)}
+                     for month, total in sorted(by_month.items())},
         'by_category': [
             {
                 'category': cat,
@@ -502,11 +502,11 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
     # Monthly Breakdown
     if by_month:
         lines.append('## Monthly Breakdown\n')
-        lines.append('| Month | Spending | Transactions |')
-        lines.append('|-------|----------|--------------|')
+        lines.append('| Month | Spending |')
+        lines.append('|-------|----------|')
         for month in sorted(by_month.keys()):
-            data = by_month[month]
-            lines.append(f"| {month} | {fmt(data['total'])} | {data['count']} |")
+            total = by_month[month]
+            lines.append(f"| {month} | {fmt(total)} |")
         lines.append('')
 
     # Credits/Refunds

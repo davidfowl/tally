@@ -1,12 +1,65 @@
 """Tests for analyzer module - CSV parsing and amount handling."""
 
+import json
 import pytest
 import tempfile
 import os
+from datetime import date
 
-from tally.analyzer import parse_amount, parse_generic_csv
+from tally.analyzer import parse_amount, parse_generic_csv, analyze_transactions, export_json
 from tally.format_parser import parse_format_string
 from tally.merchant_utils import get_all_rules
+
+
+class TestExportJson:
+    """Tests for export_json function."""
+
+    def _create_transactions(self, txn_data):
+        """Create test transaction dicts."""
+        transactions = []
+        for i, (merchant, amount, category, tags, txn_date) in enumerate(txn_data):
+            transactions.append({
+                'date': txn_date,
+                'description': merchant,
+                'raw_description': merchant,
+                'merchant': merchant,
+                'amount': amount,
+                'category': category,
+                'subcategory': 'General',
+                'source': 'test.csv',
+                'match_info': {'tags': tags} if tags else None,
+                'tags': tags or [],
+                'excluded': None,
+            })
+        return transactions
+
+    def test_export_json_with_by_month(self):
+        """export_json should handle by_month data correctly.
+        
+        Regression test: by_month stores floats, not dicts with 'total'/'count'.
+        """
+        txns = self._create_transactions([
+            ('GROCERY STORE', 50.00, 'Food', [], date(2025, 1, 15)),
+            ('COFFEE SHOP', 5.00, 'Food', [], date(2025, 1, 16)),
+            ('RESTAURANT', 25.00, 'Food', [], date(2025, 2, 10)),
+        ])
+
+        stats = analyze_transactions(txns)
+
+        # This should not raise "TypeError: 'float' object is not subscriptable"
+        json_output = export_json(stats)
+        
+        # Verify it's valid JSON
+        parsed = json.loads(json_output)
+        
+        # Verify by_month structure
+        assert 'by_month' in parsed
+        assert '2025-01' in parsed['by_month']
+        assert '2025-02' in parsed['by_month']
+        # Should have total key
+        assert 'total' in parsed['by_month']['2025-01']
+        assert parsed['by_month']['2025-01']['total'] == 55.0
+        assert parsed['by_month']['2025-02']['total'] == 25.0
 
 
 class TestParseAmount:
