@@ -396,6 +396,174 @@ def main():
         help='Install latest development build from main branch'
     )
 
+    # rule subcommand with its own subparsers
+    rule_parser = subparsers.add_parser(
+        'rule',
+        help='Manage merchant rules (add, list, update, delete)',
+        description='CRUD operations for .rules files. Faster than editing files directly.'
+    )
+    rule_subparsers = rule_parser.add_subparsers(dest='rule_command', metavar='<action>')
+
+    # rule add
+    rule_add = rule_subparsers.add_parser(
+        'add',
+        help='Add or update a rule'
+    )
+    rule_add.add_argument(
+        'pattern',
+        help='Pattern or expression (e.g., "NETFLIX" or "contains(\'UBER\')")'
+    )
+    rule_add.add_argument(
+        '-m', '--merchant',
+        help='Display name (defaults to pattern-derived name)'
+    )
+    rule_add.add_argument(
+        '-c', '--category',
+        help='Category'
+    )
+    rule_add.add_argument(
+        '-s', '--subcategory',
+        help='Subcategory'
+    )
+    rule_add.add_argument(
+        '-t', '--tags',
+        help='Comma-separated tags'
+    )
+    rule_add.add_argument(
+        '-p', '--priority',
+        type=int,
+        default=50,
+        help='Priority (higher = checked first, default: 50)'
+    )
+    rule_add.add_argument(
+        '--validate',
+        action='store_true',
+        dest='validate',
+        help='Validate rule matches against transactions'
+    )
+    rule_add.add_argument(
+        '--json',
+        action='store_true',
+        help='Output as JSON'
+    )
+    rule_add.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule list
+    rule_list = rule_subparsers.add_parser(
+        'list',
+        help='List all rules'
+    )
+    rule_list.add_argument(
+        '--category',
+        help='Filter by category'
+    )
+    rule_list.add_argument(
+        '--json',
+        action='store_true',
+        help='Output as JSON'
+    )
+    rule_list.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule show
+    rule_show = rule_subparsers.add_parser(
+        'show',
+        help='Show details of a rule'
+    )
+    rule_show.add_argument(
+        'name',
+        help='Rule name'
+    )
+    rule_show.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule update
+    rule_update = rule_subparsers.add_parser(
+        'update',
+        help='Update an existing rule'
+    )
+    rule_update.add_argument(
+        'name',
+        help='Rule name to update'
+    )
+    rule_update.add_argument(
+        '-c', '--category',
+        help='New category'
+    )
+    rule_update.add_argument(
+        '-s', '--subcategory',
+        help='New subcategory'
+    )
+    rule_update.add_argument(
+        '-t', '--tags',
+        help='Tag modifications: tag, +tag (add), -tag (remove)'
+    )
+    rule_update.add_argument(
+        '-p', '--priority',
+        type=int,
+        help='New priority'
+    )
+    rule_update.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule delete
+    rule_delete = rule_subparsers.add_parser(
+        'delete',
+        help='Delete a rule'
+    )
+    rule_delete.add_argument(
+        'name',
+        nargs='?',
+        help='Rule name to delete'
+    )
+    rule_delete.add_argument(
+        '--pattern',
+        help='Delete by pattern instead of name'
+    )
+    rule_delete.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule import
+    rule_import = rule_subparsers.add_parser(
+        'import',
+        help='Import rules from CSV'
+    )
+    rule_import.add_argument(
+        'file',
+        nargs='?',
+        help='CSV file to import'
+    )
+    rule_import.add_argument(
+        '--stdin',
+        action='store_true',
+        help='Read CSV from stdin'
+    )
+    rule_import.add_argument(
+        '--validate',
+        action='store_true',
+        help='Validate rules against transactions'
+    )
+    rule_import.add_argument(
+        '--json',
+        action='store_true',
+        help='Output as JSON'
+    )
+    rule_import.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
     args = parser.parse_args()
 
     # If no command specified, show help
@@ -464,6 +632,9 @@ def main():
     elif args.command == 'update':
         from .commands import cmd_update
         cmd_update(args)
+    elif args.command == 'rule':
+        from .commands import cmd_rule
+        cmd_rule(args)
 
 
 if __name__ == '__main__':
