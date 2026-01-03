@@ -20,7 +20,7 @@ from ..analyzer import (
 # Import shared utilities from parent cli module
 from ..cli import (
     C,
-    find_config_dir,
+    require_config_dir,
     _check_deprecated_description_cleaning,
     _check_merchant_migration,
     _warn_deprecated_parser,
@@ -30,18 +30,7 @@ from ..cli import (
 
 def cmd_run(args):
     """Handle the 'run' subcommand."""
-    # Determine config directory
-    if args.config:
-        config_dir = os.path.abspath(args.config)
-    else:
-        # Auto-detect config directory (supports both old and new layouts)
-        config_dir = find_config_dir()
-
-    if not config_dir or not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found.", file=sys.stderr)
-        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
-        print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
-        sys.exit(1)
+    config_dir = require_config_dir(args)
 
     # Load configuration
     try:

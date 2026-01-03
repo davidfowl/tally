@@ -103,6 +103,52 @@ tags: large
         assert rule.tags == {"large"}
         assert not rule.is_categorization_rule
 
+    def test_rule_with_priority(self):
+        """Parse a rule with priority."""
+        content = '''
+[Uber Eats]
+priority: 100
+match: contains("UBER") and contains("EATS")
+category: Food
+'''
+        engine = parse_merchants(content)
+        assert engine.rules[0].priority == 100
+
+    def test_priority_default(self):
+        """Priority defaults to 50."""
+        content = '''
+[Netflix]
+match: contains("NETFLIX")
+category: Subscriptions
+'''
+        engine = parse_merchants(content)
+        assert engine.rules[0].priority == 50
+
+    def test_priority_sorting(self):
+        """Rules are sorted by priority (descending)."""
+        content = '''
+[Low Priority]
+priority: 10
+match: contains("LOW")
+category: Test
+
+[High Priority]
+priority: 100
+match: contains("HIGH")
+category: Test
+
+[Default Priority]
+match: contains("DEFAULT")
+category: Test
+'''
+        engine = parse_merchants(content)
+        assert engine.rules[0].name == "High Priority"
+        assert engine.rules[0].priority == 100
+        assert engine.rules[1].name == "Default Priority"
+        assert engine.rules[1].priority == 50
+        assert engine.rules[2].name == "Low Priority"
+        assert engine.rules[2].priority == 10
+
     def test_multiple_rules(self):
         """Parse multiple rules."""
         content = '''

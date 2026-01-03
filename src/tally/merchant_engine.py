@@ -41,6 +41,7 @@ class MerchantRule:
     tags: Set[str] = field(default_factory=set)
     priority: int = 50  # Higher priority = checked first for tie-breaking (default 50)
     line_number: int = 0  # For error reporting
+    priority: int = 50  # Higher priority rules match first (default: 50)
     let_bindings: List[Tuple[str, str]] = field(default_factory=list)  # [(var_name, expr), ...]
     fields: Dict[str, str] = field(default_factory=dict)  # {field_name: expr} extra fields to add
 
@@ -297,6 +298,9 @@ class MerchantEngine:
         # Save final rule
         if current_rule:
             self._add_rule(current_rule, rule_start_line)
+
+        # Sort rules by priority (desc), then file order (line_number asc)
+        self.rules.sort(key=lambda r: (-r.priority, r.line_number))
 
     def _add_rule(self, rule_data: Dict[str, Any], line_number: int) -> None:
         """Add a parsed rule to the engine."""

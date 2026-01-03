@@ -5,7 +5,7 @@ Tally 'diag' command - Show diagnostic information about config and rules.
 import os
 import sys
 
-from ..cli import C, find_config_dir
+from ..cli import C, resolve_config_dir, print_no_config_help
 from ..classification import SPECIAL_TAGS
 from ..config_loader import load_config
 from ..merchant_utils import get_all_rules, diagnose_rules, get_transforms
@@ -15,11 +15,11 @@ def cmd_diag(args):
     """Handle the 'diag' subcommand - show diagnostic information about config and rules."""
     import json as json_module
 
-    # Determine config directory
-    if args.config:
-        config_dir = os.path.abspath(args.config)
-    else:
-        config_dir = find_config_dir() or os.path.abspath('config')
+    config_dir = resolve_config_dir(args)
+
+    if not config_dir or not os.path.isdir(config_dir):
+        print_no_config_help()
+        sys.exit(1)
 
     print("BUDGET ANALYZER DIAGNOSTICS")
     print("=" * 70)
@@ -31,11 +31,6 @@ def cmd_diag(args):
     print(f"Config directory: {config_dir}")
     print(f"  Exists: {os.path.isdir(config_dir)}")
     print()
-
-    if not os.path.isdir(config_dir):
-        print("ERROR: Config directory not found!")
-        print("Run 'tally init' to create a new budget directory.")
-        sys.exit(1)
 
     # Settings file
     settings_path = os.path.join(config_dir, args.settings)

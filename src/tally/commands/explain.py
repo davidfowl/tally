@@ -5,7 +5,7 @@ Tally 'explain' command - Explain merchant classifications.
 import os
 import sys
 
-from ..cli import C, find_config_dir, _check_deprecated_description_cleaning, _print_deprecation_warnings
+from ..cli import C, require_config_dir, _check_deprecated_description_cleaning, _print_deprecation_warnings
 from ..config_loader import load_config
 from ..merchant_utils import get_all_rules, get_transforms, explain_description
 from ..analyzer import parse_amex, parse_boa, parse_generic_csv
@@ -16,25 +16,8 @@ def cmd_explain(args):
     """Handle the 'explain' subcommand - explain merchant classifications."""
     from difflib import get_close_matches
 
-    # Determine config directory
-    # Check if first merchant arg looks like a config path
-    config_dir = None
+    config_dir = require_config_dir(args)
     merchant_names = args.merchant if args.merchant else []
-
-    if merchant_names and os.path.isdir(merchant_names[-1]):
-        # Last arg is a directory, treat it as config
-        config_dir = os.path.abspath(merchant_names[-1])
-        merchant_names = merchant_names[:-1]
-    elif args.config:
-        config_dir = os.path.abspath(args.config)
-    else:
-        config_dir = find_config_dir()
-
-    if not config_dir or not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found.", file=sys.stderr)
-        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
-        print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
-        sys.exit(1)
 
     # Load configuration
     try:

@@ -20,7 +20,8 @@ class TestCLIErrorHandling:
                 text=True
             )
             assert result.returncode == 1
-            assert 'tally init' in result.stderr
+            # Guide is printed to stdout
+            assert 'tally init' in result.stdout
 
     def test_explain_invalid_merchant_suggests_similar(self):
         """Typo in merchant name should suggest similar names."""
@@ -51,7 +52,7 @@ data_sources:
                 f.write("2025-01-15,NETFLIX STREAMING,15.99\n")
 
             result = subprocess.run(
-                ['uv', 'run', 'tally', 'explain', 'Netflx', config_dir],
+                ['uv', 'run', 'tally', 'explain', 'Netflx', '--config', config_dir],
                 capture_output=True,
                 text=True
             )
@@ -81,7 +82,7 @@ data_sources:
                 f.write("2025-01-15,TEST,10.00\n")
 
             result = subprocess.run(
-                ['uv', 'run', 'tally', 'up', '--only', 'invalid', '--format', 'summary', config_dir],
+                ['uv', 'run', 'tally', 'up', '--only', 'invalid', '--format', 'summary', '--config', config_dir],
                 capture_output=True,
                 text=True
             )
@@ -109,7 +110,7 @@ data_sources:
                 f.write("2025-01-15,TEST,10.00\n")
 
             result = subprocess.run(
-                ['uv', 'run', 'tally', 'up', '--only', 'monthly,invalid,travel', '--format', 'summary', config_dir],
+                ['uv', 'run', 'tally', 'up', '--only', 'monthly,invalid,travel', '--format', 'summary', '--config', config_dir],
                 capture_output=True,
                 text=True
             )
@@ -145,7 +146,7 @@ data_sources:
                 f.write("2025-01-15,NETFLIX STREAMING,15.99\n")
 
             result = subprocess.run(
-                ['uv', 'run', 'tally', 'explain', '--category', 'NonExistent', config_dir],
+                ['uv', 'run', 'tally', 'explain', '--category', 'NonExistent', '--config', config_dir],
                 capture_output=True,
                 text=True
             )
@@ -185,7 +186,7 @@ data_sources:
                 f.write("2025-01-15,TEST,10.00\n")
 
             result = subprocess.run(
-                ['uv', 'run', 'tally', 'explain', '--view', 'invalid', config_dir],
+                ['uv', 'run', 'tally', 'explain', '--view', 'invalid', '--config', config_dir],
                 capture_output=True,
                 text=True
             )
@@ -341,7 +342,7 @@ data_sources:
                 f.write("2025-01-15,TEST PURCHASE,-10.00\n")
 
             result = subprocess.run(
-                ['uv', 'run', 'tally', 'run', '--migrate', '--format', 'summary', config_dir],
+                ['uv', 'run', 'tally', 'run', '--migrate', '--format', 'summary', '--config', config_dir],
                 capture_output=True,
                 text=True
             )

@@ -667,6 +667,66 @@ def find_config_dir():
     return None
 
 
+def resolve_config_dir(args):
+    """Resolve config directory from args or auto-discovery.
+
+    All commands should use this single function for config resolution.
+
+    Resolution order:
+    1. --config flag (if provided)
+    2. Auto-discovery via find_config_dir()
+
+    Args:
+        args: Parsed argparse namespace with optional 'config' attribute
+
+    Returns:
+        Absolute path to config directory, or None if not found
+    """
+    # Check --config flag
+    config_path = getattr(args, 'config', None)
+    if config_path:
+        return os.path.abspath(config_path)
+
+    # Fall back to auto-discovery
+    return find_config_dir()
+
+
+def print_no_config_help():
+    """Print helpful getting started guide when no config is found."""
+    print()
+    print(f"{C.BOLD}  TALLY - Getting Started{C.RESET}")
+    print(f"{C.DIM}  ─────────────────────────────────────────{C.RESET}")
+    print(f"  {C.YELLOW}●{C.RESET} No config found")
+    print()
+    print(f"  {C.DIM}1.{C.RESET} Initialize: {C.GREEN}tally init{C.RESET}")
+    print(f"     {C.DIM}Creates settings.yaml, merchants.rules, views.rules{C.RESET}")
+    print()
+    print(f"  {C.DIM}2.{C.RESET} Add bank/credit card CSVs to {C.CYAN}./data/{C.RESET}")
+    print()
+    print(f"  {C.DIM}3.{C.RESET} Configure data sources in {C.CYAN}./config/settings.yaml{C.RESET}")
+    print()
+
+
+def require_config_dir(args):
+    """Resolve config directory or exit with helpful guide.
+
+    Use this in commands that require a config directory.
+
+    Args:
+        args: Parsed argparse namespace with optional 'config' attribute
+
+    Returns:
+        Absolute path to config directory (exits if not found)
+    """
+    config_dir = resolve_config_dir(args)
+
+    if not config_dir or not os.path.isdir(config_dir):
+        print_no_config_help()
+        sys.exit(1)
+
+    return config_dir
+
+
 # Schema version for asset migrations
 SCHEMA_VERSION = 1
 
@@ -880,9 +940,8 @@ def main():
         help='Parse transactions, categorize them, and generate HTML spending report'
     )
     up_parser.add_argument(
-        'config',
-        nargs='?',
-        help='Path to config directory (default: ./config)'
+        '--config', '-c',
+        help='Path to config directory (default: auto-detect)'
     )
     up_parser.add_argument(
         '--settings', '-s',
@@ -949,9 +1008,8 @@ def main():
     # run subcommand (deprecated alias for 'up' - hidden from help)
     run_parser = subparsers.add_parser('run')
     run_parser.add_argument(
-        'config',
-        nargs='?',
-        help='Path to config directory (default: ./config)'
+        '--config', '-c',
+        help='Path to config directory (default: auto-detect)'
     )
     run_parser.add_argument(
         '--settings', '-s',
@@ -1034,9 +1092,8 @@ def main():
                     'Outputs suggested rules for your .rules file.'
     )
     discover_parser.add_argument(
-        'config',
-        nargs='?',
-        help='Path to config directory (default: ./config)'
+        '--config', '-c',
+        help='Path to config directory (default: auto-detect)'
     )
     discover_parser.add_argument(
         '--settings', '-s',
@@ -1055,6 +1112,16 @@ def main():
         default='text',
         help='Output format: text (human readable), csv (for import), json (for agents)'
     )
+    discover_parser.add_argument(
+        '--pipe',
+        action='store_true',
+        help='Output clean CSV for piping to "rule import --stdin" (no comments, no CATEGORY placeholders)'
+    )
+    discover_parser.add_argument(
+        '--prefixes',
+        action='store_true',
+        help='Detect common prefixes in descriptions and suggest field transforms'
+    )
 
     # diag subcommand
     diag_parser = subparsers.add_parser(
@@ -1063,9 +1130,8 @@ def main():
         description='Display detailed diagnostic info to help troubleshoot rule loading issues.'
     )
     diag_parser.add_argument(
-        'config',
-        nargs='?',
-        help='Path to config directory (default: ./config)'
+        '--config', '-c',
+        help='Path to config directory (default: auto-detect)'
     )
     diag_parser.add_argument(
         '--settings', '-s',
@@ -1093,9 +1159,8 @@ def main():
         help='Merchant name or raw transaction description to explain (shows summary if omitted)'
     )
     explain_parser.add_argument(
-        'config',
-        nargs='?',
-        help='Path to config directory (default: ./config)'
+        '--config', '-c',
+        help='Path to config directory (default: auto-detect)'
     )
     explain_parser.add_argument(
         '--settings', '-s',
@@ -1141,10 +1206,14 @@ def main():
     )
 
     # workflow subcommand
-    subparsers.add_parser(
+    workflow_parser = subparsers.add_parser(
         'workflow',
         help='Show context-aware workflow instructions for AI agents',
         description='Detects current state and shows relevant next steps.'
+    )
+    workflow_parser.add_argument(
+        '--config', '-c',
+        help='Path to config directory (default: auto-detect)'
     )
 
     # reference subcommand
@@ -1187,6 +1256,174 @@ def main():
         '--prerelease',
         action='store_true',
         help='Install latest development build from main branch'
+    )
+
+    # rule subcommand with its own subparsers
+    rule_parser = subparsers.add_parser(
+        'rule',
+        help='Manage merchant rules (add, list, update, delete)',
+        description='CRUD operations for .rules files. Faster than editing files directly.'
+    )
+    rule_subparsers = rule_parser.add_subparsers(dest='rule_command', metavar='<action>')
+
+    # rule add
+    rule_add = rule_subparsers.add_parser(
+        'add',
+        help='Add or update a rule'
+    )
+    rule_add.add_argument(
+        'pattern',
+        help='Pattern or expression (e.g., "NETFLIX" or "contains(\'UBER\')")'
+    )
+    rule_add.add_argument(
+        '-m', '--merchant',
+        help='Display name (defaults to pattern-derived name)'
+    )
+    rule_add.add_argument(
+        '-c', '--category',
+        help='Category'
+    )
+    rule_add.add_argument(
+        '-s', '--subcategory',
+        help='Subcategory'
+    )
+    rule_add.add_argument(
+        '-t', '--tags',
+        help='Comma-separated tags'
+    )
+    rule_add.add_argument(
+        '-p', '--priority',
+        type=int,
+        default=50,
+        help='Priority (higher = checked first, default: 50)'
+    )
+    rule_add.add_argument(
+        '--validate',
+        action='store_true',
+        dest='validate',
+        help='Validate rule matches against transactions'
+    )
+    rule_add.add_argument(
+        '--json',
+        action='store_true',
+        help='Output as JSON'
+    )
+    rule_add.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule list
+    rule_list = rule_subparsers.add_parser(
+        'list',
+        help='List all rules'
+    )
+    rule_list.add_argument(
+        '--category',
+        help='Filter by category'
+    )
+    rule_list.add_argument(
+        '--json',
+        action='store_true',
+        help='Output as JSON'
+    )
+    rule_list.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule show
+    rule_show = rule_subparsers.add_parser(
+        'show',
+        help='Show details of a rule'
+    )
+    rule_show.add_argument(
+        'name',
+        help='Rule name'
+    )
+    rule_show.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule update
+    rule_update = rule_subparsers.add_parser(
+        'update',
+        help='Update an existing rule'
+    )
+    rule_update.add_argument(
+        'name',
+        help='Rule name to update'
+    )
+    rule_update.add_argument(
+        '-c', '--category',
+        help='New category'
+    )
+    rule_update.add_argument(
+        '-s', '--subcategory',
+        help='New subcategory'
+    )
+    rule_update.add_argument(
+        '-t', '--tags',
+        help='Tag modifications: tag, +tag (add), -tag (remove)'
+    )
+    rule_update.add_argument(
+        '-p', '--priority',
+        type=int,
+        help='New priority'
+    )
+    rule_update.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule delete
+    rule_delete = rule_subparsers.add_parser(
+        'delete',
+        help='Delete a rule'
+    )
+    rule_delete.add_argument(
+        'name',
+        nargs='?',
+        help='Rule name to delete'
+    )
+    rule_delete.add_argument(
+        '--pattern',
+        help='Delete by pattern instead of name'
+    )
+    rule_delete.add_argument(
+        '--config',
+        help='Config directory'
+    )
+
+    # rule import
+    rule_import = rule_subparsers.add_parser(
+        'import',
+        help='Import rules from CSV'
+    )
+    rule_import.add_argument(
+        'file',
+        nargs='?',
+        help='CSV file to import'
+    )
+    rule_import.add_argument(
+        '--stdin',
+        action='store_true',
+        help='Read CSV from stdin'
+    )
+    rule_import.add_argument(
+        '--validate',
+        action='store_true',
+        help='Validate rules against transactions'
+    )
+    rule_import.add_argument(
+        '--json',
+        action='store_true',
+        help='Output as JSON'
+    )
+    rule_import.add_argument(
+        '--config',
+        help='Config directory'
     )
 
     args = parser.parse_args()
@@ -1258,6 +1495,9 @@ def main():
     elif args.command == 'update':
         from .commands import cmd_update
         cmd_update(args)
+    elif args.command == 'rule':
+        from .commands import cmd_rule
+        cmd_rule(args)
 
 
 if __name__ == '__main__':

@@ -496,8 +496,10 @@ class TransactionContext:
         data_sources: Optional[Dict[str, List[Dict]]] = None,
     ) -> 'TransactionContext':
         """Create context from a transaction dictionary."""
+        # Prefer raw_description for matching (contains original CSV text)
+        # Fall back to description (may be normalized merchant name)
         return cls(
-            description=txn.get('description', txn.get('raw_description', '')),
+            description=txn.get('raw_description', txn.get('description', '')),
             amount=txn.get('amount', 0.0),
             date=txn.get('date'),
             variables=variables,

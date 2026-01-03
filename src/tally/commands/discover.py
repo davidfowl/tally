@@ -6,7 +6,7 @@ import os
 import sys
 from collections import defaultdict
 
-from ..cli import C, find_config_dir, _check_deprecated_description_cleaning, _print_deprecation_warnings
+from ..cli import C, require_config_dir, _check_deprecated_description_cleaning, _print_deprecation_warnings
 from ..config_loader import load_config
 from ..merchant_utils import get_all_rules, get_transforms
 from ..analyzer import parse_amex, parse_boa, parse_generic_csv
@@ -16,17 +16,7 @@ def cmd_discover(args):
     """Handle the 'discover' subcommand - find unknown merchants for rule creation."""
     import re
 
-    # Determine config directory
-    if args.config:
-        config_dir = os.path.abspath(args.config)
-    else:
-        config_dir = find_config_dir()
-
-    if not config_dir or not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found.", file=sys.stderr)
-        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
-        print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
-        sys.exit(1)
+    config_dir = require_config_dir(args)
 
     # Load configuration
     try:
@@ -129,8 +119,78 @@ def cmd_discover(args):
     if limit > 0:
         sorted_descs = sorted_descs[:limit]
 
+    # Handle --prefixes: detect common prefixes and show statistics
+    if getattr(args, 'prefixes', False):
+        import json as json_module
+
+        # Get all raw descriptions (not just unknown)
+        all_descriptions = [t.get('raw_description', t.get('description', '')) for t in all_txns]
+        prefixes = detect_common_prefixes(all_descriptions)
+
+        if not prefixes:
+            print("No common prefixes detected in your transaction descriptions.")
+            print()
+            print("Prefixes are patterns like 'APLPAY', 'SQ *', 'TST*' that appear")
+            print("at the start of many transactions and should be stripped.")
+            sys.exit(0)
+
+        # JSON output for agents
+        if args.format == 'json':
+            print(json_module.dumps(prefixes, indent=2))
+            sys.exit(0)
+
+        # Human-readable output with statistics
+        print("PREFIX ANALYSIS")
+        print("=" * 90)
+        print(f"Found {len(prefixes)} potential prefixes in {len(all_descriptions)} transactions")
+        print()
+        print("Interpreting the data:")
+        print("  - HIGH diversity (>0.5) + short prefix = likely payment processor (strip it)")
+        print("  - LOW diversity (<0.3) = likely merchant name (don't strip)")
+        print("  - Special chars (*, -) often indicate payment processors")
+        print()
+        print(f"{'PREFIX':<12} {'COUNT':>6} {'%':>6} {'UNIQUE':>7} {'DIV':>5}  EXAMPLES")
+        print("-" * 90)
+
+        for p in prefixes:
+            examples_str = ', '.join(p['examples'][:3])
+            if len(examples_str) > 40:
+                examples_str = examples_str[:40] + '...'
+            print(f"{p['prefix']:<12} {p['count']:>6} {p['percent']:>5.1f}% {p['unique_following']:>7} {p['diversity']:>5.2f}  {examples_str}")
+
+        print()
+        print("To strip a prefix, add to TOP of merchants.rules:")
+        print()
+        # Show example for the most common high-diversity prefix
+        high_div = [p for p in prefixes if p['diversity'] > 0.4]
+        if high_div:
+            example = high_div[0]
+            print(f"  # {example['prefix']} ({example['count']} txns, {example['diversity']:.0%} diverse)")
+            print(f'  field.description = regex_replace(field.description, "{example["regex_pattern"]}", "")')
+        else:
+            # Just show the first one as an example
+            example = prefixes[0]
+            print(f"  # Example: {example['prefix']}")
+            print(f'  field.description = regex_replace(field.description, "{example["regex_pattern"]}", "")')
+
+        sys.exit(0)
+
     # Output format
-    if args.format == 'csv':
+    if getattr(args, 'pipe', False):
+        # Clean CSV output for piping to rule import --stdin
+        # Format: PATTERN,MERCHANT,Unknown,Unknown
+        # Uses "Unknown" as category so agents can edit and re-run
+        for raw_desc, stats in sorted_descs:
+            pattern = suggest_pattern(raw_desc)
+            merchant = suggest_merchant_name(raw_desc)
+            # Escape commas in pattern/merchant for CSV
+            if ',' in pattern:
+                pattern = f'"{pattern}"'
+            if ',' in merchant:
+                merchant = f'"{merchant}"'
+            print(f"{pattern},{merchant},Unknown,Unknown")
+
+    elif args.format == 'csv':
         # Legacy CSV output (deprecated)
         print("# NOTE: CSV format is deprecated. Use .rules format instead.")
         print("# See 'tally workflow' for the new format.")
@@ -146,15 +206,25 @@ def cmd_discover(args):
 
     elif args.format == 'json':
         import json
+        import shlex
         output = []
         for raw_desc, stats in sorted_descs:
             pattern = suggest_pattern(raw_desc)
             merchant = suggest_merchant_name(raw_desc)
             # Add refund tag suggestion for negative amounts
             suggested_tags = ['refund'] if stats['has_negative'] else []
+
+            # Build CLI command for agent use
+            cli_parts = ['tally', 'rule', 'add', shlex.quote(pattern), '-m', shlex.quote(merchant), '-c', 'CATEGORY']
+            if suggested_tags:
+                cli_parts.extend(['-t', ','.join(suggested_tags)])
+            cli_command = ' '.join(cli_parts)
+
             output.append({
                 'raw_description': raw_desc,
+                'suggested_pattern': pattern,
                 'suggested_merchant': merchant,
+                'cli_command': cli_command,
                 'suggested_rule': suggest_merchants_rule(merchant, pattern, tags=suggested_tags),
                 'suggested_tags': suggested_tags,
                 'has_negative': stats['has_negative'],
@@ -202,34 +272,79 @@ def cmd_discover(args):
 
 
 def suggest_pattern(description):
-    """Generate a suggested regex pattern from a raw description."""
+    """Generate a suggested regex pattern from a raw description.
+
+    Returns a pattern that will work with field transforms (which strip common prefixes)
+    and handles truncated CSV descriptions.
+    """
     import re
 
     desc = description.upper()
+
+    # Remove common payment processor prefixes (case variations handled)
+    # These are typically stripped by field transforms, so patterns should match without them
+    prefix_patterns = [
+        r'^APLPAY\s*',      # Apple Pay (AplPay, APLPAY)
+        r'^SQ\s*\*?\s*',    # Square (SQ *, SQ*)
+        r'^TST\*?\s*',      # Toast (TST*, TST* )
+        r'^SP\s+',          # Stripe/Square Payments
+        r'^PP\*?\s*',       # PayPal
+        r'^GOOGLE\s*\*?\s*', # Google Pay
+        r'^BT\*?\s*',       # BrainTree
+        r'^IC\*?\s*',       # Instacart
+        r'^DD\s*\*?\s*',    # DoorDash
+        r'^CKO\*?\s*',      # Checkout.com
+        r'^EB\s*\*?\s*',    # Eventbrite
+        r'^LS\s+',          # Lightspeed
+        r'^PY\s*\*?\s*',    # Various payment processors
+        r'^CLR\*?\s*',      # Clear/Club
+        r'^6CRIC\*?\s*',    # Specific payment processor
+        r'^AT\s*\*?\s*',    # AT&T or tickets
+        r'^SC\*?\s*',       # Various
+        r'^WP\*?\s*',       # WordPress/Wix
+    ]
+
+    for prefix_pattern in prefix_patterns:
+        desc = re.sub(prefix_pattern, '', desc, flags=re.IGNORECASE)
+
+    # Remove URL prefixes
+    desc = re.sub(r'^WWW\.', '', desc, flags=re.IGNORECASE)
+    desc = re.sub(r'^HTTP[S]?://', '', desc, flags=re.IGNORECASE)
 
     # Remove common suffixes that vary
     desc = re.sub(r'\s+\d{4,}.*$', '', desc)  # Remove trailing numbers (store IDs)
     desc = re.sub(r'\s+[A-Z]{2}$', '', desc)  # Remove trailing state codes
     desc = re.sub(r'\s+\d{5}$', '', desc)  # Remove zip codes
     desc = re.sub(r'\s+#\d+', '', desc)  # Remove store numbers like #1234
-
-    # Remove common prefixes
-    prefixes = ['APLPAY ', 'SQ *', 'TST*', 'SP ', 'PP*', 'GOOGLE *']
-    for prefix in prefixes:
-        if desc.startswith(prefix):
-            desc = desc[len(prefix):]
+    desc = re.sub(r'\s+\d{3}-\d{3}-\d{4}.*$', '', desc)  # Phone numbers
+    desc = re.sub(r'\s+\(\d{3}\).*$', '', desc)  # Phone numbers in parens
+    desc = re.sub(r'\s+https?://.*$', '', desc, flags=re.IGNORECASE)  # URLs
 
     # Clean up
     desc = desc.strip()
 
-    # Escape regex special characters but keep it readable
-    # Only escape characters that are common in descriptions
-    pattern = re.sub(r'([.*+?^${}()|[\]\\])', r'\\\1', desc)
+    # Extract the core merchant name
+    words = desc.split()
 
-    # Simplify: take first 2-3 significant words
-    words = pattern.split()[:3]
+    # Filter out location words that commonly appear after merchant name
+    location_words = {'NEW', 'LOS', 'SAN', 'LAS', 'NORTH', 'SOUTH', 'EAST', 'WEST'}
+
     if words:
-        pattern = r'\s*'.join(words)
+        # Take first word(s) until we hit a location word
+        core_words = []
+        for word in words[:3]:
+            if word in location_words and core_words:
+                break  # Stop at location word if we have at least one word
+            core_words.append(word)
+
+        # If we have nothing, take first word
+        if not core_words:
+            core_words = words[:1]
+
+        # Join with flexible whitespace
+        pattern = r'\s*'.join(core_words)
+    else:
+        pattern = desc
 
     return pattern
 
@@ -240,11 +355,30 @@ def suggest_merchant_name(description):
 
     desc = description
 
-    # Remove common prefixes
-    prefixes = ['APLPAY ', 'SQ *', 'TST*', 'TST* ', 'SP ', 'PP*', 'GOOGLE *']
-    for prefix in prefixes:
-        if desc.upper().startswith(prefix.upper()):
-            desc = desc[len(prefix):]
+    # Remove common payment processor prefixes
+    prefix_patterns = [
+        r'^APLPAY\s*',      # Apple Pay
+        r'^SQ\s*\*?\s*',    # Square
+        r'^TST\*?\s*',      # Toast
+        r'^SP\s+',          # Stripe/Square Payments
+        r'^PP\*?\s*',       # PayPal
+        r'^GOOGLE\s*\*?\s*', # Google Pay
+        r'^BT\*?\s*',       # BrainTree
+        r'^IC\*?\s*',       # Instacart
+        r'^DD\s*\*?\s*',    # DoorDash
+        r'^CKO\*?\s*',      # Checkout.com
+        r'^EB\s*\*?\s*',    # Eventbrite
+        r'^LS\s+',          # Lightspeed
+        r'^PY\s*\*?\s*',    # Various payment processors
+        r'^CLR\*?\s*',      # Clear/Club
+        r'^6CRIC\*?\s*',    # Specific payment processor
+        r'^AT\s*\*?\s*',    # AT&T or tickets
+        r'^SC\*?\s*',       # Various
+        r'^WP\*?\s*',       # WordPress/Wix
+    ]
+
+    for prefix_pattern in prefix_patterns:
+        desc = re.sub(prefix_pattern, '', desc, flags=re.IGNORECASE)
 
     # Remove trailing IDs, numbers, locations
     desc = re.sub(r'\s+\d{4,}.*$', '', desc)
@@ -253,6 +387,9 @@ def suggest_merchant_name(description):
     desc = re.sub(r'\s+#\d+', '', desc)
     desc = re.sub(r'\s+DES:.*$', '', desc, flags=re.IGNORECASE)
     desc = re.sub(r'\s+ID:.*$', '', desc, flags=re.IGNORECASE)
+    desc = re.sub(r'\s+\d{3}-\d{3}-\d{4}.*$', '', desc)  # Phone numbers
+    desc = re.sub(r'\s+\(\d{3}\).*$', '', desc)  # Phone numbers in parens
+    desc = re.sub(r'\s+https?://.*$', '', desc, flags=re.IGNORECASE)  # URLs
 
     # Take first few words and title case
     words = desc.split()[:3]
@@ -273,3 +410,97 @@ subcategory: SUBCATEGORY"""
     if tags:
         rule += f"\ntags: {', '.join(tags)}"
     return rule
+
+
+def detect_common_prefixes(descriptions, min_count=3):
+    """
+    Detect common prefixes in transaction descriptions.
+
+    Returns ALL potential prefixes with statistics so agents/users can
+    identify payment processor prefixes (like APLPAY, SQ *, TST*) vs
+    merchant names (like AMAZON, STARBUCKS).
+
+    Key insight: Payment processor prefixes are followed by MANY different
+    merchants (high diversity), while merchant names are followed by
+    locations/store numbers (low diversity).
+
+    Args:
+        descriptions: List of raw description strings
+        min_count: Minimum occurrences to include in results
+
+    Returns:
+        List of dicts with prefix statistics, sorted by count descending:
+        {
+            'prefix': 'APLPAY ',
+            'count': 45,
+            'percent': 12.5,
+            'unique_following': 38,
+            'diversity': 0.84,  # unique_following / count
+            'has_special_char': False,
+            'prefix_length': 6,
+            'examples': ['APLPAY STARBUCKS', 'APLPAY WHOLEFDS', ...],
+            'regex_pattern': '^APLPAY\\\\s+'
+        }
+    """
+    import re
+    from collections import Counter, defaultdict
+
+    # Extract potential prefixes and track what follows them
+    prefix_candidates = Counter()
+    prefix_remainders = defaultdict(set)  # prefix -> set of second words
+    prefix_examples = defaultdict(list)  # prefix -> sample full descriptions
+
+    for desc in descriptions:
+        upper_desc = desc.upper().strip()
+        if not upper_desc:
+            continue
+
+        # Look for patterns like "WORD " or "WORD*" or "WORD* " at start
+        match = re.match(r'^([A-Z0-9]{2,10})(\s*[\*\-]\s*|\s+)', upper_desc)
+        if match:
+            prefix = match.group(0)
+            # Only count if there's something meaningful after the prefix
+            remaining = upper_desc[len(prefix):].strip()
+            if remaining and len(remaining) > 3:
+                prefix_candidates[prefix] += 1
+                # Track the first word of the remainder (truncated to 10 chars)
+                remainder_words = remaining.split()
+                if remainder_words:
+                    prefix_remainders[prefix].add(remainder_words[0][:10])
+                # Keep examples (original case)
+                if len(prefix_examples[prefix]) < 5:
+                    prefix_examples[prefix].append(desc)
+
+    total = len(descriptions)
+    results = []
+
+    for prefix, count in prefix_candidates.most_common():
+        if count < min_count:
+            break
+
+        unique_following = len(prefix_remainders[prefix])
+        diversity = unique_following / count if count > 0 else 0
+        prefix_word = prefix.strip().rstrip('*- ')
+
+        # Generate regex pattern for potential field transform
+        escaped = re.escape(prefix.rstrip())
+        if prefix.endswith(' '):
+            regex_pattern = f"^{escaped}\\\\s+"
+        elif '*' in prefix or '-' in prefix:
+            regex_pattern = f"^{escaped}\\\\s*"
+        else:
+            regex_pattern = f"^{escaped}\\\\s+"
+
+        results.append({
+            'prefix': prefix.strip(),
+            'count': count,
+            'percent': round(count / total * 100, 1) if total > 0 else 0,
+            'unique_following': unique_following,
+            'diversity': round(diversity, 2),
+            'has_special_char': '*' in prefix or '-' in prefix,
+            'prefix_length': len(prefix_word),
+            'examples': prefix_examples[prefix],
+            'regex_pattern': regex_pattern,
+        })
+
+    return results

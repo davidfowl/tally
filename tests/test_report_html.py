@@ -118,7 +118,7 @@ tags: {field.card_holder}
     # Generate the report
     report_file = output_dir / "report.html"
     result = subprocess.run(
-        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        ["uv", "run", "tally", "run", "-o", str(report_file), "--config", str(config_dir)],
         capture_output=True,
         text=True,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -457,7 +457,7 @@ tags: transfer
     # Generate the report
     report_file = output_dir / "report.html"
     result = subprocess.run(
-        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        ["uv", "run", "tally", "run", "-o", str(report_file), "--config", str(config_dir)],
         capture_output=True,
         text=True,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -899,7 +899,7 @@ subcategory: Shopping
     # Generate report
     report_path = output_dir / "spending.html"
     subprocess.run(
-        ["uv", "run", "tally", "run", "--format", "html", "-o", str(report_path), str(config_dir)],
+        ["uv", "run", "tally", "run", "--format", "html", "-o", str(report_path), "--config", str(config_dir)],
         check=True,
         capture_output=True
     )
@@ -1138,7 +1138,7 @@ subcategory: Online
     # Generate the report
     report_file = output_dir / "report.html"
     result = subprocess.run(
-        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        ["uv", "run", "tally", "run", "-o", str(report_file), "--config", str(config_dir)],
         capture_output=True,
         text=True,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1311,7 +1311,7 @@ category: Shopping
     # Generate report
     report_path = output_dir / "spending.html"
     subprocess.run(
-        ["uv", "run", "tally", "run", "--format", "html", "-o", str(report_path), str(config_dir)],
+        ["uv", "run", "tally", "run", "--format", "html", "-o", str(report_path), "--config", str(config_dir)],
         check=True,
         capture_output=True
     )
@@ -1615,7 +1615,7 @@ category: Electronics
     # Generate the report
     report_file = output_dir / "report.html"
     result = subprocess.run(
-        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        ["uv", "run", "tally", "run", "-o", str(report_file), "--config", str(config_dir)],
         capture_output=True,
         text=True,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1725,7 +1725,7 @@ subcategory: Credits
     # Generate the report
     report_file = output_dir / "report.html"
     result = subprocess.run(
-        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        ["uv", "run", "tally", "run", "-o", str(report_file), "--config", str(config_dir)],
         capture_output=True,
         text=True,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1843,7 +1843,7 @@ subcategory: Online
     # Generate report
     report_path = output_dir / "spending.html"
     result = subprocess.run(
-        ["uv", "run", "tally", "run", "--format", "html", "-o", str(report_path), str(config_dir)],
+        ["uv", "run", "tally", "run", "--format", "html", "-o", str(report_path), "--config", str(config_dir)],
         capture_output=True,
         text=True,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

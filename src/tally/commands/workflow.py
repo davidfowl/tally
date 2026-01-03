@@ -7,7 +7,7 @@ import os
 from ..config_loader import load_config
 
 # Import shared utilities from parent cli module
-from ..cli import C, find_config_dir
+from ..cli import C, resolve_config_dir, print_no_config_help
 
 
 def cmd_workflow(args):
@@ -15,20 +15,22 @@ def cmd_workflow(args):
     import subprocess
 
     # Detect current state
-    config_dir = find_config_dir()
-    has_config = config_dir is not None
+    config_dir = resolve_config_dir(args)
+    has_config = config_dir is not None and os.path.isdir(config_dir)
     has_data_sources = False
     unknown_count = 0
     total_unknown_spend = 0
 
+    # If no config, show getting started guide and exit
+    if not has_config:
+        print_no_config_help()
+        return
+
     # Calculate relative paths for display (OS-aware)
     def make_path(relative_to_config_parent, trailing_sep=False):
         """Create display path relative to cwd with correct OS separators."""
-        if config_dir:
-            parent = os.path.dirname(config_dir)
-            full_path = os.path.join(parent, relative_to_config_parent)
-        else:
-            full_path = relative_to_config_parent
+        parent = os.path.dirname(config_dir)
+        full_path = os.path.join(parent, relative_to_config_parent)
         rel = os.path.relpath(full_path)
         if trailing_sep:
             rel = rel + os.sep
@@ -37,35 +39,34 @@ def cmd_workflow(args):
             rel = './' + rel
         return rel
 
-    # Default paths (used when no config exists)
-    path_data = make_path('data', trailing_sep=True) if config_dir else './data/'
-    path_settings = make_path(os.path.join('config', 'settings.yaml')) if config_dir else './config/settings.yaml'
-    path_merchants = make_path(os.path.join('config', 'merchants.rules')) if config_dir else './config/merchants.rules'
+    # Paths relative to config
+    path_data = make_path('data', trailing_sep=True)
+    path_settings = make_path(os.path.join('config', 'settings.yaml'))
+    path_merchants = make_path(os.path.join('config', 'merchants.rules'))
 
     rule_mode = 'first_match'  # Default
 
-    if has_config:
-        try:
-            config = load_config(config_dir)
-            has_data_sources = bool(config.get('data_sources'))
-            rule_mode = config.get('rule_mode', 'first_match')
+    try:
+        config = load_config(config_dir)
+        has_data_sources = bool(config.get('data_sources'))
+        rule_mode = config.get('rule_mode', 'first_match')
 
-            if has_data_sources:
-                # Try to get unknown merchant count
-                try:
-                    result = subprocess.run(
-                        ['tally', 'discover', '--format', 'json'],
-                        capture_output=True, text=True, timeout=30
-                    )
-                    if result.returncode == 0:
-                        import json as json_module
-                        unknowns = json_module.loads(result.stdout)
-                        unknown_count = len(unknowns)
-                        total_unknown_spend = sum(u.get('total_spend', 0) for u in unknowns)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        if has_data_sources:
+            # Try to get unknown merchant count
+            try:
+                result = subprocess.run(
+                    ['tally', 'discover', '--format', 'json', '--config', config_dir],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    import json as json_module
+                    unknowns = json_module.loads(result.stdout)
+                    unknown_count = len(unknowns)
+                    total_unknown_spend = sum(u.get('total_spend', 0) for u in unknowns)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     # Helper for section headers
     def section(title):
@@ -76,19 +77,6 @@ def cmd_workflow(args):
     print()
     print(f"{C.BOLD}  TALLY WORKFLOW{C.RESET}")
     print(f"{C.DIM}  ─────────────────────────────────────────{C.RESET}")
-
-    # Status bar
-    if not has_config:
-        print(f"  {C.YELLOW}●{C.RESET} No config found")
-        section("Getting Started")
-        print(f"    {C.DIM}1.{C.RESET} Initialize: {C.GREEN}tally init{C.RESET}")
-        print(f"       {C.DIM}Creates settings.yaml, merchants.rules, views.rules{C.RESET}")
-        print()
-        print(f"    {C.DIM}2.{C.RESET} Add bank/credit card CSVs to {C.CYAN}./data/{C.RESET}")
-        print()
-        print(f"    {C.DIM}3.{C.RESET} Configure data sources in {C.CYAN}./config/settings.yaml{C.RESET}")
-        print()
-        return
 
     if not has_data_sources:
         print(f"  {C.YELLOW}●{C.RESET} No data sources configured")
@@ -118,18 +106,25 @@ def cmd_workflow(args):
 
     # Show categorization workflow if there are unknowns
     if unknown_count > 0:
-        section("Categorization Workflow")
-        print(f"    {C.DIM}1.{C.RESET} Get unknown merchants with suggested rules:")
-        print(f"       {C.GREEN}tally discover --format json{C.RESET}")
+        section("Categorize All Transactions")
         print()
-        print(f"    {C.DIM}2.{C.RESET} Add rules to {C.CYAN}{path_merchants}{C.RESET}")
-        print(f"       {C.YELLOW}READ the Best Practices below first!{C.RESET}")
+        print(f"    {C.BOLD}Step 1:{C.RESET} Check for payment processor prefixes to strip:")
+        print(f"           {C.GREEN}tally discover --prefixes{C.RESET}")
         print()
-        print(f"    {C.DIM}3.{C.RESET} Check progress:")
-        print(f"       {C.GREEN}tally run --summary{C.RESET}")
+        print(f"    {C.BOLD}Step 2:{C.RESET} Import all unknown merchants as rules:")
+        print(f"           {C.GREEN}tally discover --pipe | tally rule import --stdin{C.RESET}")
         print()
-        print(f"    {C.YELLOW}{C.BOLD}KEEP GOING UNTIL ALL UNKNOWNS ARE RESOLVED!{C.RESET}")
-        print(f"    {C.DIM}Your report is only as good as your rules. Don't stop at 80%.{C.RESET}")
+        print(f"    {C.BOLD}Step 3:{C.RESET} Edit {C.CYAN}{path_merchants}{C.RESET} to set categories")
+        print(f"           {C.DIM}Each rule has category: CATEGORY — replace with Food, Travel, etc.{C.RESET}")
+        print()
+        print(f"    {C.BOLD}Step 4:{C.RESET} Check progress and repeat until done:")
+        print(f"           {C.GREEN}tally up --summary{C.RESET}")
+        print()
+    else:
+        section("Generate Report")
+        print(f"    {C.GREEN}tally up{C.RESET}           {C.DIM}Generate HTML spending report{C.RESET}")
+        print(f"    {C.GREEN}tally up --summary{C.RESET} {C.DIM}Quick text summary{C.RESET}")
+        print()
 
     section("Commands")
     cmds = [
