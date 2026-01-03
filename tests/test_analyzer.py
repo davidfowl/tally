@@ -730,6 +730,47 @@ class TestRegexDelimiter:
         finally:
             os.unlink(f.name)
 
+    def test_semicolon_delimiter_with_european_format(self):
+        """Parse a semicolon-delimited file with European number format.
+
+        This tests European bank format:
+        - Semicolon (;) as field delimiter
+        - Comma (,) as decimal separator
+        - Period (.) as thousands separator
+
+        Example: -8.000,00 means -8000.00
+        """
+        csv_content = """Date;Description;Amount
+15-01-2025;SUPERMARKET PURCHASE;-148,00
+16-01-2025;ONLINE TRANSFER;-8.000,00
+17-01-2025;SALARY DEPOSIT;9.132,36
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8')
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%d-%m-%Y},{description},{amount}')
+            format_spec.delimiter = ';'
+
+            from tally.analyzer import parse_generic_csv
+            txns = parse_generic_csv(
+                f.name,
+                format_spec,
+                rules,
+                decimal_separator=','
+            )
+
+            # Should parse 3 transactions
+            assert len(txns) == 3, f"Expected 3 transactions, got {len(txns)}"
+            assert txns[0]['amount'] == -148.00
+            assert txns[1]['amount'] == -8000.00
+            assert txns[2]['amount'] == 9132.36
+
+        finally:
+            os.unlink(f.name)
+
 
 class TestAmountSignHandling:
     """Tests for amount sign handling - signs flow through, no auto-exclusion."""

@@ -22,11 +22,12 @@ data_sources:
   - name: BOA
     file: data/boa-checking.txt
     type: boa
-  # European format example:
-  # - name: Deutsche Bank
-  #   file: data/deutsche.csv
-  #   format: "{date:%d.%m.%Y},{description},{amount}"
-  #   decimal_separator: ","  # 1.234,56 format
+  # European format example (semicolon-delimited with comma decimals):
+  # - name: European Bank
+  #   file: data/export.csv
+  #   format: "{date:%d-%m-%Y},{description},{amount}"
+  #   delimiter: ";"           # Semicolon-separated columns
+  #   decimal: ","             # 1.234,56 format (comma = decimal, period = thousands)
 
   # Multi-column description example:
   # Some banks split transaction info across columns (e.g., type + recipient).

@@ -153,13 +153,15 @@ def _iter_rows_with_delimiter(filepath, delimiter, has_header):
 
     Args:
         filepath: Path to the file
-        delimiter: None for CSV, 'tab' for TSV, or 'regex:pattern' for regex
+        delimiter: None for CSV, 'tab' for TSV, single char (e.g. ';'), or 'regex:pattern'
         has_header: Whether to skip the first line
 
     Yields:
         List of column values for each row
     """
     with open(filepath, 'r', encoding='utf-8') as f:
+        if delimiter and delimiter == 'tab':
+            delimiter = '\t'
         if delimiter and delimiter.startswith('regex:'):
             # Regex-based parsing
             pattern = re.compile(delimiter[6:])  # Strip 'regex:' prefix
@@ -172,9 +174,8 @@ def _iter_rows_with_delimiter(filepath, delimiter, has_header):
                 match = pattern.match(line)
                 if match:
                     yield list(match.groups())
-        elif delimiter == 'tab' or delimiter == '\t':
-            # Tab-separated
-            reader = csv.reader(f, delimiter='\t')
+        elif delimiter and len(delimiter) == 1:
+            reader = csv.reader(f, delimiter=delimiter)
             if has_header:
                 next(reader, None)
             for row in reader:
