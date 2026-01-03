@@ -1273,7 +1273,8 @@ data_sources:
 
 merchants_file: config/merchants.rules
 """
-    (config_dir / "settings.yaml").write_text(settings_content)
+    # Must specify UTF-8 encoding for £ symbol to work on Windows
+    (config_dir / "settings.yaml").write_text(settings_content, encoding="utf-8")
 
     rules_content = """[Tesco]
 match: contains("TESCO")
