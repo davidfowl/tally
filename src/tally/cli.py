@@ -378,7 +378,8 @@ merchants_file: config/merchants.rules
 STARTER_MERCHANTS = '''# Tally Merchant Rules
 #
 # Expression-based rules for categorizing transactions.
-# First match wins (file order).
+# All matching rules are evaluated. Most specific sets category.
+# Tags are collected from ALL matching rules.
 #
 # Match expressions:
 #   contains("X")     - Case-insensitive substring match
