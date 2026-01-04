@@ -143,6 +143,53 @@ def cmd_run(args):
     # Analyze
     stats = analyze_transactions(all_txns)
 
+    # Currency format: use settings.yaml if configured, otherwise auto-detect from data
+    currency_format = config.get('currency_format')
+    if currency_format:
+        # Explicitly configured in settings.yaml - use it (overrides auto-detection)
+        if not args.quiet:
+            print(f"Using currency format from settings.yaml: {currency_format}")
+    else:
+        # Not configured - auto-detect from transaction data
+        from collections import Counter
+        from ..parsers import detect_currencies_from_file, currency_to_format
+        
+        # Scan all data sources for currencies
+        all_detected_currencies = []
+        for source in data_sources:
+            if source.get('_supplemental', False):
+                continue
+                
+            filepath = os.path.join(config_dir, '..', source['file'])
+            filepath = os.path.normpath(filepath)
+            if not os.path.exists(filepath):
+                filepath = os.path.join(os.path.dirname(config_dir), source['file'])
+            if not os.path.exists(filepath):
+                continue
+                
+            parser_type = source.get('_parser_type', source.get('type', '')).lower()
+            format_spec = source.get('_format_spec')
+            decimal_separator = source.get('decimal_separator', '.')
+            
+            currencies = detect_currencies_from_file(
+                filepath, format_spec, parser_type, decimal_separator
+            )
+            all_detected_currencies.extend(currencies)
+        
+        if all_detected_currencies:
+            # Find most common currency
+            currency_counter = Counter(all_detected_currencies)
+            most_common_currency = currency_counter.most_common(1)[0][0]
+            currency_format = currency_to_format(most_common_currency)
+            
+            if not args.quiet:
+                print(f"Auto-detected currency: {most_common_currency} (from {len(all_detected_currencies)} transactions)")
+        else:
+            # Default to USD if no currency detected and not configured
+            currency_format = '${amount}'
+            if not args.quiet:
+                print("No currency detected in data, defaulting to USD")
+
     # Classify by user-defined views
     views_config = config.get('sections')
     if views_config:
@@ -180,8 +227,6 @@ def cmd_run(args):
     # Handle output format
     output_format = args.format if hasattr(args, 'format') else 'html'
     verbose = args.verbose if hasattr(args, 'verbose') else 0
-
-    currency_format = config.get('currency_format', '${amount}')
 
     if output_format == 'json':
         # JSON output with reasoning

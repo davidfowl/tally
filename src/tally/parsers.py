@@ -7,9 +7,76 @@ This module handles parsing of CSV files and other transaction formats.
 import csv
 import re
 from datetime import datetime
+from collections import Counter
 
 from .merchant_utils import normalize_merchant
 from .format_parser import FormatSpec
+
+
+def detect_currency(amount_str):
+    """Detect currency symbol from an amount string.
+    
+    Args:
+        amount_str: String like "$1,234.56" or "€100.00" or "£50"
+        
+    Returns:
+        Currency symbol found (e.g., '$', '€', '£', '¥') or None if none detected
+    """
+    # Check for common currency symbols
+    # Order matters - check multi-char symbols first, then single chars
+    currency_patterns = [
+        (r'€', '€'),
+        (r'\$', '$'),
+        (r'£', '£'),
+        (r'¥', '¥'),
+        (r'\blei\b', 'lei'),  # Romanian Leu (plural, suffix)
+        (r'\bleu\b', 'lei'),  # Romanian Leu (singular, suffix)
+        (r'\bRON\b', 'RON'),  # Romanian Leu (code)
+        (r'kr\b', 'kr'),  # Swedish/Norwegian/Danish krone (suffix)
+        (r'\bzł\b', 'zł'),  # Polish złoty (suffix)
+        (r'\bPLN\b', 'PLN'),  # Polish złoty (code)
+        (r'\bEUR\b', 'EUR'),  # Euro (code)
+        (r'\bGBP\b', 'GBP'),  # British Pound (code)
+        (r'\bUSD\b', 'USD'),  # US Dollar (code)
+        (r'\bJPY\b', 'JPY'),  # Japanese Yen (code)
+    ]
+    
+    amount_str = amount_str.strip()
+    
+    for pattern, symbol in currency_patterns:
+        if re.search(pattern, amount_str, re.IGNORECASE):
+            return symbol
+    
+    return None
+
+
+def currency_to_format(currency_symbol):
+    """Convert a detected currency symbol to a currency format string.
+    
+    Args:
+        currency_symbol: Currency symbol like '$', '€', '£', '¥', 'kr', 'zł', etc.
+        
+    Returns:
+        Currency format string like "${amount}", "€{amount}", "{amount} zł", etc.
+    """
+    # Map currency symbols to their display formats
+    currency_format_map = {
+        '$': '${amount}',
+        'USD': '${amount}',
+        '€': '€{amount}',
+        'EUR': '€{amount}',
+        '£': '£{amount}',
+        'GBP': '£{amount}',
+        '¥': '¥{amount}',
+        'JPY': '¥{amount}',
+        'lei': '{amount} lei',  # Romanian Leu (suffix)
+        'RON': '{amount} lei',  # Romanian Leu (code -> suffix format)
+        'kr': '{amount} kr',  # Swedish/Norwegian/Danish krone (suffix)
+        'zł': '{amount} zł',  # Polish złoty (suffix)
+        'PLN': '{amount} zł',  # Polish złoty (code -> suffix format)
+    }
+    
+    return currency_format_map.get(currency_symbol, '${amount}')  # Default to USD if unknown
 
 
 def parse_amount(amount_str, decimal_separator='.'):
@@ -32,6 +99,8 @@ def parse_amount(amount_str, decimal_separator='.'):
 
     # Remove currency symbols
     amount_str = re.sub(r'[$€£¥]', '', amount_str).strip()
+    # Remove currency codes and suffixes
+    amount_str = re.sub(r'\b(?:kr|zł|lei|leu|PLN|RON|EUR|GBP|USD|JPY)\b', '', amount_str, flags=re.IGNORECASE).strip()
 
     if decimal_separator == ',':
         # European format: 1.234,56 or 1 234,56
@@ -329,6 +398,75 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
             continue
 
     return transactions
+
+
+def detect_currencies_from_file(filepath, format_spec=None, parser_type='generic', decimal_separator='.'):
+    """Detect currencies from a transaction file by scanning amount columns.
+    
+    This is a lightweight scan that only reads amount values to detect currency symbols,
+    without parsing full transactions. Use this when you only need currency detection.
+    
+    Args:
+        filepath: Path to the CSV/transaction file
+        format_spec: FormatSpec for generic CSV parsing (required if parser_type='generic')
+        parser_type: Type of parser ('amex', 'boa', or 'generic')
+        decimal_separator: Character used as decimal separator ('.' or ',')
+        
+    Returns:
+        List of detected currency symbols (may contain duplicates)
+    """
+    detected_currencies = []
+    
+    if parser_type == 'amex':
+        # AMEX CSV format
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    amount_str = row.get('Amount', '')
+                    currency = detect_currency(amount_str)
+                    if currency:
+                        detected_currencies.append(currency)
+        except (ValueError, KeyError, IOError):
+            pass
+            
+    elif parser_type == 'boa':
+        # BOA statement format
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    # Allow currency symbols in amount field for detection
+                    match = re.match(
+                        r'^(\d{2}/\d{2}/\d{4})\s+(.+?)\s+([$€£¥\s\-\d,]+\.\d{2}|\d+\.\d{2}\s*(?:lei|leu|kr|zł|PLN|RON|EUR|GBP|USD|JPY)?)\s+([-\d,]+\.\d{2})$',
+                        line.strip(),
+                        re.IGNORECASE
+                    )
+                    if match:
+                        amount_str = match.group(3)
+                        currency = detect_currency(amount_str)
+                        if currency:
+                            detected_currencies.append(currency)
+        except (ValueError, IOError):
+            pass
+            
+    elif parser_type == 'generic' and format_spec:
+        # Generic CSV format
+        try:
+            delimiter = getattr(format_spec, 'delimiter', None)
+            for row in _iter_rows_with_delimiter(filepath, delimiter, format_spec.has_header):
+                try:
+                    if len(row) <= format_spec.amount_column:
+                        continue
+                    amount_str = row[format_spec.amount_column].strip()
+                    currency = detect_currency(amount_str)
+                    if currency:
+                        detected_currencies.append(currency)
+                except (ValueError, IndexError):
+                    continue
+        except (ValueError, IOError):
+            pass
+    
+    return detected_currencies
 
 
 def auto_detect_csv_format(filepath):

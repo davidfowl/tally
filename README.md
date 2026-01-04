@@ -26,6 +26,22 @@ tally workflow              # See next steps
 
 Tell your AI assistant: *"Use tally to categorize my transactions"*
 
+## Currency Detection
+
+Tally automatically detects the currency from your transaction data. If you want to override this, set `currency_format` in `settings.yaml`:
+
+```yaml
+# Auto-detect currency from data (default behavior)
+# currency_format: not set
+
+# Or explicitly set your currency:
+currency_format: "€{amount}"      # Euro
+currency_format: "£{amount}"      # British Pound
+currency_format: "{amount} lei"   # Romanian Leu
+```
+
+When `currency_format` is set in `settings.yaml`, it overrides auto-detection. If not set, Tally will detect the most common currency from your transaction files.
+
 ## Documentation
 
 Full documentation is available at **[tallyai.money](https://tallyai.money)**:

@@ -6,7 +6,9 @@
 year: 2025
 title: "Spending Analysis"
 
-# Currency display format (default: "${amount}")
+# Currency display format (optional - auto-detected if not set)
+# If not specified, Tally will automatically detect the currency from your transaction data.
+# If specified, this setting overrides auto-detection.
 # Use {amount} as placeholder for the formatted number
 # currency_format: "${amount}"      # US Dollar (prefix)
 # currency_format: "{amount} zł"    # Polish Złoty (suffix)
