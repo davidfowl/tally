@@ -139,7 +139,8 @@ class MerchantEngine:
     - 'first_match' (default): First matching rule sets category (backwards compatible)
     - 'most_specific': Most specific matching rule wins (opt-in)
 
-    In both modes, tags are collected from ALL matching rules.
+    Tags are collected from tag-only rules (rules without a category) plus the
+    winning categorization rule.
     """
 
     def __init__(self, match_mode: str = 'first_match'):
@@ -488,7 +489,7 @@ class MerchantEngine:
         - 'first_match': First matching rule with category wins (backwards compatible)
         - 'most_specific': Most specific matching rule wins
 
-        In both modes, tags are collected from ALL matching rules.
+        Tags are collected from tag-only rules plus the winning categorization rule.
 
         Args:
             transaction: Transaction dict with description, amount, date, etc.
@@ -533,13 +534,15 @@ class MerchantEngine:
                 if first_category_rule is None and rule.is_categorization_rule:
                     first_category_rule = (rule, variables)
 
-                # Collect tags from ALL matching rules (resolve dynamic expressions)
-                resolved_tags = self._resolve_tags(rule, transaction, variables, data_sources)
-                for tag in resolved_tags:
-                    if tag not in all_tags:
-                        all_tags.add(tag)
-                        tag_sources[tag] = {'rule': rule.name, 'pattern': rule.match_expr}
-                result.tag_rules.append(rule)
+                # Collect tags only from tag-only rules (no category)
+                # Tags from the winning categorization rule are added later
+                if not rule.is_categorization_rule:
+                    resolved_tags = self._resolve_tags(rule, transaction, variables, data_sources)
+                    for tag in resolved_tags:
+                        if tag not in all_tags:
+                            all_tags.add(tag)
+                            tag_sources[tag] = {'rule': rule.name, 'pattern': rule.match_expr}
+                    result.tag_rules.append(rule)
 
         # Store all matching rules
         result.all_matching_rules = [r for r, _, _ in matching_rules]
@@ -563,6 +566,15 @@ class MerchantEngine:
                     result.extra_fields = self._evaluate_fields(
                         rule, transaction, variables, data_sources
                     )
+
+                # Collect tags from the winning categorization rule
+                if rule.tags:
+                    resolved_tags = self._resolve_tags(rule, transaction, variables, data_sources)
+                    for tag in resolved_tags:
+                        if tag not in all_tags:
+                            all_tags.add(tag)
+                            tag_sources[tag] = {'rule': rule.name, 'pattern': rule.match_expr}
+                    result.tag_rules.append(rule)
         else:
             # most_specific mode: resolve each field independently by specificity
             if matching_rules:
@@ -586,6 +598,15 @@ class MerchantEngine:
                         result.extra_fields = self._evaluate_fields(
                             winner[0], transaction, winner[2], data_sources
                         )
+
+                    # Collect tags from the winning categorization rule
+                    if winner[0].tags:
+                        resolved_tags = self._resolve_tags(winner[0], transaction, winner[2], data_sources)
+                        for tag in resolved_tags:
+                            if tag not in all_tags:
+                                all_tags.add(tag)
+                                tag_sources[tag] = {'rule': winner[0].name, 'pattern': winner[0].match_expr}
+                        result.tag_rules.append(winner[0])
 
                 # Subcategory: most specific rule that sets subcategory
                 subcategory_rules = [(r, s, v) for r, s, v in matching_rules if r.has_subcategory]

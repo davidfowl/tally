@@ -503,7 +503,7 @@ def normalize_merchant(
 
     Two-pass matching:
     1. First categorization rule that matches sets merchant/category/subcategory
-    2. Tags are collected from ALL matching rules (including tag-only rules)
+    2. Tags are collected from tag-only rules plus the winning categorization rule
 
     Args:
         description: Raw transaction description
@@ -584,7 +584,7 @@ def normalize_merchant(
     result_pattern = None
     result_source = None
 
-    # Collect tags from ALL matching rules
+    # Collect tags from tag-only rules + winning categorization rule
     all_tags = []
     # Track which rule added each tag: {tag: (rule_name, pattern)}
     tag_sources = {}

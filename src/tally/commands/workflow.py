@@ -177,10 +177,10 @@ def cmd_workflow(args):
     section("Best Practices")
     if rule_mode == 'most_specific':
         print(f"    {C.YELLOW}{C.BOLD}MOST SPECIFIC RULE WINS{C.RESET}  {C.DIM}(rule_mode: most_specific){C.RESET}")
-        print(f"    {C.DIM}More conditions = more specific = wins. Tags are collected from ALL matching rules.{C.RESET}")
+        print(f"    {C.DIM}More conditions = more specific = wins. Tags come from tag-only rules + winning rule.{C.RESET}")
     else:
         print(f"    {C.YELLOW}{C.BOLD}FIRST MATCHING RULE WINS{C.RESET}  {C.DIM}(rule_mode: first_match){C.RESET}")
-        print(f"    {C.DIM}Put specific rules before general ones. Tags are collected from ALL matching rules.{C.RESET}")
+        print(f"    {C.DIM}Put specific rules before general ones. Tags come from tag-only rules + winning rule.{C.RESET}")
     print()
     print(f"    {C.BOLD}1. Start broad, refine later{C.RESET}")
     print(f"       {C.DIM}Write general rules first, then add specific overrides only when needed.{C.RESET}")

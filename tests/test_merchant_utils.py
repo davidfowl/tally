@@ -794,10 +794,10 @@ subcategory: Grocery
 
 
 class TestTwoPassTagging:
-    """Tests for two-pass tagging in normalize_merchant (collect tags from ALL matching rules)."""
+    """Tests for two-pass tagging in normalize_merchant (collect tags from tag-only rules + winner)."""
 
     def test_tags_from_multiple_matching_rules(self):
-        """Tags are collected from ALL matching rules, not just the first."""
+        """Tags are collected from tag-only rules plus the winning categorization rule."""
         content = """[Netflix]
 match: contains("NETFLIX")
 category: Subscriptions
@@ -831,7 +831,7 @@ tags: holiday
             assert merchant == 'Netflix'
             assert category == 'Subscriptions'
 
-            # Tags from ALL matching rules
+            # Tags from tag-only rules + winning rule
             assert 'entertainment' in match_info['tags']
             assert 'large' in match_info['tags']
             assert 'holiday' in match_info['tags']

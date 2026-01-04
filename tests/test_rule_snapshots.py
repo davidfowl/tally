@@ -145,10 +145,10 @@ class TestRuleSnapshots:
         )
 
     def test_tag_accumulation(self, tmp_path):
-        """Verify tags are accumulated from all matching rules.
+        """Verify tags are accumulated from all matching, tag-only rules.
 
         Even with first-match-wins for category, tags should be accumulated
-        from all rules that match the transaction.
+        from all rules that match the transaction (that don't set a category).
         """
         config_dir = tmp_path / "config"
         data_dir = tmp_path / "data"
@@ -168,7 +168,7 @@ class TestRuleSnapshots:
         # Build merchant lookup
         merchants = {m["name"]: m for m in actual.get("merchants", [])}
 
-        # Uber should have tags from both [Uber] and [Uber Eats] rules
+        # Uber should have tags from the [Uber] rule
         uber = merchants.get("Uber", {})
         uber_tags = set(uber.get("tags", []))
 
@@ -177,8 +177,8 @@ class TestRuleSnapshots:
             f"Expected 'travel' tag from [Uber] rule, got tags: {uber_tags}"
         )
 
-        # Should have 'food' tag from [Uber Eats] rule (tags accumulate)
-        assert "food" in uber_tags, (
+        # Should not have 'food' tag from [Uber Eats] rule (more specific category)
+        assert "food" not in uber_tags, (
             f"Expected 'food' tag from [Uber Eats] rule, got tags: {uber_tags}"
         )
 

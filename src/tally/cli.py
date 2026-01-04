@@ -384,7 +384,7 @@ merchants_file: config/merchants.rules
 STARTER_MERCHANTS = '''# Tally Merchant Rules
 #
 # Expression-based rules for categorizing transactions.
-# Tags are collected from ALL matching rules.
+# Tags are collected from tag-only rules plus the winning categorization rule.
 #
 # RULE MATCHING (controlled by rule_mode in settings.yaml):
 #   first_match (default) - First matching rule sets category. Order matters!

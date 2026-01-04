@@ -194,7 +194,7 @@
     },
     {
       "category": "Income",
-      "percentage": 32.8,
+      "percentage": 32.9,
       "subcategory": "Salary",
       "total": 60000.0
     },
@@ -326,9 +326,9 @@
     },
     {
       "category": "Subscriptions",
-      "percentage": 1.3,
+      "percentage": 1.1,
       "subcategory": "Apps",
-      "total": 2339.43
+      "total": 2088.43
     },
     {
       "category": "Subscriptions",
@@ -549,7 +549,7 @@
   ],
   "by_month": {
     "2025-01": {
-      "total": 8890.39
+      "total": 8639.39
     },
     "2025-02": {
       "total": 11481.89
@@ -767,24 +767,7 @@
       },
       "subcategory": "Online",
       "tags": [
-        "bills",
-        "books",
-        "brokerage",
-        "business",
-        "christmas",
-        "education",
-        "entertainment",
-        "food",
-        "gifts",
-        "grocery",
-        "housing",
-        "membership",
-        "online",
-        "recurring",
-        "shopping",
-        "stock",
-        "tech",
-        "transfer"
+        "online"
       ],
       "total": 6789.83
     },
@@ -796,7 +779,7 @@
       "category": "Subscriptions",
       "classification": "variable",
       "count": 10,
-      "monthly_value": 194.95,
+      "monthly_value": 174.04,
       "months_active": 8,
       "name": "Apple Apps",
       "pattern": {
@@ -812,21 +795,10 @@
       },
       "subcategory": "Apps",
       "tags": [
-        "brokerage",
-        "christmas",
-        "cloud",
-        "dividends",
-        "entertainment",
-        "gaming",
-        "gifts",
-        "income",
-        "insurance",
-        "music",
         "recurring",
-        "shopping",
         "tech"
       ],
-      "total": 2339.43
+      "total": 2088.43
     },
     {
       "calculation": {
@@ -845,8 +817,7 @@
         "tags": [
           "entertainment",
           "recurring",
-          "streaming",
-          "tech"
+          "streaming"
         ]
       },
       "reasoning": {
@@ -856,8 +827,7 @@
       "tags": [
         "entertainment",
         "recurring",
-        "streaming",
-        "tech"
+        "streaming"
       ],
       "total": 9.99
     },
@@ -1353,10 +1323,8 @@
         "source": "user",
         "tags": [
           "dental",
-          "flights",
           "insurance",
-          "recurring",
-          "travel"
+          "recurring"
         ]
       },
       "reasoning": {
@@ -1365,11 +1333,8 @@
       "subcategory": "Dental",
       "tags": [
         "dental",
-        "flights",
-        "healthcare",
         "insurance",
-        "recurring",
-        "travel"
+        "recurring"
       ],
       "total": 230.0
     },
@@ -2201,11 +2166,9 @@
         "matched": "contains(\"HOME WARRANTY\")",
         "source": "user",
         "tags": [
-          "flights",
           "housing",
           "insurance",
-          "recurring",
-          "travel"
+          "recurring"
         ]
       },
       "reasoning": {
@@ -2213,11 +2176,9 @@
       },
       "subcategory": "Home Warranty",
       "tags": [
-        "flights",
         "housing",
         "insurance",
-        "recurring",
-        "travel"
+        "recurring"
       ],
       "total": 55.0
     },
@@ -2515,7 +2476,6 @@
       "subcategory": "Home Improvement",
       "tags": [
         "home",
-        "seasonal",
         "shopping"
       ],
       "total": 281.0
@@ -2846,9 +2806,7 @@
       },
       "subcategory": "Clothing",
       "tags": [
-        "christmas",
         "clothing",
-        "gifts",
         "shopping"
       ],
       "total": 610.0
@@ -3354,10 +3312,7 @@
       "tags": [
         "bills",
         "housing",
-        "insurance",
-        "recurring",
-        "rental",
-        "travel"
+        "recurring"
       ],
       "total": 26905.0
     },
@@ -3925,9 +3880,7 @@
       },
       "subcategory": "Retail",
       "tags": [
-        "home",
         "retail",
-        "seasonal",
         "shopping"
       ],
       "total": 619.5
@@ -3976,7 +3929,6 @@
         "matched": "contains(\"TAX REFUND\") or contains(\"REFUND IRS\")",
         "source": "user",
         "tags": [
-          "federal",
           "income",
           "tax"
         ]
@@ -3986,7 +3938,6 @@
       },
       "subcategory": "Tax Refund",
       "tags": [
-        "federal",
         "income",
         "tax"
       ],
@@ -4193,8 +4144,6 @@
       },
       "subcategory": "Rideshare",
       "tags": [
-        "delivery",
-        "food",
         "travel"
       ],
       "total": 619.0
@@ -4615,13 +4564,13 @@
     }
   ],
   "summary": {
-    "cash_flow": 13703.2,
-    "credits_total": 0.0,
-    "gross_spending": 182784.8,
-    "income_total": 84876.5,
-    "monthly_budget": 14373.73,
+    "cash_flow": 11703.2,
+    "credits_total": 125.5,
+    "gross_spending": 182533.8,
+    "income_total": 84751.0,
+    "monthly_budget": 14352.82,
     "num_months": 12,
-    "spending_total": 71173.3,
+    "spending_total": 73173.3,
     "total_spending": 2731.8,
     "transfers_total": 10300.0
   }

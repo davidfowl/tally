@@ -538,7 +538,7 @@ field.memo = trim(field.memo)</code></pre>
 
         <div class="note">
             <div class="note-title">Two-pass matching</div>
-            <p>First rule with <code>category:</code> sets the category. Tags are collected from ALL matching rules.</p>
+            <p>First rule with <code>category:</code> sets the category. Tags are collected from tag-only rules plus the winning categorization rule.</p>
         </div>
 
         <h2 id="rule-priority"><a href="#rule-priority" class="anchor-link">#</a>Rule Priority</h2>
@@ -552,7 +552,7 @@ field.memo = trim(field.memo)</code></pre>
 <span class="keyword">category:</span> Transportation</code></pre>
 
         <h2 id="practical-examples"><a href="#practical-examples" class="anchor-link">#</a>Practical Examples</h2>
-        
+
         <h3>Weekday vs Weekend Tagging</h3>
         <p>Tag the same merchant differently based on day of week (e.g., work lunches Monday-Friday):</p>
         <pre><code><span class="highlight">[Starbucks - Workdays]</span>

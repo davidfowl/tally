@@ -499,8 +499,8 @@ tags: entertainment, recurring
 
         assert result.tags == {"entertainment", "recurring"}
 
-    def test_tags_accumulated_from_all_matches(self):
-        """Tags accumulate from ALL matching rules."""
+    def test_tags_accumulated_from_tag_only_rules_and_winner(self):
+        """Tags accumulate from tag-only rules plus the winning categorization rule."""
         content = '''
 [Netflix]
 match: contains("NETFLIX")
@@ -553,6 +553,40 @@ subcategory: Streaming
         assert result.category == "Subscriptions"
         # Tags include both
         assert "large" in result.tags
+
+    def test_losing_categorization_rule_tags_not_collected(self):
+        """Tags from non-winning categorization rules are not collected."""
+        content = '''
+[Netflix]
+match: contains("NETFLIX")
+category: Subscriptions
+tags: streaming
+
+[Large Purchase]
+match: amount > 100
+category: Purchases
+tags: large
+
+[Holiday]
+match: month == 12
+tags: holiday
+'''
+        engine = parse_merchants(content)
+
+        # All three rules match, but Netflix wins (first_match mode)
+        txn = {
+            'description': 'NETFLIX PREMIUM',
+            'amount': 200.00,
+            'date': date(2025, 12, 15)
+        }
+        result = engine.match(txn)
+
+        assert result.matched
+        assert result.category == "Subscriptions"
+        # Tags should come from Netflix (winner) and Holiday (tag-only)
+        # NOT from Large Purchase (categorization rule that didn't win)
+        assert result.tags == {"streaming", "holiday"}
+        assert "large" not in result.tags
 
     def test_uncategorized_but_tagged(self):
         """Transaction can have tags without category."""
@@ -1545,8 +1579,8 @@ subcategory: Large Purchase
         assert result.subcategory == "Large Purchase"
         assert result.matched_rule.name == "Specific"
 
-    def test_both_modes_collect_all_tags(self):
-        """Both modes collect tags from ALL matching rules."""
+    def test_both_modes_collect_tags_from_tag_only_rules_and_winner(self):
+        """Both modes collect tags from tag-only rules plus the winning categorization rule."""
         content = '''
 [General]
 match: contains("STORE")
@@ -1633,5 +1667,3 @@ category: Food
         # General rule first -> Food still wins (more conditions)
         engine2 = parse_merchants(content_general_first, match_mode='most_specific')
         assert engine2.match(txn).category == "Food"
-
-

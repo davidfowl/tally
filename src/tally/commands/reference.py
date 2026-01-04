@@ -318,11 +318,11 @@ def cmd_reference(args):
 
   {C.BOLD}Two-pass matching:{C.RESET}
   1. First rule with {C.GREEN}category:{C.RESET} sets merchant/category/subcategory
-  2. Tags are collected from {C.BOLD}ALL{C.RESET} matching rules
+  2. Tags are collected from tag-only rules + winning categorization rule
 
   Example: A $600 Netflix charge in December gets:
   • Category from Netflix rule (Subscriptions)
-  • Tags: entertainment + large + review + holiday
+  • Tags: entertainment (from Netflix) + large + review + holiday (from tag-only rules)
 """)
 
         section("Rule Priority")
@@ -337,7 +337,7 @@ def cmd_reference(args):
   {C.DIM}match: contains("UBER"){C.RESET}
   {C.DIM}category: Transportation{C.RESET}
 
-  {C.BOLD}Tags accumulate{C.RESET} from all matching rules. Use 'and not' if needed:
+  {C.BOLD}Tags accumulate{C.RESET} from tag-only rules + winning rule. Use 'and not' if needed:
   {C.DIM}match: contains("UBER") and not contains("EATS"){C.RESET}
 """)
 
