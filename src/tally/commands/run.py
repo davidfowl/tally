@@ -69,6 +69,11 @@ def cmd_run(args):
         print(f"      type: amex", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-enable quiet mode for machine-readable formats
+    output_format = getattr(args, 'format', 'html')
+    if output_format in ('json', 'markdown'):
+        args.quiet = True
+
     if not args.quiet:
         print(f"Tally - {year}")
         print(f"Config: {config_dir}/{args.settings}")
@@ -177,10 +182,7 @@ def cmd_run(args):
                 only_filter = None
     category_filter = args.category if hasattr(args, 'category') and args.category else None
 
-    # Handle output format
-    output_format = args.format if hasattr(args, 'format') else 'html'
     verbose = args.verbose if hasattr(args, 'verbose') else 0
-
     currency_format = config.get('currency_format', '${amount}')
 
     if output_format == 'json':
