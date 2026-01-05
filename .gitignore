@@ -42,3 +42,6 @@ output/
 
 # Playwright MCP
 .playwright-mcp/
+
+# Local config files
+config/

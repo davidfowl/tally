@@ -5,8 +5,16 @@ Tally 'run' command - Analyze transactions and generate reports.
 import os
 import sys
 
+from ..colors import C
+from ..cli_utils import (
+    resolve_config_dir,
+    check_deprecated_description_cleaning,
+    warn_deprecated_parser,
+    print_deprecation_warnings,
+)
 from ..config_loader import load_config, load_supplemental_sources
 from ..merchant_utils import get_transforms
+from ..migrations import check_merchant_migration
 from ..analyzer import (
     parse_amex,
     parse_boa,
@@ -17,31 +25,10 @@ from ..analyzer import (
     write_summary_file_vue,
 )
 
-# Import shared utilities from parent cli module
-from ..cli import (
-    C,
-    find_config_dir,
-    _check_deprecated_description_cleaning,
-    _check_merchant_migration,
-    _warn_deprecated_parser,
-    _print_deprecation_warnings,
-)
-
 
 def cmd_run(args):
     """Handle the 'run' subcommand."""
-    # Determine config directory
-    if args.config:
-        config_dir = os.path.abspath(args.config)
-    else:
-        # Auto-detect config directory (supports both old and new layouts)
-        config_dir = find_config_dir()
-
-    if not config_dir or not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found.", file=sys.stderr)
-        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
-        print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
-        sys.exit(1)
+    config_dir = resolve_config_dir(args)
 
     # Load configuration
     try:
@@ -51,9 +38,15 @@ def cmd_run(args):
         sys.exit(1)
 
     # Check for deprecated settings
-    _check_deprecated_description_cleaning(config)
+    check_deprecated_description_cleaning(config)
 
-    year = config.get('year', 2025)
+    # Get report title (new) or year (deprecated)
+    title = config.get('title')
+    year = config.get('year')
+    if year and not title:
+        # Backwards compatibility: generate title from year
+        title = f"{year} Financial Report"
+
     data_sources = config.get('data_sources', [])
     rule_mode = config.get('rule_mode', 'first_match')
     transforms = get_transforms(config.get('_merchants_file'), match_mode=rule_mode)
@@ -69,13 +62,21 @@ def cmd_run(args):
         print(f"      type: amex", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-enable quiet mode for machine-readable formats
+    output_format = getattr(args, 'format', 'html')
+    if output_format in ('json', 'markdown'):
+        args.quiet = True
+
     if not args.quiet:
-        print(f"Tally - {year}")
+        if title:
+            print(f"Tally - {title}")
+        else:
+            print("Tally")
         print(f"Config: {config_dir}/{args.settings}")
         print()
 
     # Load merchant rules (with migration check for CSV -> .rules)
-    rules = _check_merchant_migration(config, config_dir, args.quiet, getattr(args, 'migrate', False))
+    rules = check_merchant_migration(config, config_dir, args.quiet, getattr(args, 'migrate', False))
 
     # Load supplemental data sources for cross-source queries
     supplemental_data = load_supplemental_sources(config, config_dir)
@@ -108,10 +109,10 @@ def cmd_run(args):
 
         try:
             if parser_type == 'amex':
-                _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
+                warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
                 txns = parse_amex(filepath, rules)
             elif parser_type == 'boa':
-                _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
+                warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
                 txns = parse_boa(filepath, rules)
             elif parser_type == 'generic' and format_spec:
                 txns = parse_generic_csv(filepath, format_spec, rules,
@@ -177,10 +178,7 @@ def cmd_run(args):
                 only_filter = None
     category_filter = args.category if hasattr(args, 'category') and args.category else None
 
-    # Handle output format
-    output_format = args.format if hasattr(args, 'format') else 'html'
     verbose = args.verbose if hasattr(args, 'verbose') else 0
-
     currency_format = config.get('currency_format', '${amount}')
 
     if output_format == 'json':
@@ -195,18 +193,18 @@ def cmd_run(args):
         # Text summary only (no HTML)
         group_by = getattr(args, 'group_by', 'merchant')
         if stats.get('sections'):
-            print_sections_summary(stats, year=year, currency_format=currency_format, only_filter=only_filter)
+            print_sections_summary(stats, title=title, currency_format=currency_format, only_filter=only_filter)
         else:
-            print_summary(stats, year=year, currency_format=currency_format, group_by=group_by)
+            print_summary(stats, title=title, currency_format=currency_format, group_by=group_by)
     else:
         # HTML output (default)
         # Print summary first
         group_by = getattr(args, 'group_by', 'merchant')
         if not args.quiet:
             if stats.get('sections'):
-                print_sections_summary(stats, year=year, currency_format=currency_format, only_filter=only_filter)
+                print_sections_summary(stats, title=title, currency_format=currency_format, only_filter=only_filter)
             else:
-                print_summary(stats, year=year, currency_format=currency_format, group_by=group_by)
+                print_summary(stats, title=title, currency_format=currency_format, group_by=group_by)
 
         # Determine output path
         if args.output:
@@ -218,7 +216,7 @@ def cmd_run(args):
 
         # Collect source names for the report subtitle (exclude supplemental)
         source_names = [s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)]
-        write_summary_file_vue(stats, output_path, year=year,
+        write_summary_file_vue(stats, output_path, title=title,
                                currency_format=currency_format, sources=source_names,
                                embedded_html=args.embedded_html)
         if not args.quiet:
@@ -229,4 +227,4 @@ def cmd_run(args):
             clickable_path = f"\033]8;;{file_url}\033\\{output_path}\033]8;;\033\\"
             print(f"\nHTML report: {clickable_path}")
 
-    _print_deprecation_warnings(config)
+    print_deprecation_warnings(config)

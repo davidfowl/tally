@@ -5,15 +5,10 @@ Tally 'init' command - Initialize a new budget directory.
 import os
 import sys
 
-from ..cli import (
-    C,
-    _supports_color,
-    init_config,
-    _migrate_csv_to_rules,
-    STARTER_SETTINGS,
-    STARTER_MERCHANTS,
-    STARTER_VIEWS,
-)
+from ..colors import C, supports_color
+from ..cli_utils import init_config
+from ..migrations import migrate_csv_to_rules
+from ..templates import STARTER_SETTINGS, STARTER_MERCHANTS, STARTER_VIEWS
 
 
 def cmd_init(args):
@@ -61,7 +56,7 @@ def cmd_init(args):
             print(f"{C.CYAN}Upgrading merchant rules to new format...{C.RESET}")
             print(f"  Found: config/merchant_categories.csv (legacy CSV format)")
             print()
-            _migrate_csv_to_rules(old_csv, config_dir, backup=True)
+            migrate_csv_to_rules(old_csv, config_dir, backup=True)
             print()
 
     created, skipped = init_config(target_dir)
@@ -125,7 +120,7 @@ def cmd_init(args):
     # Helper for clickable links (OSC 8 hyperlinks, with fallback)
     def link(url, text=None):
         text = text or url
-        if _supports_color():
+        if supports_color():
             return f"\033]8;;{url}\033\\{C.UNDERLINE}{C.BLUE}{text}{C.RESET}\033]8;;\033\\"
         return url
 

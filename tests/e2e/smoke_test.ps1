@@ -209,6 +209,38 @@ subcategory: Other
     Write-Host ($viewOutput | Select-Object -First 10)
     Write-Host "✓ View filter works in explain" -ForegroundColor Green
 
+    # Test 13: tally workflow
+    Write-Host ""
+    Write-Host "=== Test 13: tally workflow ===" -ForegroundColor Yellow
+    tally workflow | Select-Object -First 20
+    Write-Host "✓ Workflow command works" -ForegroundColor Green
+
+    # Test 14: tally reference
+    Write-Host ""
+    Write-Host "=== Test 14: tally reference ===" -ForegroundColor Yellow
+    $refOutput = tally reference | Out-String
+    if ($refOutput -match "merchant|rule|syntax") {
+        Write-Host "✓ Reference command works" -ForegroundColor Green
+    } else {
+        throw "Reference command missing expected content"
+    }
+
+    # Test 15: tally inspect
+    Write-Host ""
+    Write-Host "=== Test 15: tally inspect ===" -ForegroundColor Yellow
+    tally inspect data/transactions.csv | Select-Object -First 20
+    Write-Host "✓ Inspect command works" -ForegroundColor Green
+
+    # Test 16: tally update --check
+    Write-Host ""
+    Write-Host "=== Test 16: tally update --check ===" -ForegroundColor Yellow
+    try {
+        tally update --check
+    } catch {
+        # Don't fail if no update available or network issue
+    }
+    Write-Host "✓ Update check works" -ForegroundColor Green
+
     Write-Host ""
     Write-Host "=== All tests passed! ===" -ForegroundColor Green
 

@@ -1,11 +1,17 @@
 """
-Tally 'explain' command - Explain merchant classifications.
+Tally 'explain' command - Show merchant categorization and matching rules.
 """
 
 import os
 import sys
 
-from ..cli import C, find_config_dir, _check_deprecated_description_cleaning, _print_deprecation_warnings
+from ..colors import C
+from ..cli_utils import (
+    resolve_config_dir,
+    check_deprecated_description_cleaning,
+    warn_deprecated_parser,
+    print_deprecation_warnings,
+)
 from ..config_loader import load_config
 from ..merchant_utils import get_all_rules, get_transforms, explain_description
 from ..analyzer import parse_amex, parse_boa, parse_generic_csv
@@ -13,28 +19,19 @@ from ..analyzer import analyze_transactions, export_json, export_markdown, build
 
 
 def cmd_explain(args):
-    """Handle the 'explain' subcommand - explain merchant classifications."""
+    """Handle the 'explain' subcommand - show merchant categorization and matching rules."""
     from difflib import get_close_matches
 
-    # Determine config directory
-    # Check if first merchant arg looks like a config path
-    config_dir = None
+    # Handle merchant args - check if last arg looks like a config path
     merchant_names = args.merchant if args.merchant else []
 
     if merchant_names and os.path.isdir(merchant_names[-1]):
-        # Last arg is a directory, treat it as config
-        config_dir = os.path.abspath(merchant_names[-1])
+        # Last arg is a directory, treat it as config and remove from merchants
+        args.config = merchant_names[-1]
         merchant_names = merchant_names[:-1]
-    elif args.config:
-        config_dir = os.path.abspath(args.config)
-    else:
-        config_dir = find_config_dir()
 
-    if not config_dir or not os.path.isdir(config_dir):
-        print(f"Error: Config directory not found.", file=sys.stderr)
-        print(f"Looked for: ./config and ./tally/config", file=sys.stderr)
-        print(f"\nRun 'tally init' to create a new budget directory.", file=sys.stderr)
-        sys.exit(1)
+    # Resolve config directory using standard logic
+    config_dir = resolve_config_dir(args)
 
     # Load configuration
     try:
@@ -44,7 +41,7 @@ def cmd_explain(args):
         sys.exit(1)
 
     # Check for deprecated settings
-    _check_deprecated_description_cleaning(config)
+    check_deprecated_description_cleaning(config)
 
     data_sources = config.get('data_sources', [])
     rule_mode = config.get('rule_mode', 'first_match')
@@ -76,12 +73,10 @@ def cmd_explain(args):
 
         try:
             if parser_type == 'amex':
-                from ..cli import _warn_deprecated_parser
-                _warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
+                warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
                 txns = parse_amex(filepath, rules)
             elif parser_type == 'boa':
-                from ..cli import _warn_deprecated_parser
-                _warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
+                warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
                 txns = parse_boa(filepath, rules)
             elif parser_type == 'generic' and format_spec:
                 txns = parse_generic_csv(filepath, format_spec, rules,
@@ -317,7 +312,7 @@ def cmd_explain(args):
                     print(f"No merchants found matching: {filter_desc}")
                     _suggest_available_values(by_merchant, has_category, has_tags, has_month, has_location)
 
-    _print_deprecation_warnings(config)
+    print_deprecation_warnings(config)
 
 
 def _parse_month_filter(month_str, available_months):
@@ -704,8 +699,6 @@ def _print_merchant_explanation(name, data, output_format, verbose, num_months, 
         reasoning = data.get('reasoning', {})
         print(f"## {name}")
         print(f"**Category:** {data.get('category', '')} > {data.get('subcategory', '')}")
-        print(f"**Frequency:** {data.get('classification', 'unknown').replace('_', ' ').title()}")
-        print(f"**Reason:** {reasoning.get('decision', 'N/A')}")
         print(f"**Monthly Value:** ${data.get('monthly_value', 0):.2f}")
         print(f"**YTD Total:** ${data.get('total', 0):.2f}")
         print(f"**Months Active:** {data.get('months_active', 0)}/{num_months}")
@@ -756,15 +749,11 @@ def _print_merchant_explanation(name, data, output_format, verbose, num_months, 
             print(f"\n**Pattern:** `{pattern}` ({source})")
         print()
     else:
-        # Text format - show category first, then frequency classification
+        # Text format
         category = data.get('category', 'Unknown')
         subcategory = data.get('subcategory', 'Unknown')
-        classification = data.get('classification', 'unknown').replace('_', ' ').title()
-        reasoning = data.get('reasoning', {})
         print(f"{name}")
         print(f"  Category: {category} > {subcategory}")
-        print(f"  Frequency: {classification}")
-        print(f"  Reason: {reasoning.get('decision', 'N/A')}")
 
         # Show tags
         tags = data.get('tags', [])

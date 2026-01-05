@@ -1,15 +1,11 @@
 name: E2E Smoke Test
 
 on:
-  workflow_dispatch:
-  workflow_run:
-    workflows: ["Dev Build"]
-    types:
-      - completed
+  workflow_dispatch:  # Manual trigger
+  workflow_call:      # Called by dev-build.yml
 
 jobs:
   smoke-test:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     strategy:
       fail-fast: false
       matrix:

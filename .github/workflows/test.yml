@@ -8,7 +8,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  # Unit tests run on both platforms (fast, no browser needed)
+  unit-tests:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -26,8 +27,27 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      - name: Run unit tests
+        run: uv run pytest -v -m "not playwright"
+
+  # Playwright tests run only on Ubuntu (browser behavior is platform-independent)
+  playwright-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
       - name: Install Playwright browsers
         run: uv run playwright install chromium --with-deps
 
-      - name: Run tests
-        run: uv run pytest -v
+      - name: Run Playwright tests
+        run: uv run pytest -v -m playwright

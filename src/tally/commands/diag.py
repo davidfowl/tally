@@ -5,7 +5,8 @@ Tally 'diag' command - Show diagnostic information about config and rules.
 import os
 import sys
 
-from ..cli import C, find_config_dir
+from ..colors import C
+from ..cli_utils import resolve_config_dir
 from ..classification import SPECIAL_TAGS
 from ..config_loader import load_config
 from ..merchant_utils import get_all_rules, diagnose_rules, get_transforms
@@ -15,11 +16,10 @@ def cmd_diag(args):
     """Handle the 'diag' subcommand - show diagnostic information about config and rules."""
     import json as json_module
 
-    # Determine config directory
-    if args.config:
-        config_dir = os.path.abspath(args.config)
-    else:
-        config_dir = find_config_dir() or os.path.abspath('config')
+    # Determine config directory (don't require it - diag shows status even if missing)
+    config_dir = resolve_config_dir(args, required=False)
+    if config_dir is None:
+        config_dir = os.path.abspath('config')  # Default for display purposes
 
     print("BUDGET ANALYZER DIAGNOSTICS")
     print("=" * 70)

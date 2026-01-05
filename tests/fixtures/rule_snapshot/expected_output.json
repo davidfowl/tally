@@ -599,7 +599,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 41.67,
       "months_active": 1,
@@ -630,7 +629,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 12.08,
       "months_active": 1,
@@ -661,7 +659,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 3,
       "monthly_value": 75.0,
       "months_active": 3,
@@ -690,7 +687,6 @@
         "type": "/12"
       },
       "category": "Utilities",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 10.42,
       "months_active": 1,
@@ -721,7 +717,6 @@
         "type": "/12"
       },
       "category": "Travel",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 81.25,
       "months_active": 2,
@@ -750,7 +745,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 27,
       "monthly_value": 565.82,
       "months_active": 12,
@@ -777,7 +771,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 10,
       "monthly_value": 174.04,
       "months_active": 8,
@@ -806,7 +799,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.83,
       "months_active": 1,
@@ -837,7 +829,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.25,
       "months_active": 1,
@@ -868,7 +859,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 3.75,
       "months_active": 1,
@@ -897,7 +887,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 4,
       "monthly_value": 20.0,
       "months_active": 4,
@@ -926,7 +915,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 70.83,
       "months_active": 2,
@@ -955,7 +943,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 3,
       "monthly_value": 750.0,
       "months_active": 3,
@@ -984,7 +971,6 @@
         "type": "/12"
       },
       "category": "Entertainment",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 5.42,
       "months_active": 1,
@@ -1013,7 +999,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 6.25,
       "months_active": 1,
@@ -1044,7 +1029,6 @@
         "type": "/12"
       },
       "category": "Charity",
-      "classification": "variable",
       "count": 3,
       "monthly_value": 50.0,
       "months_active": 2,
@@ -1075,7 +1059,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 6,
       "monthly_value": 31.17,
       "months_active": 6,
@@ -1104,7 +1087,6 @@
         "type": "/12"
       },
       "category": "Pets",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.08,
       "months_active": 1,
@@ -1135,7 +1117,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 2.58,
       "months_active": 2,
@@ -1164,7 +1145,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.08,
       "months_active": 1,
@@ -1195,7 +1175,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 6,
       "monthly_value": 180.62,
       "months_active": 6,
@@ -1224,7 +1203,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 6,
       "monthly_value": 27.17,
       "months_active": 6,
@@ -1253,7 +1231,6 @@
         "type": "/12"
       },
       "category": "Fees",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.92,
       "months_active": 1,
@@ -1282,7 +1259,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 23.75,
       "months_active": 1,
@@ -1313,7 +1289,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 19.17,
       "months_active": 2,
@@ -1344,7 +1319,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.83,
       "months_active": 1,
@@ -1373,7 +1347,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 2.33,
       "months_active": 2,
@@ -1404,7 +1377,6 @@
         "type": "/12"
       },
       "category": "Healthcare",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 2.92,
       "months_active": 1,
@@ -1433,7 +1405,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 3,
       "monthly_value": 8.88,
       "months_active": 3,
@@ -1462,7 +1433,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.0,
       "months_active": 1,
@@ -1493,7 +1463,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.92,
       "months_active": 1,
@@ -1524,7 +1493,6 @@
         "type": "/12"
       },
       "category": "Utilities",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 177.5,
       "months_active": 12,
@@ -1555,7 +1523,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 375.0,
       "months_active": 12,
@@ -1584,7 +1551,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 5000.0,
       "months_active": 12,
@@ -1613,7 +1579,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 4.58,
       "months_active": 1,
@@ -1642,7 +1607,6 @@
         "type": "/12"
       },
       "category": "Healthcare",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 47.92,
       "months_active": 1,
@@ -1671,7 +1635,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 83.33,
       "months_active": 2,
@@ -1702,7 +1665,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 10.42,
       "months_active": 1,
@@ -1733,7 +1695,6 @@
         "type": "/12"
       },
       "category": "Utilities",
-      "classification": "variable",
       "count": 6,
       "monthly_value": 34.75,
       "months_active": 6,
@@ -1764,7 +1725,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 12.08,
       "months_active": 1,
@@ -1795,7 +1755,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.33,
       "months_active": 1,
@@ -1826,7 +1785,6 @@
         "type": "/12"
       },
       "category": "Travel",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 8.33,
       "months_active": 1,
@@ -1855,7 +1813,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.25,
       "months_active": 1,
@@ -1886,7 +1843,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 6.42,
       "months_active": 2,
@@ -1915,7 +1871,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 12.5,
       "months_active": 1,
@@ -1944,7 +1899,6 @@
         "type": "/12"
       },
       "category": "Healthcare",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 15.42,
       "months_active": 1,
@@ -1975,7 +1929,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 2.67,
       "months_active": 2,
@@ -2006,7 +1959,6 @@
         "type": "/12"
       },
       "category": "Housing",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 29.17,
       "months_active": 1,
@@ -2037,7 +1989,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 20.83,
       "months_active": 1,
@@ -2068,7 +2019,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 15.42,
       "months_active": 1,
@@ -2097,7 +2047,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 37.5,
       "months_active": 1,
@@ -2128,7 +2077,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 20.42,
       "months_active": 1,
@@ -2157,7 +2105,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 4.58,
       "months_active": 1,
@@ -2188,7 +2135,6 @@
         "type": "/12"
       },
       "category": "Travel",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 89.58,
       "months_active": 2,
@@ -2217,7 +2163,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 3,
       "monthly_value": 4.5,
       "months_active": 3,
@@ -2248,7 +2193,6 @@
         "type": "/12"
       },
       "category": "Taxes",
-      "classification": "variable",
       "count": 4,
       "monthly_value": 283.33,
       "months_active": 4,
@@ -2277,7 +2221,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 3,
       "monthly_value": 13.85,
       "months_active": 3,
@@ -2306,7 +2249,6 @@
         "type": "/12"
       },
       "category": "Utilities",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 89.99,
       "months_active": 12,
@@ -2337,7 +2279,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 18.75,
       "months_active": 1,
@@ -2368,7 +2309,6 @@
         "type": "/12"
       },
       "category": "Healthcare",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 10.42,
       "months_active": 1,
@@ -2397,7 +2337,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 20.83,
       "months_active": 2,
@@ -2426,7 +2365,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.08,
       "months_active": 1,
@@ -2457,7 +2395,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 23.42,
       "months_active": 2,
@@ -2486,7 +2423,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 5,
       "monthly_value": 12.04,
       "months_active": 5,
@@ -2515,7 +2451,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 13.75,
       "months_active": 1,
@@ -2544,7 +2479,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.25,
       "months_active": 1,
@@ -2573,7 +2507,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 104.17,
       "months_active": 1,
@@ -2604,7 +2537,6 @@
         "type": "/12"
       },
       "category": "Entertainment",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 19.17,
       "months_active": 2,
@@ -2633,7 +2565,6 @@
         "type": "/12"
       },
       "category": "Entertainment",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 2.92,
       "months_active": 1,
@@ -2662,7 +2593,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.0,
       "months_active": 1,
@@ -2693,7 +2623,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 15.99,
       "months_active": 12,
@@ -2724,7 +2653,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 15.42,
       "months_active": 1,
@@ -2757,7 +2685,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 12.08,
       "months_active": 1,
@@ -2788,7 +2715,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 50.83,
       "months_active": 2,
@@ -2817,7 +2743,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.67,
       "months_active": 1,
@@ -2846,7 +2771,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.25,
       "months_active": 1,
@@ -2875,7 +2799,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.0,
       "months_active": 1,
@@ -2906,7 +2829,6 @@
         "type": "/12"
       },
       "category": "Education",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 20.83,
       "months_active": 1,
@@ -2935,7 +2857,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.08,
       "months_active": 1,
@@ -2964,7 +2885,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 1.0,
       "months_active": 2,
@@ -2995,7 +2915,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.92,
       "months_active": 1,
@@ -3024,7 +2943,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 5.42,
       "months_active": 1,
@@ -3055,7 +2973,6 @@
         "type": "/12"
       },
       "category": "Pets",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 12.5,
       "months_active": 1,
@@ -3084,7 +3001,6 @@
         "type": "/12"
       },
       "category": "Pets",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 10.42,
       "months_active": 1,
@@ -3113,7 +3029,6 @@
         "type": "/12"
       },
       "category": "Healthcare",
-      "classification": "variable",
       "count": 4,
       "monthly_value": 14.72,
       "months_active": 4,
@@ -3142,7 +3057,6 @@
         "type": "/12"
       },
       "category": "Entertainment",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.83,
       "months_active": 1,
@@ -3171,7 +3085,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 22.92,
       "months_active": 1,
@@ -3200,7 +3113,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 2.33,
       "months_active": 1,
@@ -3229,7 +3141,6 @@
         "type": "/12"
       },
       "category": "Taxes",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 104.17,
       "months_active": 1,
@@ -3260,7 +3171,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 641.67,
       "months_active": 2,
@@ -3291,7 +3201,6 @@
         "type": "/12"
       },
       "category": "Housing",
-      "classification": "variable",
       "count": 15,
       "monthly_value": 2242.08,
       "months_active": 12,
@@ -3322,7 +3231,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 5,
       "monthly_value": 77.92,
       "months_active": 4,
@@ -3351,7 +3259,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.83,
       "months_active": 1,
@@ -3382,7 +3289,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 9.38,
       "months_active": 1,
@@ -3413,7 +3319,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 4,
       "monthly_value": 49.79,
       "months_active": 4,
@@ -3442,7 +3347,6 @@
         "type": "/12"
       },
       "category": "Fees",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 0.41,
       "months_active": 1,
@@ -3471,7 +3375,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 5.71,
       "months_active": 1,
@@ -3502,7 +3405,6 @@
         "type": "/12"
       },
       "category": "Fees",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 0.83,
       "months_active": 2,
@@ -3531,7 +3433,6 @@
         "type": "/12"
       },
       "category": "Home",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 4.58,
       "months_active": 1,
@@ -3562,7 +3463,6 @@
         "type": "/12"
       },
       "category": "Utilities",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 3.17,
       "months_active": 1,
@@ -3593,7 +3493,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 7,
       "monthly_value": 33.67,
       "months_active": 7,
@@ -3622,7 +3521,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 6,
       "monthly_value": 5.5,
       "months_active": 6,
@@ -3653,7 +3551,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 1.36,
       "months_active": 2,
@@ -3682,7 +3579,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 7,
       "monthly_value": 72.92,
       "months_active": 7,
@@ -3713,7 +3609,6 @@
         "type": "/12"
       },
       "category": "Taxes",
-      "classification": "variable",
       "count": 4,
       "monthly_value": 108.33,
       "months_active": 4,
@@ -3742,7 +3637,6 @@
         "type": "/12"
       },
       "category": "Entertainment",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 5.0,
       "months_active": 1,
@@ -3771,7 +3665,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.44,
       "months_active": 1,
@@ -3802,7 +3695,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 4,
       "monthly_value": -858.33,
       "months_active": 4,
@@ -3833,7 +3725,6 @@
         "type": "/12"
       },
       "category": "Travel",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.08,
       "months_active": 1,
@@ -3862,7 +3753,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 4,
       "monthly_value": 51.62,
       "months_active": 4,
@@ -3891,7 +3781,6 @@
         "type": "/12"
       },
       "category": "Taxes",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.42,
       "months_active": 1,
@@ -3920,7 +3809,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 154.17,
       "months_active": 1,
@@ -3949,7 +3837,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 54.17,
       "months_active": 1,
@@ -3980,7 +3867,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 4,
       "monthly_value": 42.33,
       "months_active": 4,
@@ -4009,7 +3895,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 500.0,
       "months_active": 12,
@@ -4038,7 +3923,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 500.0,
       "months_active": 12,
@@ -4067,7 +3951,6 @@
         "type": "/12"
       },
       "category": "Utilities",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 2.92,
       "months_active": 1,
@@ -4098,7 +3981,6 @@
         "type": "/12"
       },
       "category": "Education",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 208.33,
       "months_active": 1,
@@ -4127,7 +4009,6 @@
         "type": "/12"
       },
       "category": "Transport",
-      "classification": "variable",
       "count": 15,
       "monthly_value": 51.58,
       "months_active": 12,
@@ -4154,7 +4035,6 @@
         "type": "/12"
       },
       "category": "Insurance",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 3.75,
       "months_active": 1,
@@ -4183,7 +4063,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.92,
       "months_active": 1,
@@ -4212,7 +4091,6 @@
         "type": "/12"
       },
       "category": "Unknown",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 3.75,
       "months_active": 1,
@@ -4239,7 +4117,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 12,
       "monthly_value": 750.0,
       "months_active": 12,
@@ -4270,7 +4147,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 5,
       "monthly_value": 70.38,
       "months_active": 4,
@@ -4301,7 +4177,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 2,
       "monthly_value": 7.92,
       "months_active": 2,
@@ -4330,7 +4205,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 16.67,
       "months_active": 1,
@@ -4359,7 +4233,6 @@
         "type": "/12"
       },
       "category": "Pets",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 16.25,
       "months_active": 1,
@@ -4388,7 +4261,6 @@
         "type": "/12"
       },
       "category": "Utilities",
-      "classification": "variable",
       "count": 6,
       "monthly_value": 23.33,
       "months_active": 6,
@@ -4419,7 +4291,6 @@
         "type": "/12"
       },
       "category": "Food",
-      "classification": "variable",
       "count": 13,
       "monthly_value": 241.56,
       "months_active": 12,
@@ -4450,7 +4321,6 @@
         "type": "/12"
       },
       "category": "Subscriptions",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 1.17,
       "months_active": 1,
@@ -4481,7 +4351,6 @@
         "type": "/12"
       },
       "category": "Income",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 8.33,
       "months_active": 1,
@@ -4510,7 +4379,6 @@
         "type": "/12"
       },
       "category": "Transfers",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 66.67,
       "months_active": 1,
@@ -4539,7 +4407,6 @@
         "type": "/12"
       },
       "category": "Shopping",
-      "classification": "variable",
       "count": 1,
       "monthly_value": 7.42,
       "months_active": 1,
