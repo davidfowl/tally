@@ -6,7 +6,7 @@ import os
 import sys
 import csv
 
-from ..cli import C
+from ..colors import C
 from ..analyzer import auto_detect_csv_format
 
 

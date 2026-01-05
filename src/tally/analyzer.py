@@ -153,7 +153,6 @@ def analyze_transactions(transactions):
     # All merchants use YTD/12 for monthly value calculation
     # Custom grouping/views are defined in views.rules
     for merchant, data in by_merchant.items():
-        data['classification'] = 'variable'
         data['calc_type'] = '/12'
         monthly_value = data['total'] / 12
         data['monthly_value'] = monthly_value
@@ -326,7 +325,6 @@ def build_merchant_json(merchant_name, data, verbose=0):
 
     result = {
         'name': merchant_name,
-        'classification': data.get('classification', 'unknown'),
         'category': data.get('category', ''),
         'subcategory': data.get('subcategory', ''),
         'tags': tags,
@@ -590,18 +588,18 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
     return '\n'.join(lines)
 
 
-def print_summary(stats, year=2025, filter_category=None, currency_format="${amount}", group_by='merchant'):
+def print_summary(stats, title=None, filter_category=None, currency_format="${amount}", group_by='merchant'):
     """Print analysis summary.
 
     Args:
         stats: Analysis statistics dict
-        year: Year for display
+        title: Report title for display (e.g., "2025 Budget Analysis")
         filter_category: Optional category to filter to
         currency_format: Format string for currency
         group_by: How to group in BY CATEGORY section - 'merchant' or 'subcategory'
     """
-    # Lazy import to avoid circular dependency
-    from .cli import C
+    # Import colors for terminal output
+    from .colors import C
 
     # Local helper for currency formatting
     def fmt(amount):
@@ -625,7 +623,7 @@ def print_summary(stats, year=2025, filter_category=None, currency_format="${amo
     # FINANCIAL SUMMARY
     # =========================================================================
     print("=" * 80)
-    print(f"{year} FINANCIAL REPORT")
+    print(title or "FINANCIAL REPORT")
     print("=" * 80)
 
     print("\nCASH FLOW")
@@ -764,17 +762,17 @@ def print_summary(stats, year=2025, filter_category=None, currency_format="${amo
                     break
 
 
-def print_sections_summary(stats, year=2025, currency_format="${amount}", only_filter=None):
+def print_sections_summary(stats, title=None, currency_format="${amount}", only_filter=None):
     """Print sections-based analysis summary.
 
     Args:
         stats: Analysis statistics dict
-        year: Year for display
+        title: Report title for display (e.g., "2025 Budget Analysis")
         currency_format: Format string for currency
         only_filter: Optional list of section names (lowercase) to show
     """
-    # Lazy import to avoid circular dependency
-    from .cli import C
+    # Import colors for terminal output
+    from .colors import C
 
     def fmt(amount):
         return format_currency(amount, currency_format)
@@ -796,7 +794,7 @@ def print_sections_summary(stats, year=2025, currency_format="${amount}", only_f
     num_months = stats.get('num_months', 12)
 
     print("=" * 80)
-    print(f"{year} SPENDING ANALYSIS")
+    print(title or "SPENDING ANALYSIS")
     print("=" * 80)
 
     # Print each section

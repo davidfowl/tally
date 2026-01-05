@@ -219,5 +219,34 @@ OUTPUT=$(tally explain --view subscriptions 2>&1) || true
 echo "$OUTPUT" | head -10
 echo "✓ View filter works in explain"
 
+# Test 13: tally workflow
+echo ""
+echo "=== Test 13: tally workflow ==="
+tally workflow | head -20
+echo "✓ Workflow command works"
+
+# Test 14: tally reference
+echo ""
+echo "=== Test 14: tally reference ==="
+OUTPUT=$(tally reference)
+if echo "$OUTPUT" | grep -qi "merchant\|rule\|syntax"; then
+    echo "✓ Reference command works"
+else
+    echo "✗ Reference command missing expected content"
+    exit 1
+fi
+
+# Test 15: tally inspect
+echo ""
+echo "=== Test 15: tally inspect ==="
+tally inspect data/transactions.csv | head -20
+echo "✓ Inspect command works"
+
+# Test 16: tally update --check
+echo ""
+echo "=== Test 16: tally update --check ==="
+tally update --check || true  # Don't fail if no update available
+echo "✓ Update check works"
+
 echo ""
 echo "=== All tests passed! ==="

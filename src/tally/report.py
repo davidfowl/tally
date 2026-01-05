@@ -84,16 +84,17 @@ def generate_embeddings(items):
 # VUE-BASED HTML REPORT (Modern)
 # ============================================================================
 
-def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount}", sources=None, embedded_html=True):
+def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount}", sources=None, embedded_html=True, title=None):
     """Write summary to HTML file using Vue 3 for client-side rendering.
 
     Args:
         stats: Analysis statistics dict
         filepath: Output file path
-        year: Year for display in title
+        year: Deprecated - use title instead
         currency_format: Format string for currency display, e.g. "${amount}" or "{amount} zl"
         sources: List of data source names (e.g., ['Amex', 'Chase'])
         embedded_html: If True (default), embed CSS/JS inline. If False, output separate files.
+        title: Custom report title (e.g., "2025 Budget Analysis")
     """
     sources = sources or []
 
@@ -414,7 +415,7 @@ def write_summary_file_vue(stats, filepath, year=2025, currency_format="${amount
 
     # Build final spending data object
     spending_data = {
-        'year': year,
+        'title': title,  # Custom report title (None = auto-generate in JS)
         'numMonths': num_months,
         'sources': sources,
         'dataThrough': latest_date,

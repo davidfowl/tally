@@ -33,10 +33,10 @@ except ImportError:
 if TYPE_CHECKING:
     from playwright.sync_api import Page
 
-pytestmark = pytest.mark.skipif(
-    not PLAYWRIGHT_AVAILABLE,
-    reason="Playwright not installed"
-)
+pytestmark = [
+    pytest.mark.playwright,
+    pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed"),
+]
 
 
 @pytest.fixture(scope="module")

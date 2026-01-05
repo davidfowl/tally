@@ -2,8 +2,7 @@
 Tally 'reference' command - Show complete rule syntax reference.
 """
 
-# Import shared utilities from parent cli module
-from ..cli import C
+from ..colors import C
 
 
 def cmd_reference(args):

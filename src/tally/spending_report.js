@@ -502,10 +502,10 @@ createApp({
         // ========== COMPUTED ==========
 
         // Shortcut to spending data
-        const spendingData = computed(() => window.spendingData || { sections: {}, year: 2025, numMonths: 12 });
+        const spendingData = computed(() => window.spendingData || { sections: {}, numMonths: 12 });
 
         // Report title and subtitle
-        const title = computed(() => `${spendingData.value.year} Financial Report`);
+        const title = computed(() => spendingData.value.title || 'Financial Report');
         const subtitle = computed(() => {
             const data = spendingData.value;
             const sources = data.sources || [];

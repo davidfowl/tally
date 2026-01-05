@@ -164,3 +164,8 @@ jobs:
             --notes-file notes.md \
             --draft \
             rc-artifacts/*/*.zip
+
+  # Run E2E smoke tests after release (tests the published dev build)
+  e2e-tests:
+    needs: [release]
+    uses: ./.github/workflows/e2e-test.yml

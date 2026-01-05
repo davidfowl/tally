@@ -10,8 +10,8 @@ from .._version import (
     perform_update,
 )
 
-# Import shared utilities from parent cli module
-from ..cli import find_config_dir, run_migrations
+from ..cli_utils import resolve_config_dir
+from ..migrations import run_migrations
 
 
 def cmd_update(args):
@@ -66,7 +66,7 @@ def cmd_update(args):
 
     # Check for migrations (layout updates, etc.)
     # This runs even if version check failed
-    config_dir = find_config_dir()
+    config_dir = resolve_config_dir(args, required=False)
     did_migrate = False
     if config_dir:
         old_config = config_dir
@@ -86,9 +86,9 @@ def cmd_update(args):
         print(f"\n✗ Cannot self-update when running from source. Use: uv tool upgrade tally")
         sys.exit(1)
 
-    # Perform binary update
+    # Perform binary update (force=True when switching from prerelease to stable)
     print()
-    success, message = perform_update(release_info)
+    success, message = perform_update(release_info, force=is_prerelease_to_stable)
 
     if success:
         print(f"\n✓ {message}")

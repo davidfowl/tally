@@ -255,6 +255,17 @@ def load_config(config_dir, settings_file='settings.yaml'):
             'suggestion': "Use merchant rules with a 'Travel' category instead. Remove these settings from settings.yaml.",
         })
 
+    # Warn about deprecated 'year' setting
+    if 'year' in config:
+        warnings.append({
+            'type': 'deprecated',
+            'source': 'settings.yaml',
+            'feature': 'year',
+            'message': "Setting 'year' is deprecated.",
+            'suggestion': "Use 'title' instead to set a custom report title.",
+            'example': 'title: "2025 Budget Analysis"',
+        })
+
     # Store config dir for reference
     config['_config_dir'] = config_dir
 

@@ -46,3 +46,6 @@ packages = ["src/tally"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "playwright: tests that require Playwright browser automation",
+]

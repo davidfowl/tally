@@ -48,28 +48,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Verify E2E passed
+      - name: Verify Dev Build passed
         run: |
-          echo "Checking latest E2E status on main branch..."
+          echo "Checking latest Dev Build status on main branch..."
 
-          # Get the latest E2E run on main branch
+          # Get the latest Dev Build run on main branch
+          # Dev Build includes E2E tests, so if it's green, everything passed
           STATUS=$(gh run list \
             --branch main \
-            --workflow "E2E Smoke Test" \
+            --workflow "Dev Build" \
             --json conclusion,status \
             --limit 1 \
             -q '.[0].conclusion')
 
-          echo "E2E conclusion: $STATUS"
+          echo "Dev Build conclusion: $STATUS"
 
           if [ "$STATUS" != "success" ]; then
-            echo "::error::E2E tests did not pass on main branch"
+            echo "::error::Dev Build did not pass on main branch"
             echo "Status was: $STATUS"
             echo ""
-            echo "The release candidate cannot be published until E2E tests pass."
+            echo "The release candidate cannot be published until Dev Build (including E2E tests) passes."
             exit 1
           fi
-          echo "E2E tests passed!"
+          echo "Dev Build passed (includes E2E tests)!"
         env:
           GH_TOKEN: ${{ github.token }}
 
