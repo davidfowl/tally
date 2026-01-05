@@ -84,7 +84,7 @@ def cmd_inspect(args):
             return
 
     # Analyze all columns
-    column_analysis = _analyze_columns(filepath, has_header=has_header, max_rows=100)
+    column_analysis = _analyze_columns(filepath, has_header=has_header, max_rows=100, dialect=dialect)
 
     # Display column analysis
     if column_analysis:
@@ -177,7 +177,7 @@ def cmd_inspect(args):
         print(f'    format: "{format_str}"')
 
         # Analyze amount patterns - detailed analysis with both signs
-        analysis = _analyze_amount_column_detailed(filepath, spec.amount_column, has_header=True)
+        analysis = _analyze_amount_column_detailed(filepath, spec.amount_column, has_header=True, dialect=dialect)
         if analysis:
             print("\n" + "=" * 70)
             print("Amount Distribution:")
@@ -448,7 +448,7 @@ def _analyze_amount_patterns(filepath, amount_col, has_header=True, delimiter=No
     }
 
 
-def _analyze_columns(filepath, has_header=True, max_rows=100):
+def _analyze_columns(filepath, has_header=True, max_rows=100, dialect=None):
     """
     Analyze all columns in a CSV to detect their types and patterns.
 
@@ -467,7 +467,7 @@ def _analyze_columns(filepath, has_header=True, max_rows=100):
 
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, dialect) if dialect else csv.reader(f)
 
             if has_header:
                 headers = next(reader, None)
@@ -482,7 +482,7 @@ def _analyze_columns(filepath, has_header=True, max_rows=100):
                 headers = [f'Column {i}' for i in range(len(first_row))]
                 # Reset to re-read file including first row as data
                 f.seek(0)
-                reader = csv.reader(f)
+                reader = csv.reader(f, dialect) if dialect else csv.reader(f)
 
             # Initialize column stats
             num_cols = len(headers)
@@ -640,7 +640,7 @@ def _detect_column_type(values, header=''):
     return 'text', None, []
 
 
-def _analyze_amount_column_detailed(filepath, amount_col, desc_col=1, has_header=True, max_rows=1000):
+def _analyze_amount_column_detailed(filepath, amount_col, desc_col=1, has_header=True, max_rows=1000, dialect=None):
     """
     Detailed analysis of amount column showing both positive and negative samples.
 
@@ -701,7 +701,7 @@ def _analyze_amount_column_detailed(filepath, amount_col, desc_col=1, has_header
 
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, dialect) if dialect else csv.reader(f)
             if has_header:
                 headers = next(reader, None)
                 # Try to find description column

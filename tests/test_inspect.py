@@ -1,5 +1,6 @@
 """Tests for inspect command - CSV sniffing and column analysis."""
 
+import csv
 import pytest
 import tempfile
 import os
@@ -417,6 +418,44 @@ class TestAnalyzeColumnsAdditional:
         finally:
             os.unlink(tmpfile)
 
+    def test_semicolon_delimiter_with_quotes(self):
+        """Handle CSV with semicolon delimiter and quoted headers."""
+        csv_content = '''"Extrait";"Date";"Date valeur";"compte";"Description";"Montant";"Devise"
+"123";"01/15/2025";"01/15/2025";"BE12345";"GROCERY STORE";"123.45";"EUR"
+"124";"01/16/2025";"01/16/2025";"BE12345";"COFFEE SHOP";"-5.99";"EUR"
+"125";"01/17/2025";"01/17/2025";"BE12345";"GAS STATION";"45.00";"EUR"
+'''
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            # Sniff the dialect like cmd_inspect does
+            with open(tmpfile, 'r', encoding='utf-8') as f:
+                sample = f.read(4096)
+                dialect = csv.Sniffer().sniff(sample)
+
+            # Pass dialect to _analyze_columns
+            cols = _analyze_columns(tmpfile, has_header=True, dialect=dialect)
+            
+            # Should detect 7 columns, not 1
+            assert len(cols) == 7
+            
+            # Check column headers are correctly parsed
+            assert cols[0]['header'] == 'Extrait'
+            assert cols[1]['header'] == 'Date'
+            assert cols[2]['header'] == 'Date valeur'
+            assert cols[3]['header'] == 'compte'
+            assert cols[4]['header'] == 'Description'
+            assert cols[5]['header'] == 'Montant'
+            assert cols[6]['header'] == 'Devise'
+            
+            # Check data is correctly parsed
+            assert cols[1]['type'] == 'date'
+            assert cols[1]['format'] == '%m/%d/%Y'
+        finally:
+            os.unlink(tmpfile)
+
 
 class TestAnalyzeAmountColumnDetailedAdditional:
     """Additional edge case tests for _analyze_amount_column_detailed."""
@@ -497,6 +536,34 @@ class TestAnalyzeAmountColumnDetailedAdditional:
             result = _analyze_amount_column_detailed(tmpfile, amount_col=2)
             # Should return None when no valid amounts found
             assert result is None
+        finally:
+            os.unlink(tmpfile)
+
+    def test_semicolon_delimiter_amount_analysis(self):
+        """Analyze amount column with semicolon delimiter."""
+        csv_content = '''"Date";"Description";"Montant";"Devise"
+"01/15/2025";"GROCERY STORE";"123.45";"EUR"
+"01/16/2025";"COFFEE SHOP";"-5.99";"EUR"
+"01/17/2025";"GAS STATION";"45.00";"EUR"
+'''
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            # Sniff the dialect
+            with open(tmpfile, 'r', encoding='utf-8') as f:
+                sample = f.read(4096)
+                dialect = csv.Sniffer().sniff(sample)
+
+            # Pass dialect to _analyze_amount_column_detailed
+            result = _analyze_amount_column_detailed(tmpfile, amount_col=2, dialect=dialect)
+
+            assert result is not None
+            assert result['positive_count'] == 2
+            assert result['negative_count'] == 1
+            assert result['positive_total'] == pytest.approx(168.45)  # 123.45 + 45.00
+            assert result['negative_total'] == pytest.approx(5.99)
         finally:
             os.unlink(tmpfile)
 
