@@ -8,6 +8,7 @@ import os
 
 from .format_parser import parse_format_string, is_special_parser_type
 from .section_engine import load_sections, SectionParseError
+from .path_utils import resolve_data_source_paths
 
 # Try to import yaml, fall back to simple parsing if not available
 try:
@@ -379,12 +380,9 @@ def load_supplemental_sources(config, config_dir):
         if not source_name:
             continue
 
-        # Find the file
-        filepath = os.path.join(config_dir, '..', source['file'])
-        filepath = os.path.normpath(filepath)
-        if not os.path.exists(filepath):
-            filepath = os.path.join(os.path.dirname(config_dir), source['file'])
-        if not os.path.exists(filepath):
+        # Find files (supports directories and globs)
+        source_files, _ = resolve_data_source_paths(config_dir, source.get('file'))
+        if not source_files:
             continue
 
         format_spec = source.get('_format_spec')
@@ -393,74 +391,75 @@ def load_supplemental_sources(config, config_dir):
 
         # Parse the CSV file into row dicts
         rows = []
-        try:
-            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-                # Handle delimiter: None means comma (default)
-                delimiter = format_spec.delimiter
-                if delimiter == 'tab':
-                    delimiter = '\t'
-                elif delimiter == 'whitespace' or delimiter is None:
-                    delimiter = ','
+        for filepath in source_files:
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                    # Handle delimiter: None means comma (default)
+                    delimiter = format_spec.delimiter
+                    if delimiter == 'tab':
+                        delimiter = '\t'
+                    elif delimiter == 'whitespace' or delimiter is None:
+                        delimiter = ','
 
-                reader = csv.reader(f, delimiter=delimiter)
+                    reader = csv.reader(f, delimiter=delimiter)
 
-                # Skip header if specified
-                if format_spec.has_header:
-                    next(reader, None)
+                    # Skip header if specified
+                    if format_spec.has_header:
+                        next(reader, None)
 
-                # Build column map from format_spec
-                # custom_captures: {'symbol': 1, 'action': 2, ...}
-                column_map = {}
-                if format_spec.custom_captures:
-                    for name, col_idx in format_spec.custom_captures.items():
-                        column_map[name.lower()] = col_idx
+                    # Build column map from format_spec
+                    # custom_captures: {'symbol': 1, 'action': 2, ...}
+                    column_map = {}
+                    if format_spec.custom_captures:
+                        for name, col_idx in format_spec.custom_captures.items():
+                            column_map[name.lower()] = col_idx
 
-                # Add standard columns
-                column_map['date'] = format_spec.date_column
-                column_map['amount'] = format_spec.amount_column
-                if format_spec.description_column is not None:
-                    column_map['description'] = format_spec.description_column
-                if format_spec.location_column is not None:
-                    column_map['location'] = format_spec.location_column
+                    # Add standard columns
+                    column_map['date'] = format_spec.date_column
+                    column_map['amount'] = format_spec.amount_column
+                    if format_spec.description_column is not None:
+                        column_map['description'] = format_spec.description_column
+                    if format_spec.location_column is not None:
+                        column_map['location'] = format_spec.location_column
 
-                for line in reader:
-                    if not line or all(not cell.strip() for cell in line):
-                        continue
-
-                    # Parse row according to column map
-                    row = {}
-                    for field_name, col_idx in column_map.items():
-                        if col_idx >= len(line):
+                    for line in reader:
+                        if not line or all(not cell.strip() for cell in line):
                             continue
 
-                        value = line[col_idx].strip()
+                        # Parse row according to column map
+                        row = {}
+                        for field_name, col_idx in column_map.items():
+                            if col_idx >= len(line):
+                                continue
 
-                        # Type conversion
-                        if field_name == 'date':
-                            try:
-                                row[field_name] = datetime.strptime(value, format_spec.date_format).date()
-                            except ValueError:
+                            value = line[col_idx].strip()
+
+                            # Type conversion
+                            if field_name == 'date':
+                                try:
+                                    row[field_name] = datetime.strptime(value, format_spec.date_format).date()
+                                except ValueError:
+                                    row[field_name] = value
+                            elif field_name in ('amount', 'item_amount', 'price', 'total', 'proceeds', 'costbasis', 'gainloss', 'grosspay', 'federal', 'state', 'socialsec', 'medicare', '401k', 'hsa', 'netpay', 'shares'):
+                                try:
+                                    # Handle decimal separator
+                                    decimal_sep = source.get('decimal_separator', '.')
+                                    if decimal_sep != '.':
+                                        value = value.replace(decimal_sep, '.')
+                                    # Remove currency symbols
+                                    value = value.replace('$', '').replace(',', '').strip()
+                                    row[field_name] = float(value) if value else 0.0
+                                except ValueError:
+                                    row[field_name] = 0.0
+                            else:
                                 row[field_name] = value
-                        elif field_name in ('amount', 'item_amount', 'price', 'total', 'proceeds', 'costbasis', 'gainloss', 'grosspay', 'federal', 'state', 'socialsec', 'medicare', '401k', 'hsa', 'netpay', 'shares'):
-                            try:
-                                # Handle decimal separator
-                                decimal_sep = source.get('decimal_separator', '.')
-                                if decimal_sep != '.':
-                                    value = value.replace(decimal_sep, '.')
-                                # Remove currency symbols
-                                value = value.replace('$', '').replace(',', '').strip()
-                                row[field_name] = float(value) if value else 0.0
-                            except ValueError:
-                                row[field_name] = 0.0
-                        else:
-                            row[field_name] = value
 
-                    if row:
-                        rows.append(row)
+                        if row:
+                            rows.append(row)
 
-        except Exception:
-            # Skip sources that can't be loaded
-            continue
+            except Exception:
+                # Skip files that can't be loaded
+                continue
 
         if rows:
             data_sources[source_name] = rows

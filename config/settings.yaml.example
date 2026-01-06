@@ -22,6 +22,13 @@ data_sources:
   - name: BOA
     file: data/boa-checking.txt
     type: boa
+  # Folder + glob examples (CSV only):
+  # - name: Exports (top-level only)
+  #   file: data/exports/          # loads all *.csv in this folder
+  # - name: Monthly Exports
+  #   file: data/exports/*.csv     # top-level glob
+  # - name: All Exports (recursive)
+  #   file: data/exports/**/*.csv  # recursive glob
   # European format example (semicolon-delimited with comma decimals):
   # - name: European Bank
   #   file: data/export.csv

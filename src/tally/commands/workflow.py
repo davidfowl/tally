@@ -101,6 +101,8 @@ def cmd_workflow(args):
         print(f"       {C.DIM}data_sources:")
         print(f"         - name: My Card")
         print(f"           file: data/transactions.csv")
+        print(f"           {C.DIM}# or: data/exports/*.csv (top-level)")
+        print(f"           {C.DIM}# or: data/exports/**/*.csv (recursive){C.RESET}")
         print(f"           format: \"{{date:%m/%d/%Y}},{{description}},{{amount}}\"{C.RESET}")
         print()
         section("Then: Categorize Transactions")

@@ -10,6 +10,7 @@ from ..cli_utils import resolve_config_dir
 from ..classification import SPECIAL_TAGS
 from ..config_loader import load_config
 from ..merchant_utils import get_all_rules, diagnose_rules, get_transforms
+from ..path_utils import resolve_data_source_paths
 
 
 def cmd_diag(args):
@@ -137,14 +138,20 @@ def cmd_diag(args):
         else:
             missing_sources = []
             for source in data_sources:
-                filepath = os.path.join(budget_dir, source['file'])
-                if not os.path.exists(filepath):
-                    missing_sources.append(source['file'])
+                files, kind = resolve_data_source_paths(config_dir, source.get('file'))
+                if not files:
+                    missing_sources.append((source.get('file'), kind))
             if missing_sources:
-                config_issues.append(f"Missing data files: {', '.join(missing_sources)}")
-                for f in missing_sources:
+                missing_names = ', '.join(f for f, _ in missing_sources)
+                config_issues.append(f"Missing data files: {missing_names}")
+                for f, kind in missing_sources:
                     print(f"  {C.RED}✗{C.RESET}  data source: {f}")
-                    print(f"       File not found")
+                    if kind == 'glob':
+                        print(f"       No files matched")
+                    elif kind == 'dir':
+                        print(f"       No CSV files found")
+                    else:
+                        print(f"       File not found")
             else:
                 print(f"  {C.GREEN}✓{C.RESET}  data_sources: {len(data_sources)} configured, all files exist")
 
@@ -175,8 +182,13 @@ def cmd_diag(args):
             print(f"      → {resolved} ({exists})")
         for source in config.get('data_sources', []):
             sf = source['file']
-            resolved = os.path.join(budget_dir, sf)
-            exists = "exists" if os.path.exists(resolved) else "NOT FOUND"
+            resolved_files, kind = resolve_data_source_paths(config_dir, sf)
+            if resolved_files:
+                resolved = resolved_files[0] if len(resolved_files) == 1 else f"{resolved_files[0]} (+{len(resolved_files) - 1} more)"
+                exists = "exists"
+            else:
+                resolved = os.path.join(budget_dir, sf)
+                exists = "NOT FOUND" if kind == 'missing' else "NO MATCHES"
             print(f"    data_source: {sf}")
             print(f"      → {resolved} ({exists})")
     print()
@@ -195,10 +207,7 @@ def cmd_diag(args):
             print()
 
         for i, source in enumerate(config['data_sources'], 1):
-            filepath = os.path.join(config_dir, '..', source['file'])
-            filepath = os.path.normpath(filepath)
-            if not os.path.exists(filepath):
-                filepath = os.path.join(os.path.dirname(config_dir), source['file'])
+            files, _ = resolve_data_source_paths(config_dir, source.get('file'))
 
             # Show supplemental badge
             is_supplemental = source.get('supplemental', False)
@@ -207,14 +216,17 @@ def cmd_diag(args):
             print(f"     File: {source['file']}")
 
             # Show file exists + row count
-            if os.path.exists(filepath):
+            if files:
                 try:
                     import csv
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        reader = csv.reader(f)
-                        next(reader, None)  # Skip header
-                        row_count = sum(1 for _ in reader)
-                    print(f"     Exists: True ({row_count} rows)")
+                    row_count = 0
+                    for filepath in files:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            reader = csv.reader(f)
+                            next(reader, None)  # Skip header
+                            row_count += sum(1 for _ in reader)
+                    files_note = f" ({len(files)} files)" if len(files) > 1 else ""
+                    print(f"     Exists: True ({row_count} rows){files_note}")
                 except Exception:
                     print(f"     Exists: True")
             else:

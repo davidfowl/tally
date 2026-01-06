@@ -12,6 +12,7 @@ from ..cli_utils import (
     warn_deprecated_parser,
     print_deprecation_warnings,
 )
+from ..path_utils import resolve_data_source_paths
 from ..config_loader import load_config, load_supplemental_sources
 from ..merchant_utils import get_transforms
 from ..migrations import check_merchant_migration
@@ -96,48 +97,58 @@ def cmd_run(args):
         if source.get('_supplemental', False):
             continue
 
-        filepath = os.path.join(config_dir, '..', source['file'])
-        filepath = os.path.normpath(filepath)
-
-        if not os.path.exists(filepath):
-            # Try relative to config_dir parent
-            filepath = os.path.join(os.path.dirname(config_dir), source['file'])
-
-        if not os.path.exists(filepath):
+        source_files, match_kind = resolve_data_source_paths(config_dir, source.get('file'))
+        if not source_files:
             if not args.quiet:
-                print(f"  {source['name']}: File not found - {source['file']}")
+                if match_kind == 'glob':
+                    print(f"  {source['name']}: No files matched - {source['file']}")
+                elif match_kind == 'dir':
+                    print(f"  {source['name']}: No CSV files found - {source['file']}")
+                else:
+                    print(f"  {source['name']}: File not found - {source['file']}")
             continue
 
         # Get parser type and format spec (set by config_loader.resolve_source_format)
         parser_type = source.get('_parser_type', source.get('type', '')).lower()
         format_spec = source.get('_format_spec')
 
-        try:
-            if parser_type == 'amex':
-                warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules)
-            elif parser_type == 'boa':
-                warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules)
-            elif parser_type == 'generic' and format_spec:
-                txns = parse_generic_csv(filepath, format_spec, rules,
-                                         source_name=source.get('name', 'CSV'),
-                                         decimal_separator=source.get('decimal_separator', '.'),
-                                         transforms=transforms,
-                                         data_sources=supplemental_data)
-            else:
+        source_txns = []
+        unknown_parser = False
+        for filepath in source_files:
+            try:
+                if parser_type == 'amex':
+                    warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', filepath)
+                    txns = parse_amex(filepath, rules)
+                elif parser_type == 'boa':
+                    warn_deprecated_parser(source.get('name', 'BOA'), 'boa', filepath)
+                    txns = parse_boa(filepath, rules)
+                elif parser_type == 'generic' and format_spec:
+                    txns = parse_generic_csv(filepath, format_spec, rules,
+                                             source_name=source.get('name', 'CSV'),
+                                             decimal_separator=source.get('decimal_separator', '.'),
+                                             transforms=transforms,
+                                             data_sources=supplemental_data)
+                else:
+                    if not args.quiet:
+                        print(f"  {source['name']}: Unknown parser type '{parser_type}'")
+                        print(f"    Use 'tally inspect {source['file']}' to determine format")
+                    unknown_parser = True
+                    break
+            except Exception as e:
                 if not args.quiet:
-                    print(f"  {source['name']}: Unknown parser type '{parser_type}'")
-                    print(f"    Use 'tally inspect {source['file']}' to determine format")
+                    print(f"  {source['name']}: Error parsing {filepath} - {e}")
                 continue
-        except Exception as e:
-            if not args.quiet:
-                print(f"  {source['name']}: Error parsing - {e}")
+
+            source_txns.extend(txns)
+
+        if unknown_parser:
             continue
 
-        all_txns.extend(txns)
+        if source_txns:
+            all_txns.extend(source_txns)
         if not args.quiet:
-            print(f"  {source['name']}: {len(txns)} transactions")
+            files_note = f" ({len(source_files)} files)" if len(source_files) > 1 else ""
+            print(f"  {source['name']}: {len(source_txns)} transactions{files_note}")
 
     if not all_txns:
         print("Error: No transactions found", file=sys.stderr)

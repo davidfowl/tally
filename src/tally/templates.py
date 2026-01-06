@@ -21,6 +21,14 @@ data_sources:
   # - name: Checking
   #   file: data/checking.csv
   #   format: "{{date:%Y-%m-%d}},{{description}},{{-amount}}"
+  #
+  # Folder + glob examples (CSV only):
+  # - name: Exports (top-level only)
+  #   file: data/exports/          # loads all *.csv in this folder
+  # - name: Monthly Exports
+  #   file: data/exports/*.csv     # top-level glob
+  # - name: All Exports (recursive)
+  #   file: data/exports/**/*.csv  # recursive glob
 
 output_dir: output
 html_filename: spending_summary.html

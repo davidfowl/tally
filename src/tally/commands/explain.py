@@ -12,6 +12,7 @@ from ..cli_utils import (
     warn_deprecated_parser,
     print_deprecation_warnings,
 )
+from ..path_utils import resolve_data_source_paths
 from ..config_loader import load_config
 from ..merchant_utils import get_all_rules, get_transforms, explain_description
 from ..analyzer import parse_amex, parse_boa, parse_generic_csv
@@ -61,34 +62,32 @@ def cmd_explain(args):
     # Parse transactions (quietly)
     all_txns = []
     for source in data_sources:
-        filepath = os.path.join(config_dir, '..', source['file'])
-        filepath = os.path.normpath(filepath)
-        if not os.path.exists(filepath):
-            filepath = os.path.join(os.path.dirname(config_dir), source['file'])
-        if not os.path.exists(filepath):
+        source_files, _ = resolve_data_source_paths(config_dir, source.get('file'))
+        if not source_files:
             continue
 
         parser_type = source.get('_parser_type', source.get('type', '')).lower()
         format_spec = source.get('_format_spec')
 
-        try:
-            if parser_type == 'amex':
-                warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', source['file'])
-                txns = parse_amex(filepath, rules)
-            elif parser_type == 'boa':
-                warn_deprecated_parser(source.get('name', 'BOA'), 'boa', source['file'])
-                txns = parse_boa(filepath, rules)
-            elif parser_type == 'generic' and format_spec:
-                txns = parse_generic_csv(filepath, format_spec, rules,
-                                         source_name=source.get('name', 'CSV'),
-                                         decimal_separator=source.get('decimal_separator', '.'),
-                                         transforms=transforms)
-            else:
+        for filepath in source_files:
+            try:
+                if parser_type == 'amex':
+                    warn_deprecated_parser(source.get('name', 'AMEX'), 'amex', filepath)
+                    txns = parse_amex(filepath, rules)
+                elif parser_type == 'boa':
+                    warn_deprecated_parser(source.get('name', 'BOA'), 'boa', filepath)
+                    txns = parse_boa(filepath, rules)
+                elif parser_type == 'generic' and format_spec:
+                    txns = parse_generic_csv(filepath, format_spec, rules,
+                                             source_name=source.get('name', 'CSV'),
+                                             decimal_separator=source.get('decimal_separator', '.'),
+                                             transforms=transforms)
+                else:
+                    break
+            except Exception:
                 continue
-        except Exception:
-            continue
 
-        all_txns.extend(txns)
+            all_txns.extend(txns)
 
     if not all_txns:
         print("Error: No transactions found", file=sys.stderr)

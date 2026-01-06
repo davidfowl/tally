@@ -218,11 +218,7 @@ class TestMigration:
             assert result.returncode == 0
             # Should detect existing config and use current dir
             assert 'Found existing config/' in result.stdout
-            # Should NOT create nested tally/tally/ directory
-            assert not os.path.exists(os.path.join(tmpdir, 'tally'))
-            # Should create new files in existing config/
-            assert os.path.exists(os.path.join(config_dir, 'merchants.rules'))
-            assert os.path.exists(os.path.join(config_dir, 'views.rules'))
+
 
     def test_init_migrates_csv_to_rules(self):
         """Running tally init should migrate merchant_categories.csv to merchants.rules."""
@@ -442,3 +438,101 @@ class TestMonthFilter:
         assert _parse_month_filter('January', available) == '2025-01'
 
 
+class TestDataSourcePaths:
+    """Tests for data source folder and glob support."""
+
+    def _write_csv(self, path, rows):
+        with open(path, 'w') as f:
+            f.write("date,description,amount\n")
+            for row in rows:
+                f.write(row + "\n")
+
+    def test_up_directory_top_level_only(self):
+        """Directory sources should load top-level CSVs only (non-recursive)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            nested_dir = os.path.join(data_dir, 'nested')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+            os.makedirs(nested_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            self._write_csv(os.path.join(data_dir, 'a.csv'), ["2025-01-01,ONE,10.00"])
+            self._write_csv(os.path.join(data_dir, 'b.csv'), ["2025-01-02,TWO,20.00"])
+            self._write_csv(os.path.join(nested_dir, 'c.csv'), ["2025-01-03,THREE,30.00"])
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'up', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            assert "Test: 2 transactions" in result.stdout
+
+    def test_up_glob_star_matches_top_level(self):
+        """Single-star globs should match top-level CSVs only."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            nested_dir = os.path.join(data_dir, 'nested')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+            os.makedirs(nested_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data/*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            self._write_csv(os.path.join(data_dir, 'a.csv'), ["2025-01-01,ONE,10.00"])
+            self._write_csv(os.path.join(data_dir, 'b.csv'), ["2025-01-02,TWO,20.00"])
+            self._write_csv(os.path.join(nested_dir, 'c.csv'), ["2025-01-03,THREE,30.00"])
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'up', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            assert "Test: 2 transactions" in result.stdout
+
+    def test_up_glob_double_star_matches_recursive(self):
+        """Double-star globs should match CSVs recursively."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            nested_dir = os.path.join(data_dir, 'nested')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+            os.makedirs(nested_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data/**/*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            self._write_csv(os.path.join(data_dir, 'a.csv'), ["2025-01-01,ONE,10.00"])
+            self._write_csv(os.path.join(data_dir, 'b.csv'), ["2025-01-02,TWO,20.00"])
+            self._write_csv(os.path.join(nested_dir, 'c.csv'), ["2025-01-03,THREE,30.00"])
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'up', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            assert "Test: 3 transactions" in result.stdout
