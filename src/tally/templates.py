@@ -18,6 +18,11 @@ data_sources:
   #   {{-amount}}  - Flip sign (bank statements where negative = expense)
   #   {{+amount}}  - Absolute value (mixed-sign sources like escrow accounts)
   #
+  # Optional fee column (added to amount):
+  #   {{fee}}      - Fee column added to amount
+  #   {{-fee}}     - Flip fee sign
+  #   {{+fee}}     - Absolute fee
+  #
   # - name: Checking
   #   file: data/checking.csv
   #   format: "{{date:%Y-%m-%d}},{{description}},{{-amount}}"

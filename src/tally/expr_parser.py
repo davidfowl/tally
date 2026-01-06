@@ -157,6 +157,7 @@ class TransactionContext:
     Provides primitives for transaction-level matching:
     - description: Raw transaction description (string)
     - amount: Transaction amount (float, absolute value)
+    - fee: Transaction fee (float, signed, added into amount)
     - date: Transaction date (date object)
     - month: Month number 1-12
     - year: Year (e.g., 2025)
@@ -168,7 +169,7 @@ class TransactionContext:
     - data_sources: Dict mapping source names to list of row dicts (for queries)
     """
 
-    __slots__ = ('description', 'amount', 'date', 'variables', 'field', 'source',
+    __slots__ = ('description', 'amount', 'fee', 'date', 'variables', 'field', 'source',
                  'month', 'year', 'day', 'weekday', 'location', 'data_sources')
 
     # Class-level function name mapping (looked up dynamically)
@@ -183,6 +184,7 @@ class TransactionContext:
         self,
         description: str = "",
         amount: float = 0.0,
+        fee: float = 0.0,
         date: Optional[date_type] = None,
         variables: Optional[Dict[str, Any]] = None,
         field: Optional[Dict[str, str]] = None,
@@ -192,6 +194,7 @@ class TransactionContext:
     ):
         self.description = description
         self.amount = amount  # Preserve sign - use abs(amount) in rules if needed
+        self.fee = fee
         self.date = date
         self.variables = variables or {}
         self.field = field  # Custom captures from CSV format string (None if not available)
@@ -499,6 +502,7 @@ class TransactionContext:
         return cls(
             description=txn.get('description', txn.get('raw_description', '')),
             amount=txn.get('amount', 0.0),
+            fee=txn.get('fee', 0.0),
             date=txn.get('date'),
             variables=variables,
             field=txn.get('field'),
@@ -921,6 +925,8 @@ class TransactionEvaluator:
             return self.ctx.description
         if name == 'amount':
             return self.ctx.amount
+        if name == 'fee':
+            return self.ctx.fee
         if name == 'date':
             return self.ctx.date
         if name == 'month':
@@ -1055,6 +1061,8 @@ class TransactionEvaluator:
                 return self.ctx.description
             elif attr_name == 'amount':
                 return self.ctx.amount
+            elif attr_name == 'fee':
+                return self.ctx.fee
             elif attr_name == 'date':
                 return self.ctx.date
             elif attr_name == 'source':
@@ -1070,7 +1078,7 @@ class TransactionEvaluator:
             elif attr_name == 'weekday':
                 return self.ctx.weekday
             else:
-                available = ['description', 'amount', 'date', 'source', 'location',
+                available = ['description', 'amount', 'fee', 'date', 'source', 'location',
                              'month', 'year', 'day', 'weekday']
                 raise ExpressionError(
                     f"Unknown txn attribute: txn.{node.attr}. "

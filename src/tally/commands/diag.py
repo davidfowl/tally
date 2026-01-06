@@ -235,6 +235,8 @@ def cmd_diag(args):
                 print(f"     Columns:")
                 print(f"       date: column {format_spec.date_column} (format: {format_spec.date_format})")
                 print(f"       amount: column {format_spec.amount_column}")
+                if format_spec.fee_column is not None:
+                    print(f"       fee: column {format_spec.fee_column}")
                 if format_spec.description_column is not None:
                     print(f"       description: column {format_spec.description_column}")
                 if format_spec.custom_captures:
@@ -246,6 +248,12 @@ def cmd_diag(args):
                     print(f"       location: column {format_spec.location_column}")
                 if format_spec.negate_amount:
                     print(f"     Amount negation: enabled")
+                if format_spec.abs_amount:
+                    print(f"     Amount absolute: enabled")
+                if format_spec.negate_fee:
+                    print(f"     Fee negation: enabled")
+                if format_spec.abs_fee:
+                    print(f"     Fee absolute: enabled")
             print()
 
     # Merchant rules diagnostics

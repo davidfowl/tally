@@ -16,6 +16,7 @@ class FormatSpec:
     date_column: int
     date_format: str
     amount_column: int
+    fee_column: Optional[int] = None
     description_column: Optional[int] = None  # Mode 1: single {description}
     custom_captures: Optional[dict] = None    # Mode 2: {type}, {merchant}, etc.
     description_template: Optional[str] = None  # Mode 2: "{merchant} - {type}"
@@ -25,6 +26,8 @@ class FormatSpec:
     source_name: Optional[str] = None  # Optional override for transaction source
     negate_amount: bool = False  # If True, flip the sign of amounts (use {-amount} in format)
     abs_amount: bool = False  # If True, take absolute value of amounts (use {+amount} in format)
+    negate_fee: bool = False  # If True, flip the sign of fees (use {-fee} in format)
+    abs_fee: bool = False  # If True, take absolute value of fees (use {+fee} in format)
     delimiter: Optional[str] = None  # Column delimiter: None=comma, 'tab', 'whitespace', or regex pattern
 
 
@@ -41,6 +44,9 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
         {field:format}    - Field with format specifier (e.g., date format)
         {-amount}         - Negate amount (flip sign, credits become debits)
         {+amount}         - Absolute value (all amounts become positive)
+        {fee}             - Fee column (added to amount)
+        {-fee}            - Negate fee (flip sign)
+        {+fee}            - Absolute value for fee
         {_}               - Skip this column
         {*}               - Skip this column (alias for {_})
 
@@ -55,6 +61,7 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
         Mode 1: "{date:%m/%d/%Y}, {description}, {amount}"
         Mode 2: "{date:%m/%d/%Y}, {type}, {merchant}, {amount}"
                 with description_template="{merchant} ({type})"
+        With fees: "{date:%m/%d/%Y}, {description}, {amount}, {fee}"
 
     Args:
         format_str: The format string to parse
@@ -81,6 +88,9 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
     date_format = '%m/%d/%Y'  # Default
     negate_amount = False
     abs_amount = False
+    fee_column = None
+    negate_fee = False
+    abs_fee = False
 
     for idx, part in enumerate(parts):
         match = field_pattern.match(part)
@@ -112,6 +122,18 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
                     negate_amount = True
                 elif negate_prefix == '+':
                     abs_amount = True
+        elif field_name == 'fee':
+            # Fee is a special custom capture (kept in field.*) and contributes to amount
+            if fee_column is not None:
+                raise ValueError(f"Duplicate field 'fee' at column {idx}")
+            fee_column = idx
+            if field_name in custom_captures:
+                raise ValueError(f"Duplicate custom capture '{field_name}' at column {idx}")
+            custom_captures[field_name] = idx
+            if negate_prefix == '-':
+                negate_fee = True
+            elif negate_prefix == '+':
+                abs_fee = True
         else:
             # Custom capture for description template
             if field_name in custom_captures:
@@ -166,6 +188,7 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
         date_column=field_positions['date'],
         date_format=date_format,
         amount_column=field_positions['amount'],
+        fee_column=fee_column,
         description_column=field_positions.get('description'),
         custom_captures=custom_captures if custom_captures else None,
         description_template=description_template,
@@ -174,6 +197,8 @@ def parse_format_string(format_str: str, description_template: Optional[str] = N
         has_header=True,
         negate_amount=negate_amount,
         abs_amount=abs_amount,
+        negate_fee=negate_fee,
+        abs_fee=abs_fee,
         delimiter=None  # Will be set by config_loader if specified
     )
 

@@ -226,6 +226,8 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
                 required_cols.extend(format_spec.custom_captures.values())
             if format_spec.extra_fields:
                 required_cols.extend(format_spec.extra_fields.values())
+            if format_spec.fee_column is not None:
+                required_cols.append(format_spec.fee_column)
             if format_spec.location_column is not None:
                 required_cols.append(format_spec.location_column)
             max_col = max(required_cols)
@@ -236,6 +238,9 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
             # Extract values
             date_str = row[format_spec.date_column].strip()
             amount_str = row[format_spec.amount_column].strip()
+            fee_str = None
+            if format_spec.fee_column is not None and format_spec.fee_column < len(row):
+                fee_str = row[format_spec.fee_column].strip()
 
             # Build description from either mode
             # Also capture custom fields for use in rule expressions (field.name)
@@ -267,6 +272,20 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
             # Parse amount (handle locale-specific formats)
             amount = parse_amount(amount_str, decimal_separator)
 
+            # Parse fee (optional, added to amount)
+            fee = None
+            if format_spec.fee_column is not None:
+                fee = 0.0
+                if fee_str:
+                    try:
+                        fee = parse_amount(fee_str, decimal_separator)
+                    except ValueError:
+                        fee = 0.0
+                if format_spec.abs_fee:
+                    fee = abs(fee)
+                elif format_spec.negate_fee:
+                    fee = -fee
+
             # Apply amount modifier if specified
             if format_spec.abs_amount:
                 # Absolute value: all amounts become positive (for mixed-sign sources)
@@ -275,7 +294,11 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
                 # Negate: flip sign (for credit cards where positive = charge)
                 amount = -amount
 
-            # Skip zero amounts
+            # Add fee after amount modifiers
+            if format_spec.fee_column is not None and fee is not None:
+                amount = amount + fee
+
+            # Skip zero amounts (after fee)
             if amount == 0:
                 continue
 
@@ -292,6 +315,7 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
             # Normalize merchant
             merchant, category, subcategory, match_info = normalize_merchant(
                 description, rules, amount=amount, txn_date=date.date(),
+                fee=fee,
                 field=captures if captures else None,
                 data_source=format_spec.source_name or source_name,
                 transforms=transforms,
@@ -315,6 +339,8 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
                 'excluded': None,  # No auto-exclusion; use rules to categorize
                 'field': captures if captures else None,  # Custom CSV captures for rule expressions
             }
+            if format_spec.fee_column is not None and fee is not None:
+                txn['fee'] = fee
             # Add _raw_* keys from transforms (e.g., _raw_description)
             if match_info and match_info.get('raw_values'):
                 for key, value in match_info['raw_values'].items():

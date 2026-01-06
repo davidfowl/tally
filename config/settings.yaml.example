@@ -37,6 +37,11 @@ data_sources:
   #   format: "{date:%d.%m.%Y},{_},{txn_type},{vendor},{_},{amount}"
   #   columns:
   #     description: "{vendor} ({txn_type})"  # Combines columns into description
+  #
+  # Optional fee column (added to amount):
+  # - name: Checking
+  #   file: data/checking.csv
+  #   format: "{date:%m/%d/%Y},{description},{amount},{fee}"
 
 # Output settings
 output_dir: output

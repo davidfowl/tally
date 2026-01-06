@@ -210,6 +210,9 @@ def cmd_inspect(args):
             print(f"    {{amount}}   - use values as-is")
             print(f"    {{-amount}}  - negate (flip sign)")
             print(f"    {{+amount}}  - absolute value")
+            print(f"    {{fee}}      - fee column added to amount")
+            print(f"    {{-fee}}     - negate fee")
+            print(f"    {{+fee}}     - absolute fee")
 
         # Detect currency symbol from amount column
         currency_symbol = _detect_currency_symbol(filepath, spec.amount_column, has_header=True, dialect=dialect)

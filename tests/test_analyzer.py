@@ -1062,6 +1062,88 @@ class TestAmountSignHandling:
             os.unlink(f.name)
 
 
+class TestFeeColumn:
+    """Tests for optional fee columns added into amounts."""
+
+    def test_fee_column_added_to_amount(self):
+        """Fees are added to the amount when {fee} is present."""
+        csv_content = """Date,Description,Amount,Fee
+01/15/2025,COFFEE SHOP,5.00,0.25
+01/16/2025,REFUND,-10.00,0.00
+01/17/2025,NO FEE,20.00,
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%m/%d/%Y}, {description}, {amount}, {fee}')
+
+            from tally.analyzer import parse_generic_csv
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 3
+            assert txns[0]['amount'] == 5.25
+            assert txns[0]['fee'] == 0.25
+            assert txns[1]['amount'] == -10.00
+            assert txns[1]['fee'] == 0.0
+            assert txns[1]['is_credit'] == True
+            assert txns[2]['amount'] == 20.00
+            assert txns[2]['fee'] == 0.0
+        finally:
+            os.unlink(f.name)
+
+    def test_fee_modifier_negates_fee(self):
+        """{ -fee } flips fee sign before it is added to amount."""
+        csv_content = """Date,Description,Amount,Fee
+01/15/2025,ATM WITHDRAWAL,-20.00,2.50
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = get_all_rules()
+            format_spec = parse_format_string('{date:%m/%d/%Y}, {description}, {amount}, {-fee}')
+
+            from tally.analyzer import parse_generic_csv
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 1
+            assert txns[0]['amount'] == -22.50
+            assert txns[0]['fee'] == -2.50
+        finally:
+            os.unlink(f.name)
+
+    def test_fee_variable_in_rules(self):
+        """fee can be used in rule expressions."""
+        csv_content = """Date,Description,Amount,Fee
+01/15/2025,SERVICE CHARGE,0.00,10.00
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            rules = [
+                ('fee > 0', 'Bank Fee', 'Fees', 'Service', None, 'test', ['fee']),
+            ]
+
+            format_spec = parse_format_string('{date:%m/%d/%Y}, {description}, {amount}, {fee}')
+
+            from tally.analyzer import parse_generic_csv
+            txns = parse_generic_csv(f.name, format_spec, rules)
+
+            assert len(txns) == 1
+            assert txns[0]['merchant'] == 'Bank Fee'
+            assert txns[0]['category'] == 'Fees'
+            assert txns[0]['amount'] == 10.00
+            assert txns[0]['fee'] == 10.00
+        finally:
+            os.unlink(f.name)
+
+
 class TestSpecialTags:
     """Tests for special tags that affect spending analysis (income, transfer)."""
 

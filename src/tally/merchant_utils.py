@@ -492,6 +492,7 @@ def normalize_merchant(
     description: str,
     rules: list,
     amount: Optional[float] = None,
+    fee: Optional[float] = None,
     txn_date: Optional[date] = None,
     field: Optional[Dict[str, str]] = None,
     data_source: Optional[str] = None,
@@ -510,6 +511,7 @@ def normalize_merchant(
         rules: List of (pattern, merchant, category, subcategory, parsed_pattern, source, tags) tuples
               or older formats with fewer elements
         amount: Optional transaction amount for modifier matching
+        fee: Optional transaction fee for expression matching
         txn_date: Optional transaction date for modifier matching
         field: Optional dict of custom CSV captures (for field.name in rule expressions)
         data_source: Optional data source name (for source variable in rule expressions and dynamic tags)
@@ -526,7 +528,14 @@ def normalize_merchant(
     from tally import expr_parser
 
     # Build transaction context for transforms
-    transaction = {'description': description, 'amount': amount or 0, 'field': field, 'source': data_source, 'location': location}
+    transaction = {
+        'description': description,
+        'amount': amount or 0,
+        'fee': fee or 0,
+        'field': field,
+        'source': data_source,
+        'location': location,
+    }
     if txn_date:
         transaction['date'] = txn_date
 
@@ -678,7 +687,7 @@ def _is_expression_pattern(pattern: str) -> bool:
     # - Parenthesized expressions
     # - Variable comparisons like amount > 500, month == 12, source == "Amex"
     function_pattern = r'^(contains|normalized|anyof|startswith|fuzzy|regex|extract|split|substring|trim|exists)\s*\('
-    variable_pattern = r'^(amount|month|year|day|source|description)\s*[<>=!]'
+    variable_pattern = r'^(amount|fee|month|year|day|source|description)\s*[<>=!]'
     return bool(re.match(function_pattern, pattern)) or \
            bool(re.match(variable_pattern, pattern)) or \
            pattern.startswith('field.') or \

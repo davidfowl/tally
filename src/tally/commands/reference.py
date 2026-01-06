@@ -288,6 +288,7 @@ def cmd_reference(args):
   Use {C.GREEN}txn.{C.RESET} prefix for explicit transaction field access:
 
   {C.GREEN}txn.amount{C.RESET}        Transaction amount
+  {C.GREEN}txn.fee{C.RESET}           Transaction fee (added into amount)
   {C.GREEN}txn.date{C.RESET}          Transaction date
   {C.GREEN}txn.description{C.RESET}   Transaction description
   {C.GREEN}txn.source{C.RESET}        Data source name
@@ -300,7 +301,7 @@ def cmd_reference(args):
   {C.DIM}# Match by amount{C.RESET}
   {C.CYAN}any(r for r in orders if r.amount == txn.amount){C.RESET}
 
-  {C.DIM}Bare names (amount, date) also work when unambiguous.{C.RESET}
+  {C.DIM}Bare names (amount, fee, date) also work when unambiguous.{C.RESET}
 """)
 
         section("Tag-Only Rules")

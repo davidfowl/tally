@@ -418,6 +418,8 @@ def load_supplemental_sources(config, config_dir):
                 # Add standard columns
                 column_map['date'] = format_spec.date_column
                 column_map['amount'] = format_spec.amount_column
+                if format_spec.fee_column is not None:
+                    column_map['fee'] = format_spec.fee_column
                 if format_spec.description_column is not None:
                     column_map['description'] = format_spec.description_column
                 if format_spec.location_column is not None:
@@ -441,7 +443,7 @@ def load_supplemental_sources(config, config_dir):
                                 row[field_name] = datetime.strptime(value, format_spec.date_format).date()
                             except ValueError:
                                 row[field_name] = value
-                        elif field_name in ('amount', 'item_amount', 'price', 'total', 'proceeds', 'costbasis', 'gainloss', 'grosspay', 'federal', 'state', 'socialsec', 'medicare', '401k', 'hsa', 'netpay', 'shares'):
+                        elif field_name in ('amount', 'fee', 'item_amount', 'price', 'total', 'proceeds', 'costbasis', 'gainloss', 'grosspay', 'federal', 'state', 'socialsec', 'medicare', '401k', 'hsa', 'netpay', 'shares'):
                             try:
                                 # Handle decimal separator
                                 decimal_sep = source.get('decimal_separator', '.')

@@ -102,7 +102,7 @@ def calculate_specificity(rule: MerchantRule) -> Tuple[int, int, int, int]:
     pattern_count = sum(expr.count(f) for f in pattern_funcs)
 
     # Count field constraints (amount, date, month, etc.)
-    field_keywords = ['amount', 'date', 'month', 'year', 'day', 'weekday', 'source', 'field.']
+    field_keywords = ['amount', 'fee', 'date', 'month', 'year', 'day', 'weekday', 'source', 'field.']
     field_count = sum(1 for kw in field_keywords if kw in expr)
 
     # Extract pattern text length (rough measure of specificity)
