@@ -82,6 +82,51 @@ Check https://github.com/${REPO}/pull/${pr_number}/checks"
     echo "$run_id"
 }
 
+# Migrate from old installation location
+migrate_old_installation() {
+    local old_install_dir="$HOME/.tally/bin"
+    local old_binary="${old_install_dir}/tally"
+    
+    if [[ -f "$old_binary" ]]; then
+        info "Found existing installation at ${old_install_dir}"
+        info "Migrating to ${INSTALL_DIR}..."
+        
+        # Remove old binary
+        rm -f "$old_binary"
+        
+        # Remove old directory if empty
+        if [[ -d "$old_install_dir" ]] && [[ -z "$(ls -A "$old_install_dir")" ]]; then
+            rmdir "$old_install_dir"
+        fi
+        if [[ -d "$HOME/.tally" ]] && [[ -z "$(ls -A "$HOME/.tally")" ]]; then
+            rmdir "$HOME/.tally"
+        fi
+        
+        # Clean up old PATH entries from shell config files
+        local config_files=(
+            "$HOME/.bashrc"
+            "$HOME/.bash_profile"
+            "$HOME/.zshrc"
+            "${ZDOTDIR:-$HOME}/.zshrc"
+            "$HOME/.profile"
+            "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+        )
+        
+        for config_file in "${config_files[@]}"; do
+            if [[ -f "$config_file" ]] && grep -q "/.tally/bin" "$config_file" 2>/dev/null; then
+                # Create backup
+                cp "$config_file" "${config_file}.bak"
+                # Remove lines containing .tally/bin
+                sed -i.tmp '/\.tally\/bin/d' "$config_file" 2>/dev/null || sed -i '' '/\.tally\/bin/d' "$config_file" 2>/dev/null
+                rm -f "${config_file}.tmp"
+                info "Cleaned up old PATH entry in $(basename "$config_file")"
+            fi
+        done
+        
+        info "Migration complete!"
+    fi
+}
+
 main() {
     local pr_number="$1"
 
@@ -94,6 +139,9 @@ Example: $0 42"
     check_gh
 
     info "Installing tally from PR #${pr_number}..."
+    
+    # Migrate from old installation if it exists
+    migrate_old_installation
 
     OS=$(detect_os)
     ARCH=$(detect_arch)

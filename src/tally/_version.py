@@ -237,6 +237,7 @@ def get_install_path():
     """Get the expected installation path for tally.
 
     Returns Path object for the install location based on platform.
+    For Unix systems, checks new location (~/.local/bin) first, then falls back to old location (~/.tally/bin).
     """
     import platform as plat
     from pathlib import Path
@@ -250,7 +251,14 @@ def get_install_path():
             return Path(local_app_data) / 'tally' / 'tally.exe'
     else:  # macOS, Linux
         home = Path.home()
-        return home / '.tally' / 'bin' / 'tally'
+        new_path = home / '.local' / 'bin' / 'tally'
+        old_path = home / '.tally' / 'bin' / 'tally'
+        
+        # If running from old location, return old path so update can work
+        # Otherwise return new location
+        if old_path.exists():
+            return old_path
+        return new_path
 
     return None
 
@@ -288,17 +296,29 @@ def perform_update(release_info: dict, force: bool = False) -> tuple[bool, str]:
     download_url = release_info['assets'][asset_name]
 
     # Determine install path
-    install_path = get_executable_path() or get_install_path()
+    current_path = get_executable_path()
+    install_path = current_path or get_install_path()
     if not install_path:
         return False, "Could not determine installation path"
 
     install_path = Path(install_path)
+    
+    # For Unix systems, migrate to new location if currently in old location
+    system = plat.system().lower()
+    if system != 'windows':
+        home = Path.home()
+        old_path = home / '.tally' / 'bin' / 'tally'
+        new_path = home / '.local' / 'bin' / 'tally'
+        
+        # If updating from old location, target new location instead
+        if current_path and current_path == old_path:
+            print(f"Migrating installation from {old_path} to {new_path}...")
+            install_path = new_path
 
     # Check if running from source (not frozen)
     if not getattr(__import__('sys'), 'frozen', False):
         return False, "Cannot self-update when running from source. Use: uv tool upgrade tally"
 
-    system = plat.system().lower()
     binary_name = 'tally.exe' if system == 'windows' else 'tally'
 
     try:
@@ -349,8 +369,34 @@ def perform_update(release_info: dict, force: bool = False) -> tuple[bool, str]:
             else:
                 # On Unix, atomic rename
                 shutil.copy2(new_binary, install_path)
+            
+            # Clean up old installation on Unix if we migrated
+            if system != 'windows' and current_path:
+                old_install = home / '.tally' / 'bin' / 'tally'
+                if current_path == old_install and install_path != old_install:
+                    try:
+                        if old_install.exists():
+                            old_install.unlink()
+                            print(f"Removed old installation at {old_install}")
+                        
+                        # Remove old directory if empty
+                        old_bin_dir = old_install.parent
+                        if old_bin_dir.exists() and not list(old_bin_dir.iterdir()):
+                            old_bin_dir.rmdir()
+                        old_tally_dir = old_bin_dir.parent
+                        if old_tally_dir.exists() and not list(old_tally_dir.iterdir()):
+                            old_tally_dir.rmdir()
+                            print(f"Removed old directory {old_tally_dir}")
+                    except Exception as e:
+                        # Don't fail the update if cleanup fails
+                        print(f"Note: Could not clean up old installation: {e}")
 
-            return True, f"Updated to v{release_info['version']}"
+            msg = f"Updated to v{release_info['version']}"
+            if system != 'windows' and current_path and current_path != install_path:
+                msg += f"\n\nInstalled to new location: {install_path}"
+                msg += f"\nTo complete migration, update your PATH to use ~/.local/bin instead of ~/.tally/bin"
+            
+            return True, msg
 
     except PermissionError:
         return False, f"Permission denied. Try running with elevated privileges or manually update at: {install_path}"
