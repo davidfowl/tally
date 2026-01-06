@@ -8,7 +8,7 @@ set -e
 #   brew install gh && gh auth login
 
 REPO="davidfowl/tally"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.tally/bin}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 # Colors
@@ -156,20 +156,20 @@ add_to_path() {
             else
                 config_file="$HOME/.bashrc"
             fi
-            path_line='export PATH="$HOME/.tally/bin:$PATH"'
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
         zsh)
             config_file="${ZDOTDIR:-$HOME}/.zshrc"
-            path_line='export PATH="$HOME/.tally/bin:$PATH"'
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
         fish)
             config_file="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
-            path_line='fish_add_path $HOME/.tally/bin'
+            path_line='fish_add_path $HOME/.local/bin'
             ;;
         *)
             # Fallback to .profile for other POSIX shells
             config_file="$HOME/.profile"
-            path_line='export PATH="$HOME/.tally/bin:$PATH"'
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
     esac
 
@@ -177,7 +177,7 @@ add_to_path() {
     mkdir -p "$(dirname "$config_file")"
 
     # Check if already added
-    if [[ -f "$config_file" ]] && grep -q "/.tally/bin" "$config_file" 2>/dev/null; then
+    if [[ -f "$config_file" ]] && grep -q "/.local/bin" "$config_file" 2>/dev/null; then
         return
     fi
 
