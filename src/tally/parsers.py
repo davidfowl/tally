@@ -355,7 +355,15 @@ def auto_detect_csv_format(filepath):
         return any(p in header_lower for p in patterns)
 
     with open(filepath, 'r', encoding='utf-8') as f:
-        reader = csv.reader(f)
+        # Detect CSV dialect (delimiter, quotechar, etc.)
+        sample = f.read(4096)
+        f.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample)
+        except csv.Error:
+            dialect = None
+
+        reader = csv.reader(f, dialect) if dialect else csv.reader(f)
         headers = next(reader, None)
 
         if not headers:

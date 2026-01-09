@@ -830,3 +830,74 @@ class TestDetectCurrencySymbol:
             assert symbol == 'USD'
         finally:
             os.unlink(tmpfile)
+
+
+class TestAutoDetectCsvFormat:
+    """Tests for auto_detect_csv_format function."""
+
+    def test_semicolon_delimiter_with_quotes(self):
+        """Test auto-detection of CSV with semicolon delimiter and quoted headers."""
+        from tally.parsers import auto_detect_csv_format
+
+        csv_content = '''"Extract";"Date";"Value Date";"Account";"Description";"Amount";"Currency"
+"001";"01/15/2025";"01/15/2025";"BE12345";"GROCERY STORE";"123.45";"EUR"
+"002";"01/16/2025";"01/16/2025";"BE12345";"COFFEE SHOP";"-5.99";"EUR"
+'''
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            spec = auto_detect_csv_format(tmpfile)
+
+            # Should correctly detect the columns
+            assert spec.date_column == 1  # "Date" column
+            assert spec.description_column == 4  # "Description" column
+            assert spec.amount_column == 5  # "Amount" column
+        finally:
+            os.unlink(tmpfile)
+
+    def test_standard_comma_delimiter(self):
+        """Test auto-detection of standard comma-delimited CSV."""
+        from tally.parsers import auto_detect_csv_format
+
+        csv_content = """Date,Description,Amount
+01/15/2025,GROCERY STORE,123.45
+01/16/2025,COFFEE SHOP,-5.99
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            spec = auto_detect_csv_format(tmpfile)
+
+            assert spec.date_column == 0
+            assert spec.description_column == 1
+            assert spec.amount_column == 2
+        finally:
+            os.unlink(tmpfile)
+
+    def test_missing_required_column_raises(self):
+        """Test that missing required columns raise ValueError."""
+        from tally.parsers import auto_detect_csv_format
+
+        # CSV without an amount column
+        csv_content = '''"Date";"Description";"Category"
+"01/15/2025";"GROCERY";"Food"
+'''
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            with pytest.raises(ValueError) as excinfo:
+                auto_detect_csv_format(tmpfile)
+
+            # Should mention amount as missing
+            assert 'amount' in str(excinfo.value).lower()
+            # Should list detected headers correctly (not merged into one)
+            assert 'Date' in str(excinfo.value)
+            assert 'Description' in str(excinfo.value)
+        finally:
+            os.unlink(tmpfile)
