@@ -151,6 +151,8 @@ def cmd_inspect(args):
         print(f"  - Date column: {spec.date_column} (format: {spec.date_format})")
         print(f"  - Description column: {spec.description_column}")
         print(f"  - Amount column: {spec.amount_column}")
+        if spec.delimiter:
+            print(f"  - Delimiter: {repr(spec.delimiter)}")
 
         # Build suggested format string
         max_col = max(spec.date_column, spec.description_column, spec.amount_column)
@@ -169,6 +171,8 @@ def cmd_inspect(args):
         format_str = ', '.join(cols)
         print(f"\n  Suggested format string:")
         print(f'    format: "{format_str}"')
+        if spec.delimiter:
+            print(f'    delimiter: "{spec.delimiter}"')
 
         # Analyze amount patterns - detailed analysis with both signs
         analysis = _analyze_amount_column_detailed(filepath, spec.amount_column, has_header=True, dialect=dialect)

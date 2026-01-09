@@ -854,6 +854,8 @@ class TestAutoDetectCsvFormat:
             assert spec.date_column == 1  # "Date" column
             assert spec.description_column == 4  # "Description" column
             assert spec.amount_column == 5  # "Amount" column
+            # Should detect semicolon delimiter
+            assert spec.delimiter == ';'
         finally:
             os.unlink(tmpfile)
 
@@ -875,6 +877,8 @@ class TestAutoDetectCsvFormat:
             assert spec.date_column == 0
             assert spec.description_column == 1
             assert spec.amount_column == 2
+            # Comma delimiter returns None (default)
+            assert spec.delimiter is None
         finally:
             os.unlink(tmpfile)
 

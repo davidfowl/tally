@@ -369,6 +369,11 @@ def auto_detect_csv_format(filepath):
         if not headers:
             raise ValueError("CSV file is empty or has no headers")
 
+    # Determine delimiter for FormatSpec (None means comma/default)
+    detected_delimiter = None
+    if dialect and dialect.delimiter != ',':
+        detected_delimiter = dialect.delimiter
+
     # Find column indices
     date_col = desc_col = amount_col = None
 
@@ -400,5 +405,6 @@ def auto_detect_csv_format(filepath):
         date_format='%m/%d/%Y',  # Default format
         description_column=desc_col,
         amount_column=amount_col,
-        has_header=True
+        has_header=True,
+        delimiter=detected_delimiter,
     )
