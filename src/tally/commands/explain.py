@@ -11,6 +11,7 @@ from ..cli_utils import (
     check_deprecated_description_cleaning,
     warn_deprecated_parser,
     print_deprecation_warnings,
+    print_no_config_help,
 )
 from ..path_utils import resolve_data_source_paths
 from ..config_loader import load_config
@@ -32,7 +33,10 @@ def cmd_explain(args):
         merchant_names = merchant_names[:-1]
 
     # Resolve config directory using standard logic
-    config_dir = resolve_config_dir(args)
+    config_dir = resolve_config_dir(args, required=False)
+    if not config_dir:
+        print_no_config_help()
+        sys.exit(1)
 
     # Load configuration
     try:

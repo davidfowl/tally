@@ -86,6 +86,22 @@ def resolve_config_dir(args, required=True):
     return config_dir
 
 
+def print_no_config_help():
+    """Print helpful getting started guide when no config is found."""
+    print()
+    print(f"{C.BOLD}  TALLY - Getting Started{C.RESET}")
+    print(f"{C.DIM}  ─────────────────────────────────────────{C.RESET}")
+    print(f"  {C.YELLOW}●{C.RESET} No config found")
+    print()
+    print(f"  {C.DIM}1.{C.RESET} Initialize: {C.GREEN}tally init{C.RESET}")
+    print(f"     {C.DIM}Creates settings.yaml, merchants.rules, views.rules{C.RESET}")
+    print()
+    print(f"  {C.DIM}2.{C.RESET} Add bank/credit card CSVs to {C.CYAN}./data/{C.RESET}")
+    print()
+    print(f"  {C.DIM}3.{C.RESET} Configure data sources in {C.CYAN}./config/settings.yaml{C.RESET}")
+    print()
+
+
 def init_config(target_dir):
     """Initialize a new config directory with starter files."""
     import datetime
