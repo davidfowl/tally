@@ -983,17 +983,18 @@ class TestCmdInspect:
         csv_content = """Date,Description,Amount
 01/15/2025,GROCERY STORE,123.45
 01/16/2025,COFFEE SHOP,5.99
-01/17/2025,PAYMENT,-500.00
+01/17/2025,GAS STATION,45.00
+01/18/2025,PAYMENT,-500.00
 """
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             f.write(csv_content)
             tmpfile = f.name
 
         try:
-            cmd_inspect(Namespace(file=tmpfile, rows=3))
+            cmd_inspect(Namespace(file=tmpfile, rows=4))
             captured = capsys.readouterr()
             assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
-            assert 'Observed mostly positive amounts (2 positive, 1 negative).' in captured.out
+            assert 'Observed mostly positive amounts (3 positive, 1 negative).' in captured.out
             assert 'Use {amount} if you want to keep positive debits/spending positive in Tally.' in captured.out
             assert 'Use {-amount} if you want to flip that convention so those rows become negative in Tally.' in captured.out
         finally:
