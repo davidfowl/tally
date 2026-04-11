@@ -459,7 +459,14 @@ def _analyze_amount_patterns(filepath, amount_col, has_header=True, delimiter=No
 
 
 def _suggest_amount_token(analysis):
-    """Choose the amount token that best matches the detected sign convention."""
+    """
+    Choose the amount token that best matches the detected sign convention.
+
+    Prefer {-amount} when negative values clearly dominate (<30% positive),
+    keep {amount} when positive values clearly dominate (>70% positive),
+    and for mixed exports use the majority sign by count before falling back
+    to total magnitude as a final tie-breaker.
+    """
     if not analysis:
         return '{amount}'
 
