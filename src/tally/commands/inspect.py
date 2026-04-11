@@ -210,9 +210,9 @@ def cmd_inspect(args):
 
             # Show amount modifier options with context
             print("\n  How to use amount tokens:")
-            print(f"    {{amount}}   - preserve the sign from the CSV")
+            print(f"    {{amount}}   - use amounts as they appear in the CSV")
             print(f"    {{-amount}}  - flip the sign from the CSV")
-            print(f"    {{+amount}}  - take the absolute value")
+            print(f"    {{+amount}}  - make all amounts positive")
 
             for line in _describe_amount_token_usage(analysis):
                 print(f"    - {line}")

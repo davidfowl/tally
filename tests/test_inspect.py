@@ -955,8 +955,8 @@ class TestAutoDetectCsvFormat:
 class TestCmdInspect:
     """Regression tests for inspect command amount guidance."""
 
-    def test_reports_negative_debit_observations(self, capsys):
-        """Bank-style exports should report the observed sign counts."""
+    def test_reports_negative_amount_observations(self, capsys):
+        """Exports with mostly negative amounts should report the observed sign counts."""
         csv_content = """Date,Description,Amount
 01/15/2025,GROCERY STORE,-123.45
 01/16/2025,PAYROLL,2500.00
@@ -982,8 +982,8 @@ class TestCmdInspect:
         finally:
             os.unlink(tmpfile)
 
-    def test_reports_positive_debit_observations(self, capsys):
-        """Credit-card-style exports should report the observed sign counts."""
+    def test_reports_positive_amount_observations(self, capsys):
+        """Exports with mostly positive amounts should report the observed sign counts."""
         csv_content = """Date,Description,Amount
 01/15/2025,GROCERY STORE,123.45
 01/16/2025,COFFEE SHOP,5.99
