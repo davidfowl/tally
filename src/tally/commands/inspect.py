@@ -181,8 +181,8 @@ def cmd_inspect(args):
             print("\n" + "=" * 70)
             print("Amount Distribution:")
             print("-" * 70)
-            print(f"  {_format_amount_distribution_line(analysis['positive_count'], 'positive', analysis['positive_total'])}")
-            print(f"  {_format_amount_distribution_line(analysis['negative_count'], 'negative', analysis['negative_total'])}")
+            print("  " + _format_amount_distribution_line(analysis['positive_count'], 'positive', analysis['positive_total']))
+            print("  " + _format_amount_distribution_line(analysis['negative_count'], 'negative', analysis['negative_total']))
 
             # Show format observations
             if analysis['format_observations']:
