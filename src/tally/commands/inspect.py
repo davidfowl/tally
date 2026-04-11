@@ -184,8 +184,8 @@ def cmd_inspect(args):
             print("\n" + "=" * 70)
             print("Amount Distribution:")
             print("-" * 70)
-            print(f"  {analysis['positive_count']} positive amounts, totaling ${analysis['positive_total']:,.2f}")
-            print(f"  {analysis['negative_count']} negative amounts, totaling ${analysis['negative_total']:,.2f}")
+            print(f"  {_format_amount_distribution_line(analysis['positive_count'], 'positive', analysis['positive_total'])}")
+            print(f"  {_format_amount_distribution_line(analysis['negative_count'], 'negative', analysis['negative_total'])}")
 
             # Show format observations
             if analysis['format_observations']:
@@ -497,6 +497,12 @@ def _describe_amount_sign_observations(analysis):
         f"Observed a mixed sign pattern ({positive_count} positive, {negative_count} negative).",
         "Large payments, refunds, or transfers may be mixed with day-to-day spending.",
     ]
+
+
+def _format_amount_distribution_line(count, label, total):
+    """Format an amount distribution line with correct singular/plural wording."""
+    noun = 'amount' if count == 1 else 'amounts'
+    return f"{count} {label} {noun}, totaling ${total:,.2f}"
 
 
 def _describe_amount_token_usage(analysis):
