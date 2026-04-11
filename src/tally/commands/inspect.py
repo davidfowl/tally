@@ -336,12 +336,6 @@ def _describe_amount_sign_observations(analysis):
     if total_count == 0:
         return ["No non-zero amounts were found in the sampled rows."]
 
-    if positive_count == 0:
-        return [f"Observed {positive_count} positive and {negative_count} negative non-zero amounts in the sampled rows."]
-
-    if negative_count == 0:
-        return [f"Observed {positive_count} positive and {negative_count} negative non-zero amounts in the sampled rows."]
-
     return [
         f"Observed {positive_count} positive and {negative_count} negative non-zero amounts in the sampled rows.",
     ]
