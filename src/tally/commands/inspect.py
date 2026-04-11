@@ -9,6 +9,9 @@ import csv
 from ..colors import C
 from ..analyzer import auto_detect_csv_format
 
+CLEARLY_NEGATIVE_DEBITS_THRESHOLD = 30
+CLEARLY_POSITIVE_DEBITS_THRESHOLD = 70
+
 
 def cmd_inspect(args):
     """Handle the 'inspect' subcommand - show CSV structure and sample rows."""
@@ -462,10 +465,13 @@ def _suggest_amount_token(analysis):
     """
     Choose the amount token that best matches the detected sign convention.
 
-    Prefer {-amount} when negative values clearly dominate (<30% positive),
-    keep {amount} when positive values clearly dominate (>70% positive),
-    and for mixed exports use the majority sign by count before falling back
-    to total magnitude as a final tie-breaker.
+    Prefer {-amount} when negative values clearly dominate (fewer than
+    30% positive rows), keep {amount} when positive values clearly dominate
+    (more than 70% positive rows), and for mixed exports use the majority
+    sign by count before falling back to total magnitude as a final
+    tie-breaker. Count is prioritized over magnitude because statement
+    exports commonly contain a small number of large payments or transfers
+    that would otherwise outweigh the day-to-day spending pattern.
     """
     if not analysis:
         return '{amount}'
@@ -477,9 +483,9 @@ def _suggest_amount_token(analysis):
         return '{amount}'
 
     positive_pct = positive_count / total_count * 100
-    if positive_pct < 30:
+    if positive_pct < CLEARLY_NEGATIVE_DEBITS_THRESHOLD:
         return '{-amount}'
-    if positive_pct > 70:
+    if positive_pct > CLEARLY_POSITIVE_DEBITS_THRESHOLD:
         return '{amount}'
 
     if negative_count > positive_count:
