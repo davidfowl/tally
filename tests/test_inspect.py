@@ -977,6 +977,7 @@ class TestCmdInspect:
             assert 'Observed 1 positive and 3 negative non-zero amounts in the sampled rows.' in captured.out
             assert "Use {amount} to keep amounts as they appear in the CSV." in captured.out
             assert "Use {-amount} to flip the sign of amounts from the CSV." in captured.out
+            assert "Use {+amount} if you want all parsed amounts to be positive." in captured.out
             assert "Replace <amount token> in the format string template with the option you choose." in captured.out
         finally:
             os.unlink(tmpfile)
@@ -1002,6 +1003,7 @@ class TestCmdInspect:
             assert 'Observed 3 positive and 1 negative non-zero amounts in the sampled rows.' in captured.out
             assert "Use {amount} to keep amounts as they appear in the CSV." in captured.out
             assert "Use {-amount} to flip the sign of amounts from the CSV." in captured.out
+            assert "Use {+amount} if you want all parsed amounts to be positive." in captured.out
             assert "Replace <amount token> in the format string template with the option you choose." in captured.out
         finally:
             os.unlink(tmpfile)

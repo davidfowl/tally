@@ -355,6 +355,7 @@ def _describe_amount_token_usage(analysis):
     return [
         "Use {amount} to keep amounts as they appear in the CSV.",
         "Use {-amount} to flip the sign of amounts from the CSV.",
+        "Use {+amount} if you want all parsed amounts to be positive.",
         'Replace <amount token> in the format string template with the option you choose.',
     ]
 
