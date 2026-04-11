@@ -956,7 +956,7 @@ class TestCmdInspect:
     """Regression tests for inspect command amount guidance."""
 
     def test_reports_negative_debit_observations(self, capsys):
-        """Bank-style exports should explain the observed negative debit pattern."""
+        """Bank-style exports should report the observed sign counts."""
         csv_content = """Date,Description,Amount
 01/15/2025,GROCERY STORE,-123.45
 01/16/2025,PAYROLL,2500.00
@@ -974,14 +974,14 @@ class TestCmdInspect:
             assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
             assert '1 positive amount, totaling $2,500.00' in captured.out
             assert '3 negative amounts, totaling $1,329.44' in captured.out
-            assert 'Observed mostly negative amounts (3 negative, 1 positive).' in captured.out
-            assert 'Use {amount} if you want to keep negative debits/spending negative in Tally.' in captured.out
-            assert 'Use {-amount} if you want to flip those debits/spending amounts to positive values in Tally.' in captured.out
+            assert 'Observed 1 positive and 3 negative non-zero amounts in the sampled rows.' in captured.out
+            assert "Use {amount} to preserve the CSV's original signs." in captured.out
+            assert "Use {-amount} to invert the CSV's original signs." in captured.out
         finally:
             os.unlink(tmpfile)
 
     def test_reports_positive_debit_observations(self, capsys):
-        """Credit-card-style exports should explain the observed positive debit pattern."""
+        """Credit-card-style exports should report the observed sign counts."""
         csv_content = """Date,Description,Amount
 01/15/2025,GROCERY STORE,123.45
 01/16/2025,COFFEE SHOP,5.99
@@ -998,8 +998,8 @@ class TestCmdInspect:
             assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
             assert '3 positive amounts, totaling $174.44' in captured.out
             assert '1 negative amount, totaling $500.00' in captured.out
-            assert 'Observed mostly positive amounts (3 positive, 1 negative).' in captured.out
-            assert 'Use {amount} if you want to keep positive debits/spending positive in Tally.' in captured.out
-            assert 'Use {-amount} if you want to flip that convention so those rows become negative in Tally.' in captured.out
+            assert 'Observed 3 positive and 1 negative non-zero amounts in the sampled rows.' in captured.out
+            assert "Use {amount} to preserve the CSV's original signs." in captured.out
+            assert "Use {-amount} to invert the CSV's original signs." in captured.out
         finally:
             os.unlink(tmpfile)

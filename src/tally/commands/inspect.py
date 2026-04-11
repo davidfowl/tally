@@ -9,9 +9,6 @@ import csv
 from ..colors import C
 from ..analyzer import auto_detect_csv_format
 
-CLEARLY_NEGATIVE_DEBITS_THRESHOLD = 30
-CLEARLY_POSITIVE_DEBITS_THRESHOLD = 70
-
 
 def cmd_inspect(args):
     """Handle the 'inspect' subcommand - show CSV structure and sample rows."""
@@ -328,143 +325,6 @@ def _detect_file_format(filepath):
     return result
 
 
-def _analyze_amount_patterns(filepath, amount_col, has_header=True, delimiter=None, max_rows=1000):
-    """
-    Analyze amount column patterns to help users understand their data's sign convention.
-
-    Returns dict with:
-        - positive_count: number of positive amounts
-        - negative_count: number of negative amounts
-        - positive_total: sum of positive amounts
-        - negative_total: sum of negative amounts (as positive number)
-        - sign_convention: 'expenses_positive' or 'expenses_negative'
-        - suggest_negate: True if user should use {-amount} to normalize
-        - sample_credits: list of (description, amount) for likely transfers/income
-    """
-    import re as re_mod
-
-    positive_count = 0
-    negative_count = 0
-    positive_total = 0.0
-    negative_total = 0.0
-    sample_credits = []  # (description, amount) tuples
-
-    def parse_amount(val):
-        """Parse amount string to float, handling currency symbols and parentheses."""
-        if not val:
-            return None
-        val = val.strip()
-        # Remove currency symbols, commas
-        val = re_mod.sub(r'[$€£¥,]', '', val)
-        # Handle parentheses as negative
-        if val.startswith('(') and val.endswith(')'):
-            val = '-' + val[1:-1]
-        try:
-            return float(val)
-        except ValueError:
-            return None
-
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            if delimiter and delimiter.startswith('regex:'):
-                # Regex-based parsing
-                pattern = re_mod.compile(delimiter[6:])
-                for i, line in enumerate(f):
-                    if has_header and i == 0:
-                        continue
-                    if i >= max_rows:
-                        break
-                    line = line.strip()
-                    if not line:
-                        continue
-                    match = pattern.match(line)
-                    if match:
-                        groups = match.groups()
-                        if amount_col < len(groups):
-                            amount = parse_amount(groups[amount_col])
-                            if amount is not None:
-                                desc = groups[1] if len(groups) > 1 else ''
-                                if amount >= 0:
-                                    positive_count += 1
-                                    positive_total += amount
-                                else:
-                                    negative_count += 1
-                                    negative_total += abs(amount)
-                                    if len(sample_credits) < 10:
-                                        sample_credits.append((desc.strip(), amount))
-            else:
-                # Standard CSV
-                reader = csv.reader(f)
-                if has_header:
-                    headers = next(reader, None)
-                    desc_col = 1  # default
-                    for idx, h in enumerate(headers or []):
-                        hl = h.lower()
-                        if 'desc' in hl or 'merchant' in hl or 'payee' in hl or 'name' in hl:
-                            desc_col = idx
-                            break
-                else:
-                    desc_col = 1
-
-                for i, row in enumerate(reader):
-                    if i >= max_rows:
-                        break
-                    if amount_col < len(row):
-                        amount = parse_amount(row[amount_col])
-                        if amount is not None:
-                            desc = row[desc_col] if desc_col < len(row) else ''
-                            if amount >= 0:
-                                positive_count += 1
-                                positive_total += amount
-                            else:
-                                negative_count += 1
-                                negative_total += abs(amount)
-                                if len(sample_credits) < 10:
-                                    sample_credits.append((desc.strip(), amount))
-    except Exception:
-        return None
-
-    total_count = positive_count + negative_count
-    if total_count == 0:
-        return None
-
-    # Determine sign convention based on distribution
-    # Expenses positive: mostly positive amounts (typical credit card export)
-    # Expenses negative: mostly negative amounts (typical bank export)
-    positive_pct = positive_count / total_count * 100
-
-    if positive_pct > 70:
-        sign_convention = 'expenses_positive'
-        suggest_negate = False
-        rationale = "mostly positive amounts (expenses are positive)"
-    elif positive_pct < 30:
-        sign_convention = 'expenses_negative'
-        suggest_negate = True
-        rationale = "mostly negative amounts (expenses are negative)"
-    else:
-        # Mixed - harder to tell
-        if positive_total > negative_total:
-            sign_convention = 'expenses_positive'
-            suggest_negate = False
-            rationale = "total positive exceeds negative"
-        else:
-            sign_convention = 'expenses_negative'
-            suggest_negate = True
-            rationale = "total negative exceeds positive"
-
-    return {
-        'positive_count': positive_count,
-        'negative_count': negative_count,
-        'positive_total': positive_total,
-        'negative_total': negative_total,
-        'positive_pct': positive_pct,
-        'sign_convention': sign_convention,
-        'suggest_negate': suggest_negate,
-        'rationale': rationale,
-        'sample_credits': sample_credits,
-    }
-
-
 def _describe_amount_sign_observations(analysis):
     """Describe what the sampled amount signs look like."""
     if not analysis:
@@ -476,29 +336,14 @@ def _describe_amount_sign_observations(analysis):
     if total_count == 0:
         return ["No non-zero amounts were found in the sampled rows."]
 
-    positive_pct = positive_count / total_count * 100
-
     if positive_count == 0:
-        return ["Observed only negative non-zero amounts in the sampled rows."]
+        return [f"Observed {positive_count} positive and {negative_count} negative non-zero amounts in the sampled rows."]
 
     if negative_count == 0:
-        return ["Observed only positive non-zero amounts in the sampled rows."]
-
-    if positive_pct < CLEARLY_NEGATIVE_DEBITS_THRESHOLD:
-        return [
-            f"Observed mostly negative amounts ({negative_count} negative, {positive_count} positive).",
-            "Debits or spending may already be negative in this export.",
-        ]
-
-    if positive_pct > CLEARLY_POSITIVE_DEBITS_THRESHOLD:
-        return [
-            f"Observed mostly positive amounts ({positive_count} positive, {negative_count} negative).",
-            "Debits or spending may already be positive in this export.",
-        ]
+        return [f"Observed {positive_count} positive and {negative_count} negative non-zero amounts in the sampled rows."]
 
     return [
-        f"Observed a mixed sign pattern ({positive_count} positive, {negative_count} negative).",
-        "Large payments, refunds, or transfers may be mixed with day-to-day spending.",
+        f"Observed {positive_count} positive and {negative_count} negative non-zero amounts in the sampled rows.",
     ]
 
 
@@ -511,34 +356,12 @@ def _format_amount_distribution_line(count, sign_label, total):
 def _describe_amount_token_usage(analysis):
     """Explain how {amount} and {-amount} relate to the observed signs."""
     if not analysis:
-        return ["Replace <amount token> in the format string template with the token that matches your CSV's sign convention."]
-
-    positive_count = analysis['positive_count']
-    negative_count = analysis['negative_count']
-    total_count = positive_count + negative_count
-    if total_count == 0:
-        return ["Replace <amount token> in the format string template with the token that matches your CSV's sign convention."]
-
-    positive_pct = positive_count / total_count * 100
-
-    if positive_count == 0 or positive_pct < CLEARLY_NEGATIVE_DEBITS_THRESHOLD:
-        return [
-            "Use {amount} if you want to keep negative debits/spending negative in Tally.",
-            "Use {-amount} if you want to flip those debits/spending amounts to positive values in Tally.",
-            'Replace <amount token> in the format string template with the option you choose.',
-        ]
-
-    if negative_count == 0 or positive_pct > CLEARLY_POSITIVE_DEBITS_THRESHOLD:
-        return [
-            "Use {amount} if you want to keep positive debits/spending positive in Tally.",
-            "Use {-amount} if you want to flip that convention so those rows become negative in Tally.",
-            'Replace <amount token> in the format string template with the option you choose.',
-        ]
+        return ['Replace <amount token> in the format string template with the option you choose.']
 
     return [
         "Use {amount} to preserve the CSV's original signs.",
         "Use {-amount} to invert the CSV's original signs.",
-        'Replace <amount token> in the format string template after reviewing the sample rows above.',
+        'Replace <amount token> in the format string template with the option you choose.',
     ]
 
 
