@@ -353,8 +353,8 @@ def _describe_amount_token_usage(analysis):
         return ['Replace <amount token> in the format string template with the option you choose.']
 
     return [
-        "Use {amount} to preserve the CSV's original signs.",
-        "Use {-amount} to invert the CSV's original signs.",
+        "Use {amount} to keep amounts as they appear in the CSV.",
+        "Use {-amount} to flip the sign of amounts from the CSV.",
         'Replace <amount token> in the format string template with the option you choose.',
     ]
 
