@@ -1,5 +1,6 @@
 """Tests for inspect command - CSV sniffing and column analysis."""
 
+from argparse import Namespace
 import csv
 import pytest
 import tempfile
@@ -10,6 +11,7 @@ from tally.commands.inspect import (
     _analyze_columns,
     _analyze_amount_column_detailed,
     _detect_currency_symbol,
+    cmd_inspect,
 )
 
 
@@ -946,5 +948,46 @@ class TestAutoDetectCsvFormat:
             assert spec.description_column == 1
             assert spec.amount_column == 2
             assert spec.delimiter == '\t'
+        finally:
+            os.unlink(tmpfile)
+
+
+class TestCmdInspect:
+    """Regression tests for inspect command suggestions."""
+
+    def test_suggests_negated_amount_for_negative_debits(self, capsys):
+        """Bank-style exports with negative debits should suggest {-amount}."""
+        csv_content = """Date,Description,Amount
+01/15/2025,GROCERY STORE,-123.45
+01/16/2025,PAYROLL,2500.00
+01/17/2025,COFFEE SHOP,-5.99
+01/18/2025,RENT,-1200.00
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            cmd_inspect(Namespace(file=tmpfile, rows=3))
+            captured = capsys.readouterr()
+            assert 'format: "{date:%m/%d/%Y}, {description}, {-amount}"' in captured.out
+        finally:
+            os.unlink(tmpfile)
+
+    def test_keeps_amount_for_positive_debits(self, capsys):
+        """Credit-card-style exports with positive debits should keep {amount}."""
+        csv_content = """Date,Description,Amount
+01/15/2025,GROCERY STORE,123.45
+01/16/2025,COFFEE SHOP,5.99
+01/17/2025,PAYMENT,-500.00
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            cmd_inspect(Namespace(file=tmpfile, rows=3))
+            captured = capsys.readouterr()
+            assert 'format: "{date:%m/%d/%Y}, {description}, {amount}"' in captured.out
         finally:
             os.unlink(tmpfile)

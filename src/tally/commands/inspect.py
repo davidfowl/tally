@@ -154,6 +154,11 @@ def cmd_inspect(args):
         if spec.delimiter:
             print(f"  - Delimiter: {repr(spec.delimiter)}")
 
+        # Analyze amount patterns first so the suggested format string can use
+        # {-amount} for exports where debits are stored as negative values.
+        analysis = _analyze_amount_column_detailed(filepath, spec.amount_column, has_header=True, dialect=dialect)
+        amount_token = _suggest_amount_token(analysis)
+
         # Build suggested format string
         max_col = max(spec.date_column, spec.description_column, spec.amount_column)
 
@@ -164,7 +169,7 @@ def cmd_inspect(args):
             elif i == spec.description_column:
                 cols.append('{description}')
             elif i == spec.amount_column:
-                cols.append('{amount}')
+                cols.append(amount_token)
             else:
                 cols.append('{_}')
 
@@ -175,7 +180,6 @@ def cmd_inspect(args):
             print(f'    delimiter: "{spec.delimiter}"')
 
         # Analyze amount patterns - detailed analysis with both signs
-        analysis = _analyze_amount_column_detailed(filepath, spec.amount_column, has_header=True, dialect=dialect)
         if analysis:
             print("\n" + "=" * 70)
             print("Amount Distribution:")
@@ -452,6 +456,33 @@ def _analyze_amount_patterns(filepath, amount_col, has_header=True, delimiter=No
         'rationale': rationale,
         'sample_credits': sample_credits,
     }
+
+
+def _suggest_amount_token(analysis):
+    """Choose the amount token that best matches the detected sign convention."""
+    if not analysis:
+        return '{amount}'
+
+    positive_count = analysis['positive_count']
+    negative_count = analysis['negative_count']
+    total_count = positive_count + negative_count
+    if total_count == 0:
+        return '{amount}'
+
+    positive_pct = positive_count / total_count * 100
+    if positive_pct < 30:
+        return '{-amount}'
+    if positive_pct > 70:
+        return '{amount}'
+
+    if negative_count > positive_count:
+        return '{-amount}'
+    if positive_count > negative_count:
+        return '{amount}'
+
+    if analysis['negative_total'] > analysis['positive_total']:
+        return '{-amount}'
+    return '{amount}'
 
 
 def _analyze_columns(filepath, has_header=True, max_rows=100, dialect=None):
