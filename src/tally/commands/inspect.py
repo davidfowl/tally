@@ -157,12 +157,9 @@ def cmd_inspect(args):
         if spec.delimiter:
             print(f"  - Delimiter: {repr(spec.delimiter)}")
 
-        # Analyze amount patterns first so the suggested format string can use
-        # {-amount} for exports where debits are stored as negative values.
         analysis = _analyze_amount_column_detailed(filepath, spec.amount_column, has_header=True, dialect=dialect)
-        amount_token = _suggest_amount_token(analysis)
 
-        # Build suggested format string
+        # Build suggested format string template
         max_col = max(spec.date_column, spec.description_column, spec.amount_column)
 
         cols = []
@@ -172,12 +169,12 @@ def cmd_inspect(args):
             elif i == spec.description_column:
                 cols.append('{description}')
             elif i == spec.amount_column:
-                cols.append(amount_token)
+                cols.append('<amount token>')
             else:
                 cols.append('{_}')
 
         format_str = ', '.join(cols)
-        print(f"\n  Suggested format string:")
+        print(f"\n  Suggested format string template:")
         print(f'    format: "{format_str}"')
         if spec.delimiter:
             print(f'    delimiter: "{spec.delimiter}"')
@@ -210,11 +207,18 @@ def cmd_inspect(args):
                     truncated = desc[:45] + '...' if len(desc) > 45 else desc
                     print(f"    -${abs(amt):,.2f}  {truncated}")
 
-            # Show amount modifier options (not recommendations)
-            print("\n  Amount modifiers available:")
-            print(f"    {{amount}}   - use values as-is")
-            print(f"    {{-amount}}  - negate (flip sign)")
-            print(f"    {{+amount}}  - absolute value")
+            print("\n  Sign observations:")
+            for line in _describe_amount_sign_observations(analysis):
+                print(f"    - {line}")
+
+            # Show amount modifier options with context
+            print("\n  How to use amount tokens:")
+            print(f"    {{amount}}   - preserve the sign from the CSV")
+            print(f"    {{-amount}}  - flip the sign from the CSV")
+            print(f"    {{+amount}}  - take the absolute value")
+
+            for line in _describe_amount_token_usage(analysis):
+                print(f"    - {line}")
 
         # Detect currency symbol from amount column
         currency_symbol = _detect_currency_symbol(filepath, spec.amount_column, has_header=True, dialect=dialect)
@@ -461,41 +465,69 @@ def _analyze_amount_patterns(filepath, amount_col, has_header=True, delimiter=No
     }
 
 
-def _suggest_amount_token(analysis):
-    """
-    Choose the amount token that best matches the detected sign convention.
-
-    Prefer {-amount} when negative values clearly dominate (fewer than
-    30% positive rows), keep {amount} when positive values clearly dominate
-    (more than 70% positive rows), and for mixed exports use the majority
-    sign by count before falling back to total magnitude as a final
-    tie-breaker. Count is prioritized over magnitude because statement
-    exports commonly contain a small number of large payments or transfers
-    that would otherwise outweigh the day-to-day spending pattern.
-    """
+def _describe_amount_sign_observations(analysis):
+    """Describe what the sampled amount signs look like."""
     if not analysis:
-        return '{amount}'
+        return ["No non-zero amounts were found in the sampled rows."]
 
     positive_count = analysis['positive_count']
     negative_count = analysis['negative_count']
     total_count = positive_count + negative_count
-    if total_count == 0:
-        return '{amount}'
+    positive_pct = positive_count / total_count * 100 if total_count else 0
 
-    positive_pct = positive_count / total_count * 100
+    if positive_count == 0:
+        return ["Observed only negative non-zero amounts in the sampled rows."]
+
+    if negative_count == 0:
+        return ["Observed only positive non-zero amounts in the sampled rows."]
+
     if positive_pct < CLEARLY_NEGATIVE_DEBITS_THRESHOLD:
-        return '{-amount}'
+        return [
+            f"Observed mostly negative amounts ({negative_count} negative, {positive_count} positive).",
+            "Debits or spending may already be negative in this export.",
+        ]
+
     if positive_pct > CLEARLY_POSITIVE_DEBITS_THRESHOLD:
-        return '{amount}'
+        return [
+            f"Observed mostly positive amounts ({positive_count} positive, {negative_count} negative).",
+            "Debits or spending may already be positive in this export.",
+        ]
 
-    if negative_count > positive_count:
-        return '{-amount}'
-    if positive_count > negative_count:
-        return '{amount}'
+    return [
+        f"Observed a mixed sign pattern ({positive_count} positive, {negative_count} negative).",
+        "Large payments, refunds, or transfers may be mixed with day-to-day spending.",
+    ]
 
-    if analysis['negative_total'] > analysis['positive_total']:
-        return '{-amount}'
-    return '{amount}'
+
+def _describe_amount_token_usage(analysis):
+    """Explain how {amount} and {-amount} relate to the observed signs."""
+    if not analysis:
+        return ["Replace <amount token> with the token that matches your CSV's sign convention."]
+
+    positive_count = analysis['positive_count']
+    negative_count = analysis['negative_count']
+    total_count = positive_count + negative_count
+    positive_pct = positive_count / total_count * 100 if total_count else 0
+
+    if positive_count == 0 or positive_pct < CLEARLY_NEGATIVE_DEBITS_THRESHOLD:
+        return [
+            "Use {amount} if you want to keep negative debits/spending negative in Tally.",
+            "Use {-amount} if you want to flip those debits/spending amounts to positive values in Tally.",
+            'Replace <amount token> in the template with the option you choose.',
+        ]
+
+    if negative_count == 0 or positive_pct > CLEARLY_POSITIVE_DEBITS_THRESHOLD:
+        return [
+            "Use {amount} if you want to keep positive debits/spending positive in Tally.",
+            "Use {-amount} if you want to flip that convention so those rows become negative in Tally.",
+            'Replace <amount token> in the template with the option you choose.',
+        ]
+
+    return [
+        "Use {amount} to preserve the CSV's original signs.",
+        "Use {-amount} to invert the CSV's original signs.",
+        'Replace <amount token> in the template after reviewing the sample rows above.',
+    ]
 
 
 def _analyze_columns(filepath, has_header=True, max_rows=100, dialect=None):

@@ -953,10 +953,10 @@ class TestAutoDetectCsvFormat:
 
 
 class TestCmdInspect:
-    """Regression tests for inspect command suggestions."""
+    """Regression tests for inspect command amount guidance."""
 
-    def test_suggests_negated_amount_for_negative_debits(self, capsys):
-        """Bank-style exports with negative debits should suggest {-amount}."""
+    def test_reports_negative_debit_observations(self, capsys):
+        """Bank-style exports should explain the observed negative debit pattern."""
         csv_content = """Date,Description,Amount
 01/15/2025,GROCERY STORE,-123.45
 01/16/2025,PAYROLL,2500.00
@@ -970,12 +970,16 @@ class TestCmdInspect:
         try:
             cmd_inspect(Namespace(file=tmpfile, rows=3))
             captured = capsys.readouterr()
-            assert 'format: "{date:%m/%d/%Y}, {description}, {-amount}"' in captured.out
+            assert 'Suggested format string template:' in captured.out
+            assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
+            assert 'Observed mostly negative amounts (3 negative, 1 positive).' in captured.out
+            assert 'Use {amount} if you want to keep negative debits/spending negative in Tally.' in captured.out
+            assert 'Use {-amount} if you want to flip those debits/spending amounts to positive values in Tally.' in captured.out
         finally:
             os.unlink(tmpfile)
 
-    def test_keeps_amount_for_positive_debits(self, capsys):
-        """Credit-card-style exports with positive debits should keep {amount}."""
+    def test_reports_positive_debit_observations(self, capsys):
+        """Credit-card-style exports should explain the observed positive debit pattern."""
         csv_content = """Date,Description,Amount
 01/15/2025,GROCERY STORE,123.45
 01/16/2025,COFFEE SHOP,5.99
@@ -988,6 +992,9 @@ class TestCmdInspect:
         try:
             cmd_inspect(Namespace(file=tmpfile, rows=3))
             captured = capsys.readouterr()
-            assert 'format: "{date:%m/%d/%Y}, {description}, {amount}"' in captured.out
+            assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
+            assert 'Observed mostly positive amounts (2 positive, 1 negative).' in captured.out
+            assert 'Use {amount} if you want to keep positive debits/spending positive in Tally.' in captured.out
+            assert 'Use {-amount} if you want to flip that convention so those rows become negative in Tally.' in captured.out
         finally:
             os.unlink(tmpfile)
