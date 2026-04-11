@@ -502,7 +502,7 @@ def _describe_amount_sign_observations(analysis):
 def _describe_amount_token_usage(analysis):
     """Explain how {amount} and {-amount} relate to the observed signs."""
     if not analysis:
-        return ["Replace <amount token> with the token that matches your CSV's sign convention."]
+        return ["Replace <amount token> in the format string template with the token that matches your CSV's sign convention."]
 
     positive_count = analysis['positive_count']
     negative_count = analysis['negative_count']
@@ -513,20 +513,20 @@ def _describe_amount_token_usage(analysis):
         return [
             "Use {amount} if you want to keep negative debits/spending negative in Tally.",
             "Use {-amount} if you want to flip those debits/spending amounts to positive values in Tally.",
-            'Replace <amount token> in the template with the option you choose.',
+            'Replace <amount token> in the format string template with the option you choose.',
         ]
 
     if negative_count == 0 or positive_pct > CLEARLY_POSITIVE_DEBITS_THRESHOLD:
         return [
             "Use {amount} if you want to keep positive debits/spending positive in Tally.",
             "Use {-amount} if you want to flip that convention so those rows become negative in Tally.",
-            'Replace <amount token> in the template with the option you choose.',
+            'Replace <amount token> in the format string template with the option you choose.',
         ]
 
     return [
         "Use {amount} to preserve the CSV's original signs.",
         "Use {-amount} to invert the CSV's original signs.",
-        'Replace <amount token> in the template after reviewing the sample rows above.',
+        'Replace <amount token> in the format string template after reviewing the sample rows above.',
     ]
 
 

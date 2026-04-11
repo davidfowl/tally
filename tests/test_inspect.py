@@ -972,6 +972,8 @@ class TestCmdInspect:
             captured = capsys.readouterr()
             assert 'Suggested format string template:' in captured.out
             assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
+            assert '1 positive amounts, totaling $2,500.00' in captured.out
+            assert '3 negative amounts, totaling $1,329.44' in captured.out
             assert 'Observed mostly negative amounts (3 negative, 1 positive).' in captured.out
             assert 'Use {amount} if you want to keep negative debits/spending negative in Tally.' in captured.out
             assert 'Use {-amount} if you want to flip those debits/spending amounts to positive values in Tally.' in captured.out
@@ -994,6 +996,8 @@ class TestCmdInspect:
             cmd_inspect(Namespace(file=tmpfile, rows=4))
             captured = capsys.readouterr()
             assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
+            assert '3 positive amounts, totaling $174.44' in captured.out
+            assert '1 negative amounts, totaling $500.00' in captured.out
             assert 'Observed mostly positive amounts (3 positive, 1 negative).' in captured.out
             assert 'Use {amount} if you want to keep positive debits/spending positive in Tally.' in captured.out
             assert 'Use {-amount} if you want to flip that convention so those rows become negative in Tally.' in captured.out
