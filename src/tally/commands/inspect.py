@@ -473,7 +473,10 @@ def _describe_amount_sign_observations(analysis):
     positive_count = analysis['positive_count']
     negative_count = analysis['negative_count']
     total_count = positive_count + negative_count
-    positive_pct = positive_count / total_count * 100 if total_count else 0
+    if total_count == 0:
+        return ["No non-zero amounts were found in the sampled rows."]
+
+    positive_pct = positive_count / total_count * 100
 
     if positive_count == 0:
         return ["Observed only negative non-zero amounts in the sampled rows."]
@@ -499,10 +502,10 @@ def _describe_amount_sign_observations(analysis):
     ]
 
 
-def _format_amount_distribution_line(count, label, total):
+def _format_amount_distribution_line(count, sign_label, total):
     """Format an amount distribution line with correct singular/plural wording."""
     noun = 'amount' if count == 1 else 'amounts'
-    return f"{count} {label} {noun}, totaling ${total:,.2f}"
+    return f"{count} {sign_label} {noun}, totaling ${total:,.2f}"
 
 
 def _describe_amount_token_usage(analysis):
@@ -513,7 +516,10 @@ def _describe_amount_token_usage(analysis):
     positive_count = analysis['positive_count']
     negative_count = analysis['negative_count']
     total_count = positive_count + negative_count
-    positive_pct = positive_count / total_count * 100 if total_count else 0
+    if total_count == 0:
+        return ["Replace <amount token> in the format string template with the token that matches your CSV's sign convention."]
+
+    positive_pct = positive_count / total_count * 100
 
     if positive_count == 0 or positive_pct < CLEARLY_NEGATIVE_DEBITS_THRESHOLD:
         return [
