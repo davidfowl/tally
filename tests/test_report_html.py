@@ -39,6 +39,15 @@ pytestmark = [
 ]
 
 
+def merchant_row(page: Page, merchant_name: str):
+    # Row data-testid now uses composite IDs (name/category/subcategory), so
+    # locating by visible merchant name keeps tests stable across ID format changes.
+    """Locate a merchant row by visible name, independent of internal ID format."""
+    return page.locator("tr.merchant-row").filter(
+        has=page.locator(".merchant-name", has_text=re.compile(rf"^{re.escape(merchant_name)}$"))
+    ).first
+
+
 @pytest.fixture(scope="module")
 def report_path(tmp_path_factory):
     """Generate a test report with known fixture data.
@@ -157,14 +166,14 @@ class TestUINavigation:
     def test_merchants_visible_in_table(self, page: Page, report_path):
         """Merchants are visible in their category tables."""
         page.goto(f"file://{report_path}")
-        expect(page.get_by_test_id("merchant-row-Amazon")).to_be_visible()
-        expect(page.get_by_test_id("merchant-row-Target")).to_be_visible()
+        expect(merchant_row(page, "Amazon")).to_be_visible()
+        expect(merchant_row(page, "Target")).to_be_visible()
 
     def test_merchant_row_expands_on_click(self, page: Page, report_path):
         """Clicking merchant row expands to show transactions."""
         page.goto(f"file://{report_path}")
         # Click on the Amazon row to expand it
-        amazon_row = page.get_by_test_id("merchant-row-Amazon")
+        amazon_row = merchant_row(page, "Amazon")
         amazon_row.click()
         # Should see transaction details
         expect(page.locator("text=AMAZON MARKETPLACE").first).to_be_visible()
@@ -173,7 +182,7 @@ class TestUINavigation:
         """Transactions within a merchant are sorted by date descending (newest first)."""
         page.goto(f"file://{report_path}")
         # Expand Amazon to see transactions
-        amazon_row = page.get_by_test_id("merchant-row-Amazon")
+        amazon_row = merchant_row(page, "Amazon")
         amazon_row.click()
         # Wait for expansion
         page.wait_for_timeout(200)
@@ -269,7 +278,7 @@ class TestCalculationAccuracy:
         """Merchant shows correct transaction count."""
         page.goto(f"file://{report_path}")
         # Amazon has 4 transactions
-        amazon_row = page.get_by_test_id("merchant-row-Amazon")
+        amazon_row = merchant_row(page, "Amazon")
         expect(amazon_row.get_by_test_id("merchant-count")).to_have_text("4")
 
     def test_tag_filter_updates_total(self, page: Page, report_path):
@@ -288,7 +297,7 @@ class TestCalculationAccuracy:
         page.goto(f"file://{report_path}")
 
         # Amazon unfiltered: 4 transactions
-        amazon_row = page.get_by_test_id("merchant-row-Amazon")
+        amazon_row = merchant_row(page, "Amazon")
         expect(amazon_row.get_by_test_id("merchant-count")).to_have_text("4")
 
         # Apply david filter
@@ -305,7 +314,7 @@ class TestCalculationAccuracy:
         page.get_by_test_id("tag-badge").filter(has_text="david").first.click()
 
         # Amazon david total: 45.99 + 199.00 = 244.99 ≈ $245
-        amazon_row = page.get_by_test_id("merchant-row-Amazon")
+        amazon_row = merchant_row(page, "Amazon")
         expect(amazon_row.get_by_test_id("merchant-total")).to_contain_text("$245")
 
     def test_clear_filter_restores_totals(self, page: Page, report_path):
@@ -1054,6 +1063,131 @@ class TestAutocompleteCategories:
         assert len(subcategory_items) == 0
 
 
+@pytest.fixture(scope="module")
+def duplicate_merchant_name_report_path(tmp_path_factory):
+    """Generate a report where one merchant name appears in multiple categories."""
+    tmp_dir = tmp_path_factory.mktemp("duplicate_merchant_name_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    csv_content = """Date,Description,Amount
+01/05/2025,ROCHESTER PUBLIC SCHOOLS CAFE,42.50
+01/12/2025,ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE,75.00
+01/20/2025,TARGET STORE,30.00
+"""
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    settings_content = """year: 2025
+
+data_sources:
+  - name: Test
+    file: data/transactions.csv
+    format: "{date},{description},{amount}"
+
+merchants_file: config/merchants.rules
+"""
+    (config_dir / "settings.yaml").write_text(settings_content)
+
+    rules_content = """[RPS Cafeteria]
+match: contains("ROCHESTER PUBLIC SCHOOLS CAFE")
+category: Food
+subcategory: School Meals
+merchant: Rochester Public Schools
+
+[RPS Activity Fee]
+match: contains("ROCHESTER PUBLIC SCHOOLS ACTIVITY")
+category: Education
+subcategory: Fees
+merchant: Rochester Public Schools
+
+[Target]
+match: contains("TARGET")
+category: Shopping
+subcategory: Retail
+"""
+    (config_dir / "merchants.rules").write_text(rules_content)
+
+    report_path = output_dir / "spending.html"
+    subprocess.run(
+        ["uv", "run", "tally", "run", "--format", "html", "-o", str(report_path), str(config_dir)],
+        check=True,
+        capture_output=True
+    )
+
+    return str(report_path)
+
+
+class TestDuplicateMerchantNameFiltering:
+    """Regression tests for merchant filtering with duplicate names across categories."""
+
+    def test_autocomplete_shows_merchant_once_for_duplicate_name(self, page: Page, duplicate_merchant_name_report_path):
+        """Autocomplete should not duplicate merchant entries by category-specific IDs."""
+        page.goto(f"file://{duplicate_merchant_name_report_path}")
+
+        search = page.locator("input[type='text']")
+        search.click()
+        search.fill("Rochester Public Schools")
+        page.wait_for_timeout(100)
+
+        autocomplete = page.locator(".autocomplete-list")
+        merchant_items = autocomplete.locator(
+            ".autocomplete-item:has(.type.merchant)",
+            has_text="Rochester Public Schools"
+        )
+        expect(merchant_items).to_have_count(1)
+
+    def test_merchant_filter_includes_all_category_variants(self, page: Page, duplicate_merchant_name_report_path):
+        """Selecting merchant filter should include same merchant across all categories."""
+        page.goto(f"file://{duplicate_merchant_name_report_path}")
+
+        search = page.locator("input[type='text']")
+        search.click()
+        search.fill("Rochester Public Schools")
+        page.wait_for_timeout(100)
+
+        autocomplete = page.locator(".autocomplete-list")
+        autocomplete.locator(
+            ".autocomplete-item:has(.type.merchant)",
+            has_text="Rochester Public Schools"
+        ).first.click()
+        page.wait_for_timeout(150)
+
+        # Merchant filter should be applied once.
+        merchant_chip = page.get_by_test_id("filter-chips").locator(".filter-chip.merchant")
+        expect(merchant_chip).to_be_visible()
+
+        # Same merchant should remain visible in both category sections.
+        expect(page.get_by_test_id("section-cat-Food").locator(".merchant-row", has_text="Rochester Public Schools")).to_be_visible()
+        expect(page.get_by_test_id("section-cat-Education").locator(".merchant-row", has_text="Rochester Public Schools")).to_be_visible()
+
+        # Unrelated merchants should be filtered out.
+        expect(page.locator(".merchant-row", has_text="Target")).not_to_be_visible()
+
+    def test_clicking_merchant_name_uses_logical_merchant_filter(self, page: Page, duplicate_merchant_name_report_path):
+        """Clicking merchant name should apply merchant-name filter across categories."""
+        page.goto(f"file://{duplicate_merchant_name_report_path}")
+
+        food_rochester_row = page.get_by_test_id("section-cat-Food").locator(".merchant-row", has_text="Rochester Public Schools")
+        food_rochester_row.locator(".merchant-name").click()
+        page.wait_for_timeout(150)
+
+        # Filter chip should indicate merchant filter was applied.
+        merchant_chip = page.get_by_test_id("filter-chips").locator(".filter-chip.merchant")
+        expect(merchant_chip).to_be_visible()
+
+        # Both category buckets for Rochester Public Schools should remain visible.
+        expect(page.get_by_test_id("section-cat-Food").locator(".merchant-row", has_text="Rochester Public Schools")).to_be_visible()
+        expect(page.get_by_test_id("section-cat-Education").locator(".merchant-row", has_text="Rochester Public Schools")).to_be_visible()
+
+        # Unrelated merchant is filtered out.
+        expect(page.locator(".merchant-row", has_text="Target")).not_to_be_visible()
+
+
 # =============================================================================
 # Category 5: Extra Fields Search Tests
 # =============================================================================
@@ -1165,7 +1299,7 @@ class TestExtraFieldsSearch:
         expect(page.get_by_test_id("filter-chip")).to_be_visible()
 
         # Costco merchant should be visible (matches via extra_fields)
-        expect(page.get_by_test_id("merchant-row-Costco")).to_be_visible()
+        expect(merchant_row(page, "Costco")).to_be_visible()
 
     def test_search_auto_expands_merchant(self, page: Page, extra_fields_report_path):
         """Merchant auto-expands when search matches extra_fields."""
@@ -1203,7 +1337,7 @@ class TestExtraFieldsSearch:
         expect(page.get_by_test_id("filter-chip")).to_be_visible()
 
         # Amazon should not be visible (no matching transactions)
-        expect(page.get_by_test_id("merchant-row-Amazon")).not_to_be_visible()
+        expect(merchant_row(page, "Amazon")).not_to_be_visible()
 
     def test_clear_search_shows_all_merchants(self, page: Page, extra_fields_report_path):
         """Clearing search restores all merchants."""
@@ -1219,9 +1353,9 @@ class TestExtraFieldsSearch:
         page.wait_for_timeout(300)
 
         # All merchants should be visible again
-        expect(page.get_by_test_id("merchant-row-Costco")).to_be_visible()
-        expect(page.get_by_test_id("merchant-row-Target")).to_be_visible()
-        expect(page.get_by_test_id("merchant-row-Amazon")).to_be_visible()
+        expect(merchant_row(page, "Costco")).to_be_visible()
+        expect(merchant_row(page, "Target")).to_be_visible()
+        expect(merchant_row(page, "Amazon")).to_be_visible()
 
 
 # =============================================================================
@@ -1631,7 +1765,7 @@ class TestMissingSubcategory:
     """Tests for merchants without subcategories."""
 
     def test_missing_subcategory_shows_other(self, page: Page, report_with_missing_subcategories):
-        """Merchants without subcategory are grouped as 'Other' in subcategory mode."""
+        """Merchants without subcategory are grouped as 'Uncategorized' in subcategory mode."""
         page.goto(f"file://{report_with_missing_subcategories}")
 
         # Switch to subcategory mode
@@ -1639,31 +1773,31 @@ class TestMissingSubcategory:
 
         # Electronics section (Best Buy has no subcategory)
         electronics_section = page.get_by_test_id("section-cat-Electronics")
-        expect(electronics_section.locator(".merchant-name", has_text="Other")).to_be_visible()
+        expect(electronics_section.locator(".merchant-name", has_text="Uncategorized")).to_be_visible()
 
     def test_missing_subcategory_mixed_category(self, page: Page, report_with_missing_subcategories):
-        """Category with mixed subcategories shows both named and 'Other'."""
+        """Category with mixed subcategories shows both named and 'Uncategorized'."""
         page.goto(f"file://{report_with_missing_subcategories}")
 
         # Switch to subcategory mode
         page.locator(".view-toggle button", has_text="Subcategory").click()
 
-        # Retail has Target (Department Store) and Amazon (no subcategory -> Other)
+        # Retail has Target (Department Store) and Amazon (no subcategory -> Uncategorized)
         retail_section = page.get_by_test_id("section-cat-Retail")
         expect(retail_section.locator(".merchant-name", has_text="Department Store")).to_be_visible()
-        expect(retail_section.locator(".merchant-name", has_text="Other")).to_be_visible()
+        expect(retail_section.locator(".merchant-name", has_text="Uncategorized")).to_be_visible()
 
     def test_merchant_mode_shows_empty_subcategory(self, page: Page, report_with_missing_subcategories):
-        """In merchant mode, missing subcategory shows as empty cell."""
+        """In merchant mode, missing subcategory shows as 'Uncategorized'."""
         page.goto(f"file://{report_with_missing_subcategories}")
 
         # Should be in merchant mode by default
         # Best Buy row should have an empty subcategory cell
         electronics_section = page.get_by_test_id("section-cat-Electronics")
         bestbuy_row = electronics_section.locator("tr", has_text="Best Buy")
-        # Second cell (subcategory) should be empty
+        # Second cell (subcategory) should show fallback label
         subcategory_cell = bestbuy_row.locator("td").nth(1)
-        expect(subcategory_cell).to_have_text("")
+        expect(subcategory_cell).to_have_text("Uncategorized")
 
 
 # =============================================================================
@@ -2054,7 +2188,7 @@ class TestTransformDirective:
         page.goto(f"file://{transform_report_path}")
 
         # Wait for Vue to mount and render merchant rows
-        apple_row = page.get_by_test_id("merchant-row-Apple_Purchases")
+        apple_row = merchant_row(page, "Apple Purchases")
         expect(apple_row).to_be_visible()
 
         # Expand Apple Purchases merchant by clicking the chevron
@@ -2069,7 +2203,7 @@ class TestTransformDirective:
         page.goto(f"file://{transform_report_path}")
 
         # Wait for Vue to mount and render merchant rows
-        apple_row = page.get_by_test_id("merchant-row-Apple_Purchases")
+        apple_row = merchant_row(page, "Apple Purchases")
         expect(apple_row).to_be_visible()
 
         # Expand Apple Purchases merchant by clicking the chevron
@@ -2089,7 +2223,7 @@ class TestTransformDirective:
         page.goto(f"file://{transform_report_path}")
 
         # Wait for Vue to mount and render merchant rows
-        apple_row = page.get_by_test_id("merchant-row-Apple_Purchases")
+        apple_row = merchant_row(page, "Apple Purchases")
         expect(apple_row).to_be_visible()
 
         # Expand Apple Purchases merchant by clicking the chevron
@@ -2113,7 +2247,7 @@ class TestTransformDirective:
         page.goto(f"file://{transform_report_path}")
 
         # Wait for Vue to mount and render merchant rows
-        amazon_row = page.get_by_test_id("merchant-row-Amazon")
+        amazon_row = merchant_row(page, "Amazon")
         expect(amazon_row).to_be_visible()
 
         # Expand Amazon merchant by clicking the chevron

@@ -122,8 +122,13 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     # Build section merchants data
     def build_section_merchants(merchant_dict):
         merchants = {}
-        for merchant_name, data in merchant_dict.items():
-            merchant_id = make_merchant_id(merchant_name)
+        for merchant_key, data in merchant_dict.items():
+            # Display name comes from data['name'] when available; fall back to the key
+            merchant_name = data.get('name', merchant_key if isinstance(merchant_key, str) else str(merchant_key))
+            category = data.get('category', '')
+            subcategory = data.get('subcategory', '')
+            # Use a composite ID so same-named merchants with different categories are distinct
+            merchant_id = make_merchant_id(f"{merchant_name}_{category}_{subcategory}")
 
             # Build transactions array with unique IDs
             txns = []
@@ -157,8 +162,8 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
                     'source': match_info.get('source', ''),
                     'explanation': explain_pattern(pattern),
                     'assignedMerchant': merchant_name,
-                    'assignedCategory': data.get('category', ''),
-                    'assignedSubcategory': data.get('subcategory', ''),
+                    'assignedCategory': category,
+                    'assignedSubcategory': subcategory,
                     'assignedTags': sorted(match_info.get('tags', [])),
                     'tagSources': match_info.get('tag_sources', {}),
                 }
@@ -166,9 +171,9 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
             merchants[merchant_id] = {
                 'id': merchant_id,
                 'displayName': merchant_name,
-                'category': data.get('category', 'Other'),
-                'subcategory': data.get('subcategory', 'Uncategorized'),
-                'categoryPath': f"{data.get('category', 'Other')}/{data.get('subcategory', 'Uncategorized')}".lower(),
+                'category': category or 'Other',
+                'subcategory': subcategory or 'Uncategorized',
+                'categoryPath': f"{category or 'Other'}/{subcategory or 'Uncategorized'}".lower(),
                 'calcType': data.get('calc_type', '/12'),
                 'monthsActive': data.get('months_active', 0),
                 'isConsistent': data.get('is_consistent', False),
@@ -204,7 +209,14 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
                 continue
 
             # Convert list of (name, data) tuples to dict format
-            merchant_dict = {name: data for name, data in merchants_list}
+            # Use a composite key to avoid collisions when the same merchant name
+            # appears with different categories in the same section
+            merchant_dict = {}
+            for merch_name, data in merchants_list:
+                cat = data.get('category', '')
+                subcat = data.get('subcategory', '')
+                unique_key = f"{merch_name}||{cat}||{subcat}" if (cat or subcat) else merch_name
+                merchant_dict[unique_key] = data
             merchants = build_section_merchants(merchant_dict)
 
             # Add view info to each merchant
@@ -239,9 +251,14 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         # Build from by_merchant which contains ALL merchants (not filtered by sections)
         all_merchants = {}
         by_merchant = stats.get('by_merchant', {})
-        for merchant_name, data in by_merchant.items():
-            merchant_id = make_merchant_id(merchant_name)
-            all_merchants[merchant_id] = build_section_merchants({merchant_name: data})[merchant_id]
+        for merchant_key, data in by_merchant.items():
+            merchant_name = data.get('name', '')
+            category = data.get('category', '')
+            subcategory = data.get('subcategory', '')
+            # Use composite key to ensure uniqueness for same-name merchants in different categories
+            unique_key = f"{merchant_name}||{category}||{subcategory}" if (category or subcategory) else merchant_name
+            sub_result = build_section_merchants({unique_key: data})
+            all_merchants.update(sub_result)
 
         # Group by category -> subcategory
         categories = {}
