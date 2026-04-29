@@ -925,12 +925,11 @@ createApp({
             for (const cat of Object.values(filteredCategoryView.value)) {
                 for (const subcat of Object.values(cat.filteredSubcategories || cat.subcategories || {})) {
                     for (const merchant of Object.values(subcat.filteredMerchants || subcat.merchants || {})) {
-                        const tags = merchant.tags || [];
                         const txns = merchant.filteredTxns || merchant.transactions || [];
 
                         for (const txn of txns) {
                             // Use centralized categorizeAmount() for consistent classification
-                            const c = categorizeAmount(txn.amount || 0, tags);
+                            const c = categorizeAmount(txn.amount || 0, txn.tags || []);
                             totals.income += c.income;
                             totals.investment += c.investment;
                             totals.transferIn += c.transferIn;
@@ -1097,11 +1096,9 @@ createApp({
             for (const [catName, category] of Object.entries(categoryView)) {
                 for (const subcat of Object.values(category.filteredSubcategories || {})) {
                     for (const merchant of Object.values(subcat.filteredMerchants || {})) {
-                        const tags = merchant.tags || [];
-
                         for (const txn of merchant.filteredTxns || []) {
                             // Use centralized categorization
-                            const c = categorizeAmount(txn.amount, tags);
+                            const c = categorizeAmount(txn.amount, txn.tags || []);
 
                             // Track spending by month and category
                             if (c.spending > 0) {
