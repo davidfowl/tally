@@ -13,7 +13,6 @@ from .colors import C
 from .classification import (
     categorize_amount,
     normalize_amount,
-    is_excluded_from_spending,
     calculate_cash_flow,
     calculate_transfers_net,
 )
@@ -225,10 +224,6 @@ def classify_by_sections(by_merchant, sections_config, num_months=12):
     # Convert by_merchant to the format expected by section_engine
     merchant_groups = []
     for merchant_name, data in by_merchant.items():
-        # Skip merchants excluded from spending (income, transfer, investment)
-        # They appear on their respective cards, not in spending sections
-        if is_excluded_from_spending(list(data.get('tags', []))):
-            continue
 
         # Build transactions list for the section filter
         # The 'transactions' key already has the individual transactions

@@ -6,11 +6,12 @@ import tempfile
 import os
 from datetime import date
 
-from tally.analyzer import parse_amount, analyze_transactions, export_json, export_csv
+from tally.analyzer import parse_amount, analyze_transactions, export_json, export_csv, classify_by_sections
 from tally.analyzer import parse_generic_csv as _parse_generic_csv
 from tally.parsers import SkippedRow, ParseResult, _detect_date_format
 from tally.format_parser import parse_format_string
 from tally.merchant_utils import get_all_rules
+from tally.section_engine import parse_sections
 
 
 def parse_generic_csv(*args, **kwargs):
@@ -1589,6 +1590,46 @@ class TestSpecialTags:
         assert stats['income_total'] == 0.0
         assert stats['transfers_in'] == 0.0
         assert stats['transfers_out'] == 0.0
+
+
+class TestSectionViews:
+    """Tests for views.rules section classification behavior."""
+
+    def test_classify_by_sections_includes_transfer_tagged_merchants(self):
+        """Transfer-tagged merchants should still be eligible for section filters."""
+        by_merchant = {
+            'University of Minnesota': {
+                'category': 'College',
+                'subcategory': 'Tuition',
+                'tags': ['transfer'],
+                'transactions': [
+                    {'month': '2025-01', 'amount': 1000.0},
+                ],
+                'total': 1000.0,
+                'monthly_value': 83.33,
+            },
+            'Local Grocery': {
+                'category': 'Food',
+                'subcategory': 'Grocery',
+                'tags': [],
+                'transactions': [
+                    {'month': '2025-01', 'amount': 50.0},
+                ],
+                'total': 50.0,
+                'monthly_value': 4.16,
+            },
+        }
+
+        sections_config = parse_sections("""
+[College Spending]
+filter: category == "College"
+""")
+
+        results = classify_by_sections(by_merchant, sections_config, num_months=12)
+
+        assert 'College Spending' in results
+        assert len(results['College Spending']) == 1
+        assert results['College Spending'][0][0] == 'University of Minnesota'
 
 
 class TestCustomFieldCaptures:
