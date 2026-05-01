@@ -22,6 +22,9 @@ on:
         type: number
         default: 1
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     strategy:
@@ -38,13 +41,13 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: ${{ inputs.fetch_depth }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v8.1.0
 
       - name: Set up Python
         run: uv python install 3.12
@@ -90,7 +93,7 @@ jobs:
           Compress-Archive -Path tally.exe -DestinationPath tally-${{ matrix.platform }}.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tally-${{ matrix.platform }}-${{ contains(inputs.version, 'dev') && 'dev' || 'rc' }}
           path: dist/tally-${{ matrix.platform }}.zip

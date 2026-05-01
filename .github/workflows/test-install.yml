@@ -27,7 +27,7 @@ jobs:
     name: ${{ matrix.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Run install script
         run: bash docs/install.sh
@@ -42,7 +42,7 @@ jobs:
     name: Windows
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Run install script
         shell: pwsh

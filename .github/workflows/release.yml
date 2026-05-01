@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout (for gh CLI context)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Find latest draft release
         id: draft
