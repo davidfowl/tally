@@ -1,5 +1,6 @@
 """Tests for inspect command - CSV sniffing and column analysis."""
 
+from argparse import Namespace
 import csv
 import pytest
 import tempfile
@@ -10,6 +11,7 @@ from tally.commands.inspect import (
     _analyze_columns,
     _analyze_amount_column_detailed,
     _detect_currency_symbol,
+    cmd_inspect,
 )
 
 
@@ -946,5 +948,62 @@ class TestAutoDetectCsvFormat:
             assert spec.description_column == 1
             assert spec.amount_column == 2
             assert spec.delimiter == '\t'
+        finally:
+            os.unlink(tmpfile)
+
+
+class TestCmdInspect:
+    """Regression tests for inspect command amount guidance."""
+
+    def test_reports_negative_amount_observations(self, capsys):
+        """Exports with mostly negative amounts should report the observed sign counts."""
+        csv_content = """Date,Description,Amount
+01/15/2025,GROCERY STORE,-123.45
+01/16/2025,PAYROLL,2500.00
+01/17/2025,COFFEE SHOP,-5.99
+01/18/2025,RENT,-1200.00
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            cmd_inspect(Namespace(file=tmpfile, rows=3))
+            captured = capsys.readouterr()
+            assert 'Suggested format string template:' in captured.out
+            assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
+            assert '1 positive amount, totaling $2,500.00' in captured.out
+            assert '3 negative amounts, totaling $1,329.44' in captured.out
+            assert 'Observed 1 positive and 3 negative non-zero amounts in the sampled rows.' in captured.out
+            assert "Use {amount} to keep amounts as they appear in the CSV." in captured.out
+            assert "Use {-amount} to flip the sign of amounts from the CSV." in captured.out
+            assert "Use {+amount} if you want all parsed amounts to be positive." in captured.out
+            assert "Replace <amount token> in the format string template with the option you choose." in captured.out
+        finally:
+            os.unlink(tmpfile)
+
+    def test_reports_positive_amount_observations(self, capsys):
+        """Exports with mostly positive amounts should report the observed sign counts."""
+        csv_content = """Date,Description,Amount
+01/15/2025,GROCERY STORE,123.45
+01/16/2025,COFFEE SHOP,5.99
+01/17/2025,GAS STATION,45.00
+01/18/2025,PAYMENT,-500.00
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write(csv_content)
+            tmpfile = f.name
+
+        try:
+            cmd_inspect(Namespace(file=tmpfile, rows=4))
+            captured = capsys.readouterr()
+            assert 'format: "{date:%m/%d/%Y}, {description}, <amount token>"' in captured.out
+            assert '3 positive amounts, totaling $174.44' in captured.out
+            assert '1 negative amount, totaling $500.00' in captured.out
+            assert 'Observed 3 positive and 1 negative non-zero amounts in the sampled rows.' in captured.out
+            assert "Use {amount} to keep amounts as they appear in the CSV." in captured.out
+            assert "Use {-amount} to flip the sign of amounts from the CSV." in captured.out
+            assert "Use {+amount} if you want all parsed amounts to be positive." in captured.out
+            assert "Replace <amount token> in the format string template with the option you choose." in captured.out
         finally:
             os.unlink(tmpfile)
