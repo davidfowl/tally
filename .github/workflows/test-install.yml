@@ -34,8 +34,8 @@ jobs:
 
       - name: Verify installation
         run: |
-          ~/.tally/bin/tally version
-          ~/.tally/bin/tally --help
+          ~/.local/bin/tally version
+          ~/.local/bin/tally --help
 
   test-windows:
     runs-on: windows-latest

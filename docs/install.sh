@@ -6,7 +6,7 @@ set -e
 # Usage: curl -fsSL https://raw.githubusercontent.com/davidfowl/tally/main/install.sh | bash -s -- --prerelease
 
 REPO="davidfowl/tally"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.tally/bin}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 TMPDIR="${TMPDIR:-/tmp}"
 PRERELEASE=false
 
@@ -64,12 +64,60 @@ get_release_version() {
     fi
 }
 
+# Migrate from old installation location
+migrate_old_installation() {
+    local old_install_dir="$HOME/.tally/bin"
+    local old_binary="${old_install_dir}/tally"
+    
+    if [[ -f "$old_binary" ]]; then
+        info "Found existing installation at ${old_install_dir}"
+        info "Migrating to ${INSTALL_DIR}..."
+        
+        # Remove old binary
+        rm -f "$old_binary"
+        
+        # Remove old directory if empty
+        if [[ -d "$old_install_dir" ]] && [[ -z "$(ls -A "$old_install_dir")" ]]; then
+            rmdir "$old_install_dir"
+        fi
+        if [[ -d "$HOME/.tally" ]] && [[ -z "$(ls -A "$HOME/.tally")" ]]; then
+            rmdir "$HOME/.tally"
+        fi
+        
+        # Clean up old PATH entries from shell config files
+        local config_files=(
+            "$HOME/.bashrc"
+            "$HOME/.bash_profile"
+            "$HOME/.zshrc"
+            "${ZDOTDIR:-$HOME}/.zshrc"
+            "$HOME/.profile"
+            "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+        )
+        
+        for config_file in "${config_files[@]}"; do
+            if [[ -f "$config_file" ]] && grep -q "/.tally/bin" "$config_file" 2>/dev/null; then
+                # Create backup
+                cp "$config_file" "${config_file}.bak"
+                # Remove lines containing .tally/bin
+                sed -i.tmp '/\.tally\/bin/d' "$config_file" 2>/dev/null || sed -i '' '/\.tally\/bin/d' "$config_file" 2>/dev/null
+                rm -f "${config_file}.tmp"
+                info "Cleaned up old PATH entry in $(basename "$config_file")"
+            fi
+        done
+        
+        info "Migration complete!"
+    fi
+}
+
 main() {
     if [ "$PRERELEASE" = true ]; then
         info "Installing tally (development build)..."
     else
         info "Installing tally..."
     fi
+    
+    # Migrate from old installation if it exists
+    migrate_old_installation
 
     OS=$(detect_os)
     ARCH=$(detect_arch)
@@ -150,20 +198,20 @@ add_to_path() {
             else
                 config_file="$HOME/.bashrc"
             fi
-            path_line='export PATH="$HOME/.tally/bin:$PATH"'
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
         zsh)
             config_file="${ZDOTDIR:-$HOME}/.zshrc"
-            path_line='export PATH="$HOME/.tally/bin:$PATH"'
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
         fish)
             config_file="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
-            path_line='fish_add_path $HOME/.tally/bin'
+            path_line='fish_add_path $HOME/.local/bin'
             ;;
         *)
             # Fallback to .profile for other POSIX shells
             config_file="$HOME/.profile"
-            path_line='export PATH="$HOME/.tally/bin:$PATH"'
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
     esac
 
@@ -171,7 +219,7 @@ add_to_path() {
     mkdir -p "$(dirname "$config_file")"
 
     # Check if already added
-    if [[ -f "$config_file" ]] && grep -q "/.tally/bin" "$config_file" 2>/dev/null; then
+    if [[ -f "$config_file" ]] && grep -q "/.local/bin" "$config_file" 2>/dev/null; then
         return
     fi
 
