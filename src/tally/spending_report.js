@@ -149,8 +149,8 @@ const MerchantSection = defineComponent({
                 </h2>
                 <span class="section-total">
                     <template v-if="categoryMode">
-                        <span class="section-monthly">{{ formatCurrency(totalAmount / numMonths) }}/mo</span> ·
-                        <span class="section-ytd">{{ formatCurrency(totalAmount) }}</span>
+                        <span class="section-monthly" :class="{ 'negative-amount': totalAmount < 0 }">{{ formatCurrency(totalAmount / numMonths) }}/mo</span> ·
+                        <span class="section-ytd" :class="{ 'negative-amount': totalAmount < 0 }">{{ formatCurrency(totalAmount) }}</span>
                         <span class="section-pct" v-if="typeTotals">
                             <span v-if="typeTotals.spending > 0 && totalUnfilteredSpending > 0">({{ formatPct(typeTotals.spending, totalUnfilteredSpending) }})</span>
                             <span v-if="typeTotals.income > 0 && incomeTotal > 0" class="income-pct">({{ formatPct(typeTotals.income, incomeTotal) }} income)</span>
@@ -485,6 +485,7 @@ createApp({
         const currentView = ref('category'); // 'category' or 'section'
         const groupByMode = ref('merchant'); // 'merchant' or 'subcategory'
         const sortConfig = reactive({}); // { 'cat:Food': { column: 'total', dir: 'desc' } }
+        const includeNegativeTotals = ref(false); // show categories with negative filteredTotal
 
         // Chart refs
         const monthlyChart = ref(null);
@@ -660,10 +661,11 @@ createApp({
 
         // Categories to display - show all with non-negative totals
         // Negative totals (credits/refunds) are shown in the Credits section
+        // When includeNegativeTotals is enabled, show all categories regardless of total sign
         const positiveCategoryView = computed(() => {
             const result = {};
             for (const [catName, category] of Object.entries(filteredCategoryView.value)) {
-                if (category.filteredTotal >= 0) {
+                if (includeNegativeTotals.value || category.filteredTotal >= 0) {
                     result[catName] = category;
                 }
             }
@@ -808,7 +810,7 @@ createApp({
         const filteredSectionView = computed(() => {
             const sections = spendingData.value.sections || {};
             const result = {};
-
+			
             for (const [sectionId, section] of Object.entries(sections)) {
                 const filteredMerchants = {};
                 let sectionTotal = 0;
@@ -852,6 +854,18 @@ createApp({
                 section.filteredMerchants = sortMerchantEntries(section.filteredMerchants, cfg.column, cfg.dir);
             }
 
+            return result;
+        });
+
+        // Sections to display - show all with non-negative totals
+        // When includeNegativeTotals is enabled, show all sections regardless of total sign
+        const positiveSectionView = computed(() => {
+            const result = {};
+            for (const [sectionId, section] of Object.entries(filteredSectionView.value)) {
+                if (includeNegativeTotals.value || section.filteredTotal >= 0) {
+                    result[sectionId] = section;
+                }
+            }
             return result;
         });
 
@@ -1987,12 +2001,12 @@ createApp({
             // State
             activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
             showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
-            currentView, groupByMode, sortConfig,
+            currentView, groupByMode, sortConfig, includeNegativeTotals,
             // Refs
             monthlyChart, categoryPieChart, categoryByMonthChart,
             // Computed
             spendingData, title, subtitle,
-            visibleSections, filteredCategoryView, positiveCategoryView, subcategoryGroupedView, creditMerchants, filteredSectionView, hasSections,
+            visibleSections, filteredCategoryView, positiveCategoryView, subcategoryGroupedView, creditMerchants, filteredSectionView, positiveSectionView, hasSections,
             sectionTotals, grandTotal, grossSpending, creditsTotal, uncategorizedTotal,
             numFilteredMonths, filteredAutocomplete, availableMonths,
             categoryColorMap, tagColor,

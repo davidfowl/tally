@@ -176,12 +176,19 @@
                         @click="currentView = 'section'">
                     View
                 </button>
+                <button v-if="currentView === 'category' || hasSections"
+                        class="toggle-negatives"
+                        :class="{ active: includeNegativeTotals }"
+                        :title="includeNegativeTotals ? 'Exclude categories and merchants with net negative totals' : 'Include categories and merchants with net negative totals'"
+                        @click="includeNegativeTotals = !includeNegativeTotals">
+                    {{ includeNegativeTotals ? 'Exclude Negatives' : 'Include Negatives' }}
+                </button>
             </div>
 
             <!-- Section View -->
             <template v-if="currentView === 'section' && hasSections">
                 <merchant-section
-                    v-for="(section, sectionId) in filteredSectionView"
+                    v-for="(section, sectionId) in positiveSectionView"
                     :key="sectionId"
                     :section-key="'sec:' + sectionId"
                     :title="section.title"

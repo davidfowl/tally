@@ -54,6 +54,7 @@
     --accent-pink-dark: #fa709a;
     --accent-red: #ff6b6b;
     --accent-green: #4ade80;
+    --accent-negative: #663636;
 
     /* Special */
     --bg-amex: #006fcf;
@@ -236,7 +237,7 @@ h1 {
 }
 .date-range-select option {
     background: var(--bg-card);
-    color: var(--text-primary);
+    /* color: var(--text-primary); gray on gray */
     padding: 0.5rem;
 }
 .date-range-select optgroup {
@@ -1441,6 +1442,10 @@ section:nth-child(5) { animation-delay: 0.4s; }
     background: var(--accent-blue);
     border-color: var(--accent-blue);
     color: white;
+}
+.view-toggle button.toggle-negatives.active {
+    background: var(--accent-negative);
+    border-color: var(--accent-negative);
 }
 
 
