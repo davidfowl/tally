@@ -4,6 +4,7 @@ HTML Report Generation - Generate spending analysis HTML reports.
 This module handles generation of interactive HTML reports from analyzed transaction data.
 """
 
+import base64
 import json
 import sys
 from collections import defaultdict
@@ -116,19 +117,32 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     by_merchant = stats.get('by_merchant', {})
 
     # Helper function to create merchant IDs
-    def make_merchant_id(name):
-        return name.replace("'", "").replace('"', '').replace(' ', '_')
+    def make_merchant_id(name, category='', subcategory=''):
+        merchant_identity = json.dumps(
+            [name, category, subcategory],
+            ensure_ascii=False,
+            separators=(',', ':'),
+        ).encode('utf-8')
+        encoded_identity = base64.urlsafe_b64encode(merchant_identity).decode('ascii').rstrip('=')
+        return f"merchant_{encoded_identity}"
+
+    def get_merchant_display_name(merchant_key, merchant_data):
+        merchant_name = merchant_data.get('name')
+        if merchant_name:
+            return merchant_name
+        if isinstance(merchant_key, tuple) and merchant_key:
+            return merchant_key[0]
+        return str(merchant_key)
 
     # Build section merchants data
     def build_section_merchants(merchant_dict):
         merchants = {}
         for merchant_key, data in merchant_dict.items():
             # Display name comes from data['name'] when available; fall back to the key
-            merchant_name = data.get('name', merchant_key if isinstance(merchant_key, str) else str(merchant_key))
-            category = data.get('category', '')
-            subcategory = data.get('subcategory', '')
-            # Use a composite ID so same-named merchants with different categories are distinct
-            merchant_id = make_merchant_id(f"{merchant_name}_{category}_{subcategory}")
+            merchant_name = get_merchant_display_name(merchant_key, data)
+            category = data.get('category', merchant_key[1] if isinstance(merchant_key, tuple) and len(merchant_key) > 1 else '')
+            subcategory = data.get('subcategory', merchant_key[2] if isinstance(merchant_key, tuple) and len(merchant_key) > 2 else '')
+            merchant_id = make_merchant_id(merchant_name, category, subcategory)
 
             # Build transactions array with unique IDs
             txns = []
@@ -215,7 +229,7 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
             for merch_name, data in merchants_list:
                 cat = data.get('category', '')
                 subcat = data.get('subcategory', '')
-                unique_key = f"{merch_name}||{cat}||{subcat}" if (cat or subcat) else merch_name
+                unique_key = (merch_name, cat, subcat) if (cat or subcat) else merch_name
                 merchant_dict[unique_key] = data
             merchants = build_section_merchants(merchant_dict)
 
@@ -252,11 +266,10 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         all_merchants = {}
         by_merchant = stats.get('by_merchant', {})
         for merchant_key, data in by_merchant.items():
-            merchant_name = data.get('name', '')
+            merchant_name = get_merchant_display_name(merchant_key, data)
             category = data.get('category', '')
             subcategory = data.get('subcategory', '')
-            # Use composite key to ensure uniqueness for same-name merchants in different categories
-            unique_key = f"{merchant_name}||{category}||{subcategory}" if (category or subcategory) else merchant_name
+            unique_key = (merchant_name, category, subcategory) if (category or subcategory) else merchant_name
             sub_result = build_section_merchants({unique_key: data})
             all_merchants.update(sub_result)
 

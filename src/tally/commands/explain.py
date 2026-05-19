@@ -118,8 +118,8 @@ def cmd_explain(args):
         # Build a lookup from merchant name -> list of data entries
         # (same merchant name may appear with different categories as separate entries)
         name_to_entries = {}
-        for merchant_data in all_merchants.values():
-            merchant_name = merchant_data.get('name', '')
+        for merchant_key, merchant_data in all_merchants.items():
+            merchant_name = _get_merchant_display_name(merchant_key, merchant_data)
             if merchant_name not in name_to_entries:
                 name_to_entries[merchant_name] = []
             name_to_entries[merchant_name].append(merchant_data)
@@ -129,15 +129,23 @@ def cmd_explain(args):
             # Try exact match first
             if merchant_query in name_to_entries:
                 found_any = True
-                for entry in name_to_entries[merchant_query]:
-                    _print_merchant_explanation(merchant_query, entry, args.format, verbose, stats['num_months'], views_config)
+                entries = [(merchant_query, entry) for entry in name_to_entries[merchant_query]]
+                if args.format == 'json':
+                    _print_merchant_matches_json(merchant_query, 'exact', entries, verbose, stats['num_months'], views_config)
+                else:
+                    for name, entry in entries:
+                        _print_merchant_explanation(name, entry, args.format, verbose, stats['num_months'], views_config)
             else:
                 # Try case-insensitive match
                 matches = [n for n in name_to_entries.keys() if n.lower() == merchant_query.lower()]
                 if matches:
                     found_any = True
-                    for entry in name_to_entries[matches[0]]:
-                        _print_merchant_explanation(matches[0], entry, args.format, verbose, stats['num_months'], views_config)
+                    entries = [(matches[0], entry) for entry in name_to_entries[matches[0]]]
+                    if args.format == 'json':
+                        _print_merchant_matches_json(merchant_query, 'case_insensitive', entries, verbose, stats['num_months'], views_config)
+                    else:
+                        for name, entry in entries:
+                            _print_merchant_explanation(name, entry, args.format, verbose, stats['num_months'], views_config)
                     continue
 
                 # Try substring match on merchant names (partial search)
@@ -145,10 +153,17 @@ def cmd_explain(args):
                 partial_matches = [n for n in name_to_entries.keys() if query_lower in n.lower()]
                 if partial_matches:
                     found_any = True
-                    print(f"Merchants matching '{merchant_query}':\n")
-                    for n in sorted(partial_matches):
-                        for entry in name_to_entries[n]:
-                            _print_merchant_explanation(n, entry, args.format, verbose, stats['num_months'], views_config)
+                    entries = [
+                        (name, entry)
+                        for name in sorted(partial_matches)
+                        for entry in name_to_entries[name]
+                    ]
+                    if args.format == 'json':
+                        _print_merchant_matches_json(merchant_query, 'partial', entries, verbose, stats['num_months'], views_config)
+                    else:
+                        print(f"Merchants matching '{merchant_query}':\n")
+                        for name, entry in entries:
+                            _print_merchant_explanation(name, entry, args.format, verbose, stats['num_months'], views_config)
                     continue
 
                 # Search transactions containing the query
@@ -308,7 +323,10 @@ def cmd_explain(args):
 
             if args.format == 'json':
                 import json
-                merchants = [build_merchant_json(data.get('name', ''), data, verbose) for data in matching_merchants.values()]
+                merchants = [
+                    build_merchant_json(_get_merchant_display_name(merchant_key, data), data, verbose)
+                    for merchant_key, data in matching_merchants.items()
+                ]
                 merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
                 output = {'filters': active_filters, 'merchants': merchants}
                 print(json.dumps(output, indent=2))
@@ -398,6 +416,16 @@ def _merchant_has_month(merchant_data, month_filter):
         if txn_month == month_filter:
             return True
     return False
+
+
+def _get_merchant_display_name(merchant_key, merchant_data):
+    """Return the logical merchant name for string or tuple by_merchant keys."""
+    merchant_name = merchant_data.get('name')
+    if merchant_name:
+        return merchant_name
+    if isinstance(merchant_key, tuple) and merchant_key:
+        return merchant_key[0]
+    return str(merchant_key)
 
 
 def _suggest_available_values(by_merchant, has_category, has_tags, has_month):
@@ -675,11 +703,10 @@ def _print_merchant_explanation(name, data, output_format, verbose, num_months, 
     import json
 
     # Get matching views
-    matching_views = _get_matching_views(data, views_config, num_months)
+    merchant_json = _build_merchant_explanation_json(name, data, verbose, num_months, views_config)
+    matching_views = merchant_json['views']
 
     if output_format == 'json':
-        merchant_json = build_merchant_json(name, data, verbose)
-        merchant_json['views'] = matching_views
         print(json.dumps(merchant_json, indent=2))
     elif output_format == 'markdown':
         reasoning = data.get('reasoning', {})
@@ -817,6 +844,30 @@ def _print_merchant_explanation(name, data, output_format, verbose, num_months, 
         print()
 
 
+def _build_merchant_explanation_json(name, data, verbose, num_months, views_config=None):
+    """Build JSON payload for a single merchant explanation."""
+    merchant_json = build_merchant_json(name, data, verbose)
+    merchant_json['views'] = _get_matching_views(data, views_config, num_months)
+    return merchant_json
+
+
+def _print_merchant_matches_json(query, match_mode, entries, verbose, num_months, views_config=None):
+    """Print a single JSON payload for explain merchant match results."""
+    import json
+
+    merchants = [
+        _build_merchant_explanation_json(name, data, verbose, num_months, views_config)
+        for name, data in entries
+    ]
+    payload = {
+        'query': query,
+        'match_mode': match_mode,
+        'matched_names': sorted({merchant['name'] for merchant in merchants}),
+        'merchants': merchants,
+    }
+    print(json.dumps(payload, indent=2))
+
+
 def _print_classification_summary(section, merchants_dict, verbose, num_months):
     """Print summary of merchants in a classification."""
     section_name = section.replace('_', ' ').title()
@@ -825,7 +876,7 @@ def _print_classification_summary(section, merchants_dict, verbose, num_months):
 
     sorted_merchants = sorted(merchants_dict.items(), key=lambda x: x[1].get('monthly_value', 0), reverse=True)
     for key, data in sorted_merchants:
-        name = data.get('name', str(key))
+        name = _get_merchant_display_name(key, data)
         reasoning = data.get('reasoning', {})
         category = data.get('category', '')
         months = data.get('months_active', 0)
@@ -857,11 +908,11 @@ def _print_explain_summary(stats, verbose):
 
     # Group by category
     by_category = {}
-    for name, data in by_merchant.items():
+    for merchant_key, data in by_merchant.items():
         cat = data.get('category', 'Unknown')
         if cat not in by_category:
             by_category[cat] = []
-        by_category[cat].append((name, data))
+        by_category[cat].append((_get_merchant_display_name(merchant_key, data), data))
 
     # Sort categories by total spend
     sorted_categories = sorted(

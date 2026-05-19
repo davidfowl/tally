@@ -15,7 +15,6 @@ from .classification import (
     normalize_amount,
     calculate_cash_flow,
     calculate_transfers_net,
-    is_excluded_from_spending,
 )
 
 # Import parsing functions from parsers module (and re-export for backwards compatibility)
@@ -40,6 +39,16 @@ from .report import (
 
 
 # ============================================================================
+
+
+def _get_merchant_display_name(merchant_key, data):
+    """Return the logical merchant name for string or tuple by_merchant keys."""
+    merchant_name = data.get('name')
+    if merchant_name:
+        return merchant_name
+    if isinstance(merchant_key, tuple) and merchant_key:
+        return merchant_key[0]
+    return str(merchant_key)
 
 
 def analyze_transactions(transactions):
@@ -212,7 +221,7 @@ def classify_by_sections(by_merchant, sections_config, num_months=12):
     Classify merchants into user-defined sections.
 
     Args:
-        by_merchant: Dict of merchant_name -> merchant data (from analyze_transactions)
+        by_merchant: Dict of string or tuple merchant keys -> merchant data
         sections_config: SectionConfig from section_engine
         num_months: Number of months in the data period
 
@@ -229,11 +238,7 @@ def classify_by_sections(by_merchant, sections_config, num_months=12):
     # Convert by_merchant to the format expected by section_engine
     merchant_groups = []
     for merchant_key, data in by_merchant.items():
-        merchant_name = data.get('name', '')
-        # Skip merchants excluded from spending (income, transfer, investment)
-        # They appear on their respective cards, not in spending sections
-        if is_excluded_from_spending(list(data.get('tags', []))):
-            continue
+        merchant_name = _get_merchant_display_name(merchant_key, data)
 
         # Build transactions list for the section filter
         # The 'transactions' key already has the individual transactions
@@ -440,15 +445,19 @@ def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
             if data['total'] > 0
         ],
         'credits': [
-            {'merchant': data.get('name', ''), 'category': data.get('category', ''), 'amount': round(abs(data['total']), 2)}
-            for data in by_merchant.values() if data['total'] < 0
+            {
+                'merchant': _get_merchant_display_name(merchant_key, data),
+                'category': data.get('category', ''),
+                'amount': round(abs(data['total']), 2)
+            }
+            for merchant_key, data in by_merchant.items() if data['total'] < 0
         ],
         'merchants': []
     }
 
     merchants = []
-    for data in by_merchant.values():
-        merchant_name = data.get('name', '')
+    for merchant_key, data in by_merchant.items():
+        merchant_name = _get_merchant_display_name(merchant_key, data)
         # Apply filters
         if category_filter and data.get('category') != category_filter:
             continue
@@ -532,7 +541,10 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
         lines.append('')
 
     # Credits/Refunds
-    credit_merchants = [(d.get('name', ''), d) for d in by_merchant.values() if d['total'] < 0]
+    credit_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] < 0
+    ]
     if credit_merchants:
         lines.append('## Credits/Refunds\n')
         lines.append('| Merchant | Category | Amount |')
@@ -556,7 +568,10 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
     lines.append("## Merchants\n")
 
     # Sort by monthly value (positive merchants only)
-    positive_merchants = [(d.get('name', ''), d) for d in by_merchant.values() if d['total'] > 0]
+    positive_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] > 0
+    ]
     sorted_merchants = sorted(
         positive_merchants,
         key=lambda x: x[1].get('monthly_value', 0),
@@ -616,8 +631,8 @@ def export_csv(stats, category_filter=None, merchant_filter=None):
     all_transactions = []
     extra_field_names = set()
 
-    for _merchant_key, data in by_merchant.items():
-        merchant_name = data.get('name', '')
+    for merchant_key, data in by_merchant.items():
+        merchant_name = _get_merchant_display_name(merchant_key, data)
         # Apply filters
         if category_filter and data.get('category') != category_filter:
             continue
@@ -734,7 +749,10 @@ def print_summary(stats, title=None, filter_category=None, currency_format="${am
     # =========================================================================
     # CREDITS/REFUNDS (if any negative totals)
     # =========================================================================
-    credit_merchants = [(d.get('name', ''), d) for d in by_merchant.values() if d['total'] < 0]
+    credit_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] < 0
+    ]
     if credit_merchants:
         print("\n" + "=" * 80)
         print("CREDITS/REFUNDS")
@@ -773,7 +791,10 @@ def print_summary(stats, title=None, filter_category=None, currency_format="${am
     print("-" * 80)
 
     # Only show positive-total merchants here (credits shown separately)
-    positive_merchants = [(d.get('name', ''), d) for d in by_merchant.values() if d['total'] > 0]
+    positive_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] > 0
+    ]
     sorted_merchants = sorted(
         positive_merchants,
         key=lambda x: x[1].get('total', 0),
@@ -824,7 +845,7 @@ def print_summary(stats, title=None, filter_category=None, currency_format="${am
             cat = data.get('category', 'Unknown')
             if cat not in cat_merchants:
                 cat_merchants[cat] = []
-            cat_merchants[cat].append((data.get('name', ''), data))
+            cat_merchants[cat].append((_get_merchant_display_name(_merchant_key, data), data))
 
         # Sort categories by total
         sorted_cats = sorted(

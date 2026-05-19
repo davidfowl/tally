@@ -11,6 +11,7 @@ from tally.analyzer import parse_generic_csv as _parse_generic_csv
 from tally.parsers import SkippedRow, ParseResult, _detect_date_format
 from tally.format_parser import parse_format_string
 from tally.merchant_utils import get_all_rules
+from tally.report import write_summary_file_vue
 from tally.section_engine import parse_sections
 
 
@@ -432,6 +433,50 @@ class TestExportCsv:
         assert 'paypal_txn_id' in reader.fieldnames
         assert rows[0]['paypal_merchant'] == 'Acme Corp'
         assert rows[0]['paypal_txn_id'] == '123ABC'
+
+
+class TestHtmlReportTupleKeyFallback:
+    """Tests for HTML report generation with tuple by_merchant keys."""
+
+    def test_write_summary_file_vue_falls_back_to_tuple_merchant_name(self, tmp_path):
+        """HTML report should use tuple merchant names when data['name'] is unavailable."""
+        txns = [
+            {
+                'date': date(2025, 1, 5),
+                'description': 'ROCHESTER PUBLIC SCHOOLS CAFE',
+                'raw_description': 'ROCHESTER PUBLIC SCHOOLS CAFE',
+                'merchant': 'Rochester Public Schools',
+                'amount': 42.50,
+                'category': 'Food',
+                'subcategory': 'School Meals',
+                'source': 'test.csv',
+                'tags': [],
+                'excluded': None,
+            },
+            {
+                'date': date(2025, 1, 12),
+                'description': 'ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE',
+                'raw_description': 'ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE',
+                'merchant': 'Rochester Public Schools',
+                'amount': 75.00,
+                'category': 'Education',
+                'subcategory': 'Fees',
+                'source': 'test.csv',
+                'tags': [],
+                'excluded': None,
+            },
+        ]
+
+        stats = analyze_transactions(txns)
+        for data in stats['by_merchant'].values():
+            data.pop('name', None)
+
+        output_path = tmp_path / 'report.html'
+        write_summary_file_vue(stats, output_path, title='Tuple Key Report')
+
+        report_html = output_path.read_text(encoding='utf-8')
+        assert 'Rochester Public Schools' in report_html
+        assert "('Rochester Public Schools', 'Food', 'School Meals')" not in report_html
 
 
 class TestParseAmount:

@@ -1,5 +1,6 @@
 """Tests for CLI error handling and user experience."""
 
+import json
 import pytest
 import subprocess
 import tempfile
@@ -152,6 +153,51 @@ data_sources:
             assert "No merchants found matching: category:NonExistent" in result.stdout
             assert 'Available categories:' in result.stdout
 
+    def test_explain_summary_handles_tuple_merchant_keys(self):
+        """Default explain summary should render duplicate merchant names without crashing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data/test.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+merchants_file: config/merchants.rules
+""")
+
+            with open(os.path.join(config_dir, 'merchants.rules'), 'w') as f:
+                f.write("""[School Food]
+match: contains("ROCHESTER PUBLIC SCHOOLS CAFE")
+category: Food
+subcategory: School Meals
+merchant: Rochester Public Schools
+
+[School Fees]
+match: contains("ROCHESTER PUBLIC SCHOOLS ACTIVITY")
+category: Education
+subcategory: Fees
+merchant: Rochester Public Schools
+""")
+
+            with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-05,ROCHESTER PUBLIC SCHOOLS CAFE,42.50\n")
+                f.write("2025-01-12,ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE,75.00\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'explain', '--config', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            assert 'Rochester Public Schools' in result.stdout
+            assert "('Rochester Public Schools'" not in result.stdout
+
     def test_invalid_format_shows_choices(self):
         """Invalid --format should show valid choices."""
         result = subprocess.run(
@@ -194,6 +240,65 @@ data_sources:
             # Message may be in stdout or stderr depending on error type
             output = result.stdout + result.stderr
             assert 'No view' in output or 'views' in output.lower()
+
+
+class TestExplainJsonOutput:
+    """Tests for JSON explain output."""
+
+    def _create_config(self, tmpdir):
+        config_dir = os.path.join(tmpdir, 'config')
+        data_dir = os.path.join(tmpdir, 'data')
+        os.makedirs(config_dir)
+        os.makedirs(data_dir)
+
+        with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+            f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data/test.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+        with open(os.path.join(config_dir, 'merchant_categories.csv'), 'w') as f:
+            f.write("Pattern,Merchant,Category,Subcategory\n")
+            f.write("AMAZON BOOKS,Amazon,Shopping,Books\n")
+            f.write("AMAZON PRIME,Amazon,Subscriptions,Streaming\n")
+            f.write("AMAZE CAFE,Amaze Cafe,Food,Coffee\n")
+
+        with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
+            f.write("date,description,amount\n")
+            f.write("2025-01-15,AMAZON BOOKS ORDER,12.99\n")
+            f.write("2025-01-18,AMAZON PRIME MEMBERSHIP,14.99\n")
+            f.write("2025-01-20,AMAZE CAFE LATTE,6.50\n")
+
+        return config_dir
+
+    @pytest.mark.parametrize(
+        ("query", "match_mode", "matched_names", "merchant_count"),
+        [
+            ("Amazon", "exact", ["Amazon"], 2),
+            ("amazon", "case_insensitive", ["Amazon"], 2),
+            ("Amaz", "partial", ["Amaze Cafe", "Amazon"], 3),
+        ],
+    )
+    def test_explain_json_match_modes_return_single_payload(self, query, match_mode, matched_names, merchant_count):
+        """Exact/case-insensitive/partial explain JSON should be a single parseable payload."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = self._create_config(tmpdir)
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'explain', '--format', 'json', query, config_dir],
+                capture_output=True,
+                text=True
+            )
+
+            assert result.returncode == 0
+            payload = json.loads(result.stdout)
+            assert payload['query'] == query
+            assert payload['match_mode'] == match_mode
+            assert payload['matched_names'] == matched_names
+            assert len(payload['merchants']) == merchant_count
+            assert [merchant['name'] for merchant in payload['merchants']].count('Amazon') == min(merchant_count, 2)
 
 
 class TestMigration:
