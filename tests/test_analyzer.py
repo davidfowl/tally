@@ -3145,3 +3145,131 @@ class TestReportDiff:
         assert "Netflix" in detailed
         assert "Amazon" in detailed
         assert "lost 'shopping'" in detailed
+
+
+class TestReportFields:
+    """Tests for the report_fields setting and blank extra_field suppression."""
+
+    def test_report_fields_promotes_capture(self):
+        """report_fields surfaces a CSV capture as extra_fields, skipping blanks."""
+        csv_content = """Date,Description,Memo,Amount
+11/26/2025,LOWES #02736,Any idea what this is?,-45.00
+11/24/2025,LOWES #02736,,-12.00
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            format_spec = parse_format_string("{date:%m/%d/%Y},{description},{memo},{amount}")
+            format_spec.report_fields = ['memo']
+            txns = parse_generic_csv(f.name, format_spec, get_all_rules())
+
+            assert txns[0]['extra_fields'] == {'memo': 'Any idea what this is?'}
+            # Blank memo produces no extra_fields at all - no "+1" badge in the report
+            assert 'extra_fields' not in txns[1]
+        finally:
+            os.unlink(f.name)
+
+    def test_captures_not_promoted_without_report_fields(self):
+        """Captures stay rule-only (field.*) unless named in report_fields."""
+        csv_content = """Date,Description,Memo,Amount
+11/26/2025,LOWES #02736,Any idea what this is?,-45.00
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            format_spec = parse_format_string("{date:%m/%d/%Y},{description},{memo},{amount}")
+            txns = parse_generic_csv(f.name, format_spec, get_all_rules())
+
+            assert 'extra_fields' not in txns[0]
+            assert txns[0]['field']['memo'] == 'Any idea what this is?'
+        finally:
+            os.unlink(f.name)
+
+    def test_report_fields_from_global_setting(self):
+        """Global report_fields applies to sources that capture the field."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format(
+            {'name': 'wf', 'format': '{date:%m/%d/%Y},{description},{memo},{amount}'},
+            report_fields=['memo'],
+        )
+        assert source['_format_spec'].report_fields == ['memo']
+
+    def test_global_report_fields_ignores_missing_field(self):
+        """A global report_fields naming a field this source lacks is not an error."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format(
+            {'name': 'amex', 'format': '{date:%m/%d/%Y},{description},{amount}'},
+            report_fields=['memo'],
+        )
+        assert source['_format_spec'].report_fields == []
+
+    def test_source_report_fields_rejects_missing_field(self):
+        """An explicit source-level report_fields typo fails loudly."""
+        from tally.config_loader import resolve_source_format
+
+        with pytest.raises(ValueError, match='not captured by the format string'):
+            resolve_source_format({
+                'name': 'wf',
+                'format': '{date:%m/%d/%Y},{description},{amount}',
+                'report_fields': ['memo'],
+            })
+
+
+class TestEmptyFieldDirectiveSuppression:
+    """field: directives evaluating to empty values should not create blank fields."""
+
+    def test_blank_field_directive_omitted(self):
+        """A field: capturing an empty memo yields no extra_fields entry."""
+        from tally.merchant_utils import get_all_rules, normalize_merchant, clear_engine_cache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Lowes]
+match: contains("LOWES")
+category: Hardware
+field: memo = field.memo
+""")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+
+            _, _, _, with_memo = normalize_merchant(
+                "LOWES #02736", rules, amount=45.0,
+                field={'memo': 'Any idea what this is?'})
+            assert with_memo['extra_fields'] == {'memo': 'Any idea what this is?'}
+
+            _, _, _, blank_memo = normalize_merchant(
+                "LOWES #02736", rules, amount=12.0, field={'memo': ''})
+            assert 'extra_fields' not in blank_memo
+
+            clear_engine_cache()
+
+    def test_zero_field_directive_retained(self):
+        """Zero is a meaningful value and must survive the empty-value guard."""
+        from tally.merchant_utils import get_all_rules, normalize_merchant, clear_engine_cache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Lowes]
+match: contains("LOWES")
+category: Hardware
+field: fee = 0
+""")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+
+            _, _, _, info = normalize_merchant("LOWES #02736", rules, amount=45.0)
+            assert info['extra_fields'] == {'fee': 0}
+
+            clear_engine_cache()

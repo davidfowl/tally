@@ -361,6 +361,11 @@
 <span class="comment"># match: field.txn_type == "WIRE"</span>
 <span class="comment"># match: contains(field.memo, "Invoice")</span></code></pre>
 
+        <p>A captured column is available to rule expressions, but is not shown in the report until you ask for it. The simplest way is <code>report_fields</code>, which surfaces the column as-is:</p>
+        <pre><code><span class="highlight">report_fields:</span>
+  - memo</code></pre>
+        <p>Transactions with a blank value show no details badge. A rule's <a href="reference.html#field-directive"><code>field:</code> directive</a> also shows up in the popup, and is what you want when the value needs computing rather than copying. See the <a href="reference.html#report-fields">rules reference</a> for per-source overrides and how the two interact.</p>
+
         <h3>Combining Columns into Description</h3>
         <p>Some CSVs split transaction info across multiple columns. Use <code>columns.description</code> to combine them:</p>
         <pre><code><span class="comment"># CSV: Date, Category, Payee, Reference, Amount</span>

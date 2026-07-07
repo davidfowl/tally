@@ -88,8 +88,6 @@ def resolve_config_dir(args, required=True):
 
 def init_config(target_dir):
     """Initialize a new config directory with starter files."""
-    import datetime
-
     config_dir = os.path.join(target_dir, 'config')
     data_dir = os.path.join(target_dir, 'data')
     output_dir = os.path.join(target_dir, 'output')
@@ -99,7 +97,6 @@ def init_config(target_dir):
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    current_year = datetime.datetime.now().year
     files_created = []
     files_skipped = []
 
@@ -107,7 +104,8 @@ def init_config(target_dir):
     settings_path = os.path.join(config_dir, 'settings.yaml')
     if not os.path.exists(settings_path):
         with open(settings_path, 'w', encoding='utf-8') as f:
-            f.write(STARTER_SETTINGS.format(year=current_year))
+            # .format() (no args) still unescapes the {{...}} format examples
+            f.write(STARTER_SETTINGS.format())
         files_created.append('config/settings.yaml')
     else:
         files_skipped.append('config/settings.yaml')

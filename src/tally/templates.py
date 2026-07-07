@@ -3,7 +3,7 @@ Starter template strings for tally init command.
 """
 
 STARTER_SETTINGS = '''# Tally Settings
-title: "{year} Spending Analysis"
+title: "Tally Spending Analysis"
 
 # Data sources - add your statement files here
 # Run: tally inspect <file> to auto-detect the format string
@@ -29,6 +29,13 @@ data_sources:
   #   file: data/exports/*.csv     # top-level glob
   # - name: All Exports (recursive)
   #   file: data/exports/**/*.csv  # recursive glob
+
+# Capture columns to surface in the report's transaction details popup.
+# Any name here that a source's format string captures - e.g. {{memo}} - is shown
+# when non-blank. Names a source does not capture are ignored, so this is safe to
+# leave on. Override per source with report_fields under that data source.
+report_fields:
+  - memo
 
 output_dir: output
 html_filename: spending_summary.html
