@@ -39,12 +39,68 @@
                         </div>
                     </div>
                 </div>
-                <select class="date-range-select" @change="addMonthFilter($event.target.value); $event.target.value = ''">
-                    <option value="">+ Date filter</option>
-                    <optgroup label="Individual Months">
-                        <option v-for="m in availableMonths" :key="m.key" :value="m.key">{{ m.label }}</option>
-                    </optgroup>
-                </select>
+                <div class="date-filter-wrap">
+                    <button type="button" class="date-range-select date-filter-trigger"
+                            :class="{ open: datePopoverOpen }"
+                            data-testid="date-filter-trigger"
+                            @click.stop="toggleDatePopover">📅 Date filter <span class="chev">▾</span></button>
+                    <div class="date-popover" v-if="datePopoverOpen" data-testid="date-popover" @click.stop>
+                        <div class="quick-grid quick-grid-3col" data-testid="date-this-row">
+                            <button v-for="item in thisLastPresets.thisRow" :key="item.key" type="button"
+                                    class="quick-pill" :class="{ active: isDateItemActive(item) }"
+                                    :data-testid="'date-preset-' + item.label.toLowerCase().replace(/ /g, '-')"
+                                    @click="toggleDateItem(item)">{{ item.label }}</button>
+                        </div>
+                        <div class="quick-grid quick-grid-3col" data-testid="date-last-row">
+                            <button v-for="item in thisLastPresets.lastRow" :key="item.key" type="button"
+                                    class="quick-pill" :class="{ active: isDateItemActive(item) }"
+                                    :data-testid="'date-preset-' + item.label.toLowerCase().replace(/ /g, '-')"
+                                    @click="toggleDateItem(item)">{{ item.label }}</button>
+                        </div>
+                        <div class="popover-divider"></div>
+                        <div class="year-tabs" data-testid="date-year-tabs">
+                            <div v-for="year in yearTabs" :key="year" class="year-tab"
+                                 :class="{ active: year === activeYearTab }"
+                                 :data-testid="'date-year-tab-' + year"
+                                 @click="activeYearTab = year">
+                                <span>{{ year }}</span>
+                                <span v-if="yearTabHasPending(year)" class="dot"></span>
+                            </div>
+                            <button type="button" class="link-btn" data-testid="date-clear-months"
+                                    @click="clearPendingMonths">Clear</button>
+                        </div>
+                        <div class="month-grid month-grid-3col" data-testid="date-month-grid">
+                            <div v-for="m in activeYearMonths" :key="m.key" class="month-cell"
+                                 :class="{ selected: pendingMonths.has(m.key) }"
+                                 :data-testid="'date-month-cell-' + m.key"
+                                 @click="toggleDateItem({ type: 'month', key: m.key })">{{ m.label.split(' ')[0] }}</div>
+                        </div>
+                        <div class="popover-divider"></div>
+                        <div class="daterange-row">
+                            <div class="date-input-wrap">
+                                <label>Start</label>
+                                <drill-calendar :model-value="customStart"
+                                                @update:model-value="customStart = $event"
+                                                testid-prefix="date-start"
+                                                placeholder="e.g. 3/15/2026"></drill-calendar>
+                            </div>
+                            <div class="date-input-wrap">
+                                <label>End</label>
+                                <drill-calendar :model-value="customEnd"
+                                                @update:model-value="customEnd = $event"
+                                                testid-prefix="date-end"
+                                                placeholder="e.g. 7/7/2026"
+                                                :align-right="true"></drill-calendar>
+                            </div>
+                        </div>
+                        <div class="popover-footer">
+                            <button type="button" class="link-btn link-danger" data-testid="date-clear-all"
+                                    @click="clearAllDateFilters">Clear all filters</button>
+                            <button type="button" class="apply-btn" data-testid="date-apply"
+                                    @click="applyDateFilters">Apply</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="filter-chips" v-if="activeFilters.length > 0" data-testid="filter-chips">
                     <div v-for="(filter, index) in activeFilters"
                          :key="index"
@@ -176,12 +232,13 @@
                         @click="currentView = 'section'">
                     View
                 </button>
-                <button v-if="currentView === 'category' || hasSections"
+                <button v-if="(currentView === 'category' || hasSections) && negativeTotalsCount > 0"
                         class="toggle-negatives"
                         :class="{ active: includeNegativeTotals }"
                         :title="includeNegativeTotals ? 'Exclude categories and merchants with net negative totals' : 'Include categories and merchants with net negative totals'"
                         @click="includeNegativeTotals = !includeNegativeTotals">
                     {{ includeNegativeTotals ? 'Exclude Negatives' : 'Include Negatives' }}
+                    <span v-if="!includeNegativeTotals" class="negatives-badge">{{ negativeTotalsCount > 99 ? '99+' : negativeTotalsCount }}</span>
                 </button>
             </div>
 

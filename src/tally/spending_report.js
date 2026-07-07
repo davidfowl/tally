@@ -87,6 +87,141 @@ function calculateCashFlow(income, spending, credits) {
 
 // =============================================================================
 
+// =============================================================================
+// DATE FILTER HELPERS (Month / Quarter / Year / Custom range)
+// =============================================================================
+
+const MONTH_NAMES_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_NAMES_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function quarterOf(monthNum) { return Math.ceil(monthNum / 3); }
+
+// 'YYYY-MM' -> 'Mon YYYY'
+function monthKeyLabel(key) {
+    const parts = key.split('-');
+    return MONTH_NAMES_SHORT[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+}
+function quarterMonthKeys(year, q) {
+    const startM = (q - 1) * 3 + 1;
+    return [startM, startM + 1, startM + 2].map(m => year + '-' + pad2(m));
+}
+function yearMonthKeys(year) {
+    const out = [];
+    for (let m = 1; m <= 12; m++) out.push(year + '-' + pad2(m));
+    return out;
+}
+
+// Flatten a preset item ({type:'month'|'quarter'|'year', key}) to its
+// constituent calendar-month keys. This is the shared path that lets
+// quarter/year presets, individual month clicks, and aggregation all use one
+// coverage/toggle mechanism.
+function monthsForItem(item) {
+    if (item.type === 'month') return [item.key];
+    if (item.type === 'quarter') {
+        const parts = item.key.split('-Q');
+        return quarterMonthKeys(parseInt(parts[0], 10), parseInt(parts[1], 10));
+    }
+    if (item.type === 'year') return yearMonthKeys(parseInt(item.key, 10));
+    return [];
+}
+
+// Greedily compress a flat set of month keys into the fewest chips: any full
+// year first, then any full quarters remaining in that year, then whatever
+// individual months are left. Returns {type, key, label}[].
+function aggregateMonthKeys(monthKeys) {
+    const remaining = {};
+    monthKeys.forEach(k => { remaining[k] = true; });
+    const byYear = {};
+    monthKeys.forEach(k => { (byYear[k.slice(0, 4)] = byYear[k.slice(0, 4)] || []).push(k); });
+
+    const results = [];
+    Object.keys(byYear).sort().forEach(yearStr => {
+        const year = parseInt(yearStr, 10);
+        if (yearMonthKeys(year).every(k => remaining[k])) {
+            results.push({ type: 'year', key: yearStr, label: yearStr });
+            yearMonthKeys(year).forEach(k => delete remaining[k]);
+            return;
+        }
+        for (let q = 1; q <= 4; q++) {
+            const qMonths = quarterMonthKeys(year, q);
+            if (qMonths.every(k => remaining[k])) {
+                results.push({ type: 'quarter', key: yearStr + '-Q' + q, label: 'Q' + q + ' ' + yearStr });
+                qMonths.forEach(k => delete remaining[k]);
+            }
+        }
+    });
+    Object.keys(remaining).sort().forEach(k => {
+        results.push({ type: 'month', key: k, label: monthKeyLabel(k) });
+    });
+    return results;
+}
+
+// Chip type -> filter category. month/daterange share the 'date' category so
+// they OR together in passesFilters instead of AND-ing as separate types.
+function filterCategory(type) {
+    return (type === 'month' || type === 'daterange') ? 'date' : type;
+}
+
+// Convert an aggregated {type,key,label} entry into an activeFilters chip.
+// Quarter/year become 'YYYY-MM..YYYY-MM' range strings under the 'month' type
+// (reusing monthMatches), matching the chip data model in the plan.
+function aggregateEntryToChip(entry) {
+    if (entry.type === 'year') {
+        return { text: entry.key + '-01..' + entry.key + '-12', type: 'month', mode: 'include', displayText: entry.label };
+    }
+    if (entry.type === 'quarter') {
+        const parts = entry.key.split('-Q');
+        const startM = (parseInt(parts[1], 10) - 1) * 3 + 1;
+        return {
+            text: parts[0] + '-' + pad2(startM) + '..' + parts[0] + '-' + pad2(startM + 2),
+            type: 'month', mode: 'include', displayText: entry.label
+        };
+    }
+    return { text: entry.key, type: 'month', mode: 'include', displayText: monthKeyLabel(entry.key) };
+}
+
+// Restore a display label for a 'month'-type chip after a hash reload: plain
+// month, a full-year range, a quarter range, or a generic month range.
+function monthChipDisplayText(text) {
+    if (!text.includes('..')) return monthKeyLabel(text);
+    const [start, end] = text.split('..');
+    const [sy, sm] = start.split('-');
+    const [ey, em] = end.split('-');
+    if (sy === ey && sm === '01' && em === '12') return sy;               // Year
+    if (sy === ey) {
+        const smN = parseInt(sm, 10), emN = parseInt(em, 10);
+        if (emN - smN === 2 && (smN - 1) % 3 === 0) {                     // Quarter
+            return 'Q' + quarterOf(smN) + ' ' + sy;
+        }
+    }
+    return monthKeyLabel(start) + ' – ' + monthKeyLabel(end);            // Generic range
+}
+
+// Cross-year-aware label for a 'daterange' chip ('YYYY-MM-DD..YYYY-MM-DD').
+// Year shown on both ends when they differ, once (on end) when they match.
+function dateRangeDisplayText(text) {
+    const [a, b] = text.split('..');
+    const ap = a.split('-'), bp = b.split('-');
+    const startPart = MONTH_NAMES_SHORT[parseInt(ap[1], 10) - 1] + ' ' + parseInt(ap[2], 10) +
+        (ap[0] !== bp[0] ? ', ' + ap[0] : '');
+    return startPart + ' – ' + MONTH_NAMES_SHORT[parseInt(bp[1], 10) - 1] + ' ' + parseInt(bp[2], 10) + ', ' + bp[0];
+}
+
+function parseTypedDate(str) {
+    str = (str || '').trim();
+    if (!str) return null;
+    const m1 = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m1) return { y: +m1[1], m: +m1[2], d: +m1[3] };
+    const m2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m2) return { y: +m2[3], m: +m2[1], d: +m2[2] };
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
+    return null;
+}
+function fmtDrillDate(dt) { return MONTH_NAMES_SHORT[dt.m - 1] + ' ' + dt.d + ', ' + dt.y; }
+function dateToKey(dt) { return dt.y + '-' + pad2(dt.m) + '-' + pad2(dt.d); }
+
 // ========== REUSABLE COMPONENTS ==========
 
 // Sortable merchant/group section component
@@ -299,7 +434,7 @@ const MerchantSection = defineComponent({
                                                     </div>
                                                 </span>
                                             </span>
-                                            <span class="txn-date">{{ formatDate(txn.date) }}</span>
+                                            <span class="txn-date">{{ formatDate(txn.date, txn.month, getTransactionYears(item)) }}</span>
                                             <span class="txn-desc"><span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span> <span v-html="highlightDescription(txn.description)"></span></span>
                                             <span class="txn-badges">
                                                 <span v-for="tag in [...(txn.tags || [])].sort()"
@@ -329,6 +464,10 @@ const MerchantSection = defineComponent({
             </div>
         </section>
     `,
+    created() {
+        // Non-reactive cache for getTransactionYears (see method for rationale).
+        this._txnYearsCache = new WeakMap();
+    },
     methods: {
         getSortClass(column) {
             const cfg = this.sortConfig[this.sectionKey];
@@ -389,6 +528,21 @@ const MerchantSection = defineComponent({
                 const dateB = `${b.month || '0000-00'}-${(b.date || '00/00').slice(3, 5)}`;
                 return dateB.localeCompare(dateA);
             });
+        },
+        // True when this item's transactions span more than one calendar year,
+        // so transaction rows should show ", YYYY". Computed once per item and
+        // cached in a WeakMap (keyed by the item object, GC'd when the item is
+        // recreated on the next filtered-view recompute) to avoid re-deriving
+        // it for every transaction row.
+        getTransactionYears(item) {
+            if (this._txnYearsCache.has(item)) return this._txnYearsCache.get(item);
+            const years = new Set();
+            for (const t of (item.filteredTxns || item.transactions || [])) {
+                if (t.month) years.add(t.month.slice(0, 4));
+            }
+            const multi = years.size > 1;
+            this._txnYearsCache.set(item, multi);
+            return multi;
         },
         getAmountClass(item) {
             if (this.creditMode) return 'credit-amount';
@@ -452,6 +606,170 @@ const MerchantSection = defineComponent({
             return parts.join('\n');
         }
     }
+});
+
+// Drill-down calendar widget for the custom Start/End date inputs.
+// Three views: 'days' (Month + Year drill buttons + day grid), 'months'
+// (Year drill + 3x4 month grid), 'years' (paginated 3x4 year grid).
+// Ported from createDrillCalendar() in the datefilter.html prototype.
+const DrillCalendar = defineComponent({
+    name: 'DrillCalendar',
+    props: {
+        modelValue: { type: Object, default: null }, // { y, m, d } | null
+        testidPrefix: { type: String, default: 'cal' },
+        alignRight: { type: Boolean, default: false },
+        placeholder: { type: String, default: '' }
+    },
+    emits: ['update:modelValue'],
+    data() {
+        const now = new Date();
+        return {
+            view: 'days',
+            viewYear: now.getFullYear(),
+            viewMonth: now.getMonth() + 1,
+            yearPageStart: 1,
+            calOpen: false,
+            textValue: this.modelValue ? fmtDrillDate(this.modelValue) : '',
+            invalid: false
+        };
+    },
+    computed: {
+        selected() { return this.modelValue; },
+        dowLabels() { return ['S', 'M', 'T', 'W', 'T', 'F', 'S']; },
+        monthNamesShort() { return MONTH_NAMES_SHORT; },
+        monthNamesLong() { return MONTH_NAMES_LONG; },
+        dayCells() {
+            const y = this.viewYear, m = this.viewMonth;
+            const blanks = new Date(y, m - 1, 1).getDay();
+            const total = new Date(y, m, 0).getDate();
+            const t = new Date();
+            const cells = [];
+            for (let i = 0; i < blanks; i++) cells.push({ empty: true, key: 'b' + i });
+            for (let d = 1; d <= total; d++) {
+                cells.push({
+                    empty: false, day: d, key: 'd' + d,
+                    selected: this.selected && this.selected.y === y && this.selected.m === m && this.selected.d === d,
+                    today: t.getFullYear() === y && (t.getMonth() + 1) === m && t.getDate() === d
+                });
+            }
+            return cells;
+        },
+        yearPageCells() {
+            const cells = [];
+            for (let y = this.yearPageStart; y <= this.yearPageStart + 11; y++) cells.push(y);
+            return cells;
+        },
+        yearPageLabel() { return this.yearPageStart + '–' + (this.yearPageStart + 11); }
+    },
+    watch: {
+        modelValue(v) {
+            this.textValue = v ? fmtDrillDate(v) : '';
+            this.invalid = false;
+        }
+    },
+    methods: {
+        alignPage(y) { return Math.floor((y - 1) / 12) * 12 + 1; },
+        openCal() {
+            const now = new Date();
+            const base = this.selected || { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+            this.viewYear = base.y;
+            this.viewMonth = base.m;
+            this.yearPageStart = this.alignPage(this.viewYear);
+            this.view = 'days';
+            this.calOpen = true;
+        },
+        toggleCal() { if (this.calOpen) this.calOpen = false; else this.openCal(); },
+        onTextChange() {
+            const parsed = parseTypedDate(this.textValue);
+            if (parsed) {
+                this.textValue = fmtDrillDate(parsed);
+                this.invalid = false;
+                this.$emit('update:modelValue', parsed);
+            } else if (this.textValue.trim() === '') {
+                this.invalid = false;
+                this.$emit('update:modelValue', null);
+            } else {
+                this.invalid = true;
+            }
+        },
+        prevMonth() { this.viewMonth--; if (this.viewMonth < 1) { this.viewMonth = 12; this.viewYear--; } },
+        nextMonth() { this.viewMonth++; if (this.viewMonth > 12) { this.viewMonth = 1; this.viewYear++; } },
+        drillToMonths() { this.view = 'months'; },
+        drillToYears() { this.yearPageStart = this.alignPage(this.viewYear); this.view = 'years'; },
+        pickDay(d) {
+            const sel = { y: this.viewYear, m: this.viewMonth, d };
+            this.textValue = fmtDrillDate(sel);
+            this.invalid = false;
+            this.calOpen = false;
+            this.$emit('update:modelValue', sel);
+        },
+        pickMonth(i) { this.viewMonth = i + 1; this.view = 'days'; },
+        pickYear(y) { this.viewYear = y; this.view = 'months'; },
+        prevMonthsYear() { this.viewYear--; },
+        nextMonthsYear() { this.viewYear++; },
+        prevYearPage() { this.yearPageStart -= 12; },
+        nextYearPage() { this.yearPageStart += 12; },
+        onDocClick(e) {
+            if (this.calOpen && this.$el && !this.$el.contains(e.target)) this.calOpen = false;
+        }
+    },
+    mounted() { document.addEventListener('click', this.onDocClick); },
+    unmounted() { document.removeEventListener('click', this.onDocClick); },
+    template: `
+        <div class="drill-calendar" :class="{ 'align-right': alignRight }" @click.stop>
+            <div class="date-input">
+                <input type="text" :class="{ invalid }" v-model="textValue" @change="onTextChange"
+                       :data-testid="testidPrefix + '-text'" :placeholder="placeholder">
+                <button type="button" class="cal-btn" :data-testid="testidPrefix + '-cal-btn'" @click="toggleCal">📅</button>
+            </div>
+            <div class="cal-popover" v-if="calOpen" :data-testid="testidPrefix + '-cal'">
+                <template v-if="view === 'days'">
+                    <div class="cal-header">
+                        <button type="button" class="cal-nav" @click="prevMonth">‹</button>
+                        <div class="cal-title">
+                            <button type="button" class="cal-drill" @click="drillToMonths">{{ monthNamesLong[viewMonth - 1] }}</button>
+                            <button type="button" class="cal-drill" @click="drillToYears">{{ viewYear }}</button>
+                        </div>
+                        <button type="button" class="cal-nav" @click="nextMonth">›</button>
+                    </div>
+                    <div class="cal-dow"><span v-for="(d, i) in dowLabels" :key="i">{{ d }}</span></div>
+                    <div class="cal-days">
+                        <template v-for="cell in dayCells" :key="cell.key">
+                            <span v-if="cell.empty" class="cal-day empty"></span>
+                            <button v-else type="button" class="cal-day"
+                                    :class="{ selected: cell.selected, today: cell.today }"
+                                    :data-testid="testidPrefix + '-day-' + cell.day"
+                                    @click="pickDay(cell.day)">{{ cell.day }}</button>
+                        </template>
+                    </div>
+                </template>
+                <template v-else-if="view === 'months'">
+                    <div class="cal-header">
+                        <button type="button" class="cal-nav" @click="prevMonthsYear">‹</button>
+                        <div class="cal-title"><button type="button" class="cal-drill" @click="drillToYears">{{ viewYear }}</button></div>
+                        <button type="button" class="cal-nav" @click="nextMonthsYear">›</button>
+                    </div>
+                    <div class="cal-months">
+                        <button v-for="(name, i) in monthNamesShort" :key="i" type="button" class="cal-cell"
+                                :class="{ selected: selected && selected.y === viewYear && selected.m === i + 1 }"
+                                @click="pickMonth(i)">{{ name }}</button>
+                    </div>
+                </template>
+                <template v-else>
+                    <div class="cal-header">
+                        <button type="button" class="cal-nav" @click="prevYearPage">‹</button>
+                        <div class="cal-title">{{ yearPageLabel }}</div>
+                        <button type="button" class="cal-nav" @click="nextYearPage">›</button>
+                    </div>
+                    <div class="cal-years">
+                        <button v-for="y in yearPageCells" :key="y" type="button" class="cal-cell"
+                                :class="{ selected: selected && selected.y === y }"
+                                @click="pickYear(y)">{{ y }}</button>
+                    </div>
+                </template>
+            </div>
+        </div>
+    `
 });
 
 // Category colors for charts
@@ -869,6 +1187,13 @@ createApp({
             return result;
         });
 
+        // Count of hidden negative-total items (categories or sections, depending on view)
+        // Used for the badge on the Include/Exclude Negatives toggle button
+        const negativeTotalsCount = computed(() => {
+            const source = currentView.value === 'section' ? filteredSectionView.value : filteredCategoryView.value;
+            return Object.values(source).filter(item => item.filteredTotal < 0).length;
+        });
+
         // Totals per section
         const sectionTotals = computed(() => {
             const totals = {};
@@ -1068,20 +1393,29 @@ createApp({
         // Number of months in filter (for monthly averages)
         const numFilteredMonths = computed(() => {
             const monthFilters = activeFilters.value.filter(f =>
-                f.type === 'month' && f.mode === 'include'
+                filterCategory(f.type) === 'date' && f.mode === 'include'
             );
             if (monthFilters.length === 0) return spendingData.value.numMonths || 12;
 
             const months = new Set();
             monthFilters.forEach(f => {
-                if (f.text.includes('..')) {
-                    expandMonthRange(f.text).forEach(m => months.add(m));
-                } else {
-                    months.add(f.text);
-                }
+                expandFilterMonths(f).forEach(m => months.add(m));
             });
             return months.size || 1;
         });
+
+        // Expand a date filter chip (month, month-range, or daterange) into the
+        // set of whole-month keys it touches. daterange chips are approximated
+        // to whole months here (fine for averaging/chart bucketing; displayed
+        // totals stay day-accurate via passesFilters).
+        function expandFilterMonths(f) {
+            if (f.type === 'daterange') {
+                const [s, e] = f.text.split('..');
+                return expandMonthRange(s.slice(0, 7) + '..' + e.slice(0, 7));
+            }
+            if (f.text.includes('..')) return expandMonthRange(f.text);
+            return [f.text];
+        }
 
         // Chart data aggregations - always uses categoryView for consistent data
         // Includes spending, income, and investment; excludes transfers (money moving between accounts)
@@ -1188,18 +1522,14 @@ createApp({
         // Filtered months for charts (respects month filters)
         const filteredMonthsForCharts = computed(() => {
             const monthFilters = activeFilters.value.filter(f =>
-                f.type === 'month' && f.mode === 'include'
+                filterCategory(f.type) === 'date' && f.mode === 'include'
             );
             if (monthFilters.length === 0) return availableMonths.value;
 
             // Build set of included months
             const includedMonths = new Set();
             monthFilters.forEach(f => {
-                if (f.text.includes('..')) {
-                    expandMonthRange(f.text).forEach(m => includedMonths.add(m));
-                } else {
-                    includedMonths.add(f.text);
-                }
+                expandFilterMonths(f).forEach(m => includedMonths.add(m));
             });
 
             return availableMonths.value.filter(m => includedMonths.has(m.key));
@@ -1294,7 +1624,8 @@ createApp({
         });
 
         function getDisplayText(type, filterText) {
-            if (type === 'month') return formatMonthLabel(filterText);
+            if (type === 'month') return monthChipDisplayText(filterText);
+            if (type === 'daterange') return dateRangeDisplayText(filterText);
             return displayTextLookup.value[`${type}:${filterText}`] || filterText;
         }
 
@@ -1327,29 +1658,19 @@ createApp({
             return matches;
         });
 
-        // Available months for date picker
+        // Available months for date picker.
+        // Sourced exclusively from categoryView, which is built from ALL
+        // merchants (report.py build_category_view) and is a strict superset of
+        // sections: a merchant matching zero views is absent from `sections` by
+        // design, so sourcing from `sections` silently drops its months.
         const availableMonths = computed(() => {
             const months = new Set();
-            const sections = spendingData.value.sections || {};
-
-            // Use sections if available, otherwise fall back to categoryView
-            if (Object.keys(sections).length > 0) {
-                for (const section of Object.values(sections)) {
-                    for (const merchant of Object.values(section.merchants || {})) {
+            const categoryView = spendingData.value.categoryView || {};
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const merchant of Object.values(subcat.merchants || {})) {
                         for (const txn of merchant.transactions || []) {
                             months.add(txn.month);
-                        }
-                    }
-                }
-            } else {
-                // Fall back to categoryView when no views configured
-                const categoryView = spendingData.value.categoryView || {};
-                for (const category of Object.values(categoryView)) {
-                    for (const subcat of Object.values(category.subcategories || {})) {
-                        for (const merchant of Object.values(subcat.merchants || {})) {
-                            for (const txn of merchant.transactions || []) {
-                                months.add(txn.month);
-                            }
                         }
                     }
                 }
@@ -1371,20 +1692,28 @@ createApp({
                 if (matchesFilter(txn, merchant, f)) return false;
             }
 
-            // Group includes by type
+            // Group includes by filter category (month + daterange collapse to
+            // one 'date' category so they OR together rather than AND).
             const byType = {};
             includes.forEach(f => {
-                if (!byType[f.type]) byType[f.type] = [];
-                byType[f.type].push(f);
+                const cat = filterCategory(f.type);
+                if (!byType[cat]) byType[cat] = [];
+                byType[cat].push(f);
             });
 
-            // AND across types, OR within type
-            for (const [type, filters] of Object.entries(byType)) {
+            // AND across categories, OR within a category
+            for (const [cat, filters] of Object.entries(byType)) {
                 const anyMatch = filters.some(f => matchesFilter(txn, merchant, f));
                 if (!anyMatch) return false;
             }
 
             return true;
+        }
+
+        // Reconstruct a day-precision YYYY-MM-DD for a transaction, mirroring
+        // analyzer.py's CSV export: month (YYYY-MM) + day from date (MM/DD).
+        function txnFullDate(txn) {
+            return `${txn.month}-${(txn.date || '00/00').slice(3, 5)}`;
         }
 
         function matchesFilter(txn, merchant, filter) {
@@ -1399,6 +1728,11 @@ createApp({
                     return merchant.subcategory.toLowerCase() === text;
                 case 'month':
                     return monthMatches(txn.month, filter.text);
+                case 'daterange': {
+                    const [start, end] = filter.text.split('..');
+                    const full = txnFullDate(txn);
+                    return full >= start && full <= end;
+                }
                 case 'tag':
                     return (txn.tags || []).some(t => t.toLowerCase() === text);
                 case 'text':
@@ -1439,7 +1773,11 @@ createApp({
         }
 
         function removeFilter(index) {
+            const removed = activeFilters.value[index];
             activeFilters.value.splice(index, 1);
+            // Removing a custom-range chip must also reset the Start/End widget
+            // so reopening the popover doesn't silently re-add it on Apply.
+            if (removed && removed.type === 'daterange') clearCustomRange();
         }
 
         function toggleFilterMode(index) {
@@ -1449,10 +1787,133 @@ createApp({
 
         function clearFilters() {
             activeFilters.value = [];
+            pendingMonths.clear();
+            clearCustomRange();
         }
 
         function addMonthFilter(month) {
             if (month) addFilter(month, 'month', formatMonthLabel(month));
+        }
+
+        // ========== DATE FILTER POPOVER (Month / Quarter / Year / Custom) ==========
+        const datePopoverOpen = ref(false);
+        const pendingMonths = reactive(new Set());   // flat set of 'YYYY-MM' keys
+        const activeYearTab = ref(null);
+        const customStart = ref(null);               // { y, m, d } | null
+        const customEnd = ref(null);
+
+        // Distinct years present in the data, ascending.
+        const availableYears = computed(() => {
+            const years = new Set();
+            availableMonths.value.forEach(m => years.add(parseInt(m.key.slice(0, 4), 10)));
+            return Array.from(years).sort((a, b) => a - b);
+        });
+        // Year tabs: up to 3 most recent data years, oldest -> newest.
+        const yearTabs = computed(() => availableYears.value.slice(-3));
+
+        // Real-today info driving the This/Last preset rows.
+        const todayInfo = computed(() => {
+            const now = new Date();
+            const y = now.getFullYear();
+            const mo = now.getMonth() + 1;
+            return { y, mo, q: quarterOf(mo), monthKey: y + '-' + pad2(mo) };
+        });
+        const thisLastPresets = computed(() => {
+            const t = todayInfo.value;
+            let lm = t.mo - 1, lmy = t.y;
+            if (lm < 1) { lm = 12; lmy -= 1; }
+            let lq = t.q - 1, lqy = t.y;
+            if (lq < 1) { lq = 4; lqy -= 1; }
+            const ly = t.y - 1;
+            return {
+                thisRow: [
+                    { label: 'This Month', type: 'month', key: t.monthKey },
+                    { label: 'This Quarter', type: 'quarter', key: t.y + '-Q' + t.q },
+                    { label: 'This Year', type: 'year', key: String(t.y) }
+                ],
+                lastRow: [
+                    { label: 'Last Month', type: 'month', key: lmy + '-' + pad2(lm) },
+                    { label: 'Last Quarter', type: 'quarter', key: lqy + '-Q' + lq },
+                    { label: 'Last Year', type: 'year', key: String(ly) }
+                ]
+            };
+        });
+
+        // Months (with data) for the active year tab.
+        const activeYearMonths = computed(() =>
+            availableMonths.value.filter(m => m.key.slice(0, 4) === String(activeYearTab.value))
+        );
+
+        // A preset is "active" purely by coverage: every constituent month is
+        // currently pending. No separate quarter/year pending state.
+        function isDateItemActive(item) {
+            const months = monthsForItem(item);
+            return months.length > 0 && months.every(k => pendingMonths.has(k));
+        }
+        function toggleDateItem(item) {
+            const months = monthsForItem(item);
+            const active = isDateItemActive(item);
+            months.forEach(k => { if (active) pendingMonths.delete(k); else pendingMonths.add(k); });
+        }
+        function yearTabHasPending(year) {
+            for (const k of pendingMonths) if (k.slice(0, 4) === String(year)) return true;
+            return false;
+        }
+
+        function openDatePopover() {
+            // Expand currently-applied date chips (possibly aggregated into
+            // quarter/year ranges) back into flat pending months for editing.
+            pendingMonths.clear();
+            for (const f of activeFilters.value) {
+                if (f.type === 'month') {
+                    if (f.text.includes('..')) expandMonthRange(f.text).forEach(k => pendingMonths.add(k));
+                    else pendingMonths.add(f.text);
+                }
+                // daterange chips stay independent (never expanded to months).
+            }
+            const tabs = yearTabs.value;
+            const ty = todayInfo.value.y;
+            activeYearTab.value = tabs.includes(ty) ? ty : (tabs.length ? tabs[tabs.length - 1] : ty);
+            datePopoverOpen.value = true;
+        }
+        function toggleDatePopover() {
+            if (datePopoverOpen.value) datePopoverOpen.value = false;
+            else openDatePopover();
+        }
+        function closeDatePopover() { datePopoverOpen.value = false; }
+        function clearPendingMonths() { pendingMonths.clear(); }
+
+        function getCustomRangeChip() {
+            if (!customStart.value || !customEnd.value) return null;
+            let a = customStart.value, b = customEnd.value;
+            if (dateToKey(a) > dateToKey(b)) { const t = a; a = b; b = t; }
+            const text = dateToKey(a) + '..' + dateToKey(b);
+            return { text, type: 'daterange', mode: 'include', displayText: dateRangeDisplayText(text) };
+        }
+        function clearCustomRange() {
+            customStart.value = null;
+            customEnd.value = null;
+        }
+
+        // Apply: re-aggregate pending months into the fewest chips, then append
+        // the (independent) custom range. Existing date chips are replaced.
+        function applyDateFilters() {
+            activeFilters.value = activeFilters.value.filter(f => filterCategory(f.type) !== 'date');
+            aggregateMonthKeys([...pendingMonths]).forEach(entry =>
+                activeFilters.value.push(aggregateEntryToChip(entry))
+            );
+            const custom = getCustomRangeChip();
+            if (custom) activeFilters.value.push(custom);
+            datePopoverOpen.value = false;
+        }
+
+        // Footer "Clear all filters": destructive — wipes every filter, the
+        // pending set, and the custom-range widget, then closes.
+        function clearAllDateFilters() {
+            activeFilters.value = [];
+            pendingMonths.clear();
+            clearCustomRange();
+            datePopoverOpen.value = false;
         }
 
         function toggleExpand(merchantId) {
@@ -1545,17 +2006,20 @@ createApp({
             return currencyFormat.replace('{amount}', amount.toFixed(0));
         }
 
-        function formatDate(dateStr) {
+        function formatDate(dateStr, monthStr, showYear) {
             if (!dateStr) return '';
+            // Year suffix (from monthStr YYYY-MM) only when the caller's list
+            // spans multiple calendar years.
+            const yearSuffix = showYear && monthStr ? `, ${monthStr.slice(0, 4)}` : '';
             // Handle MM/DD format from Python
             if (dateStr.match(/^\d{1,2}\/\d{1,2}$/)) {
                 const [month, day] = dateStr.split('/');
                 const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                return `${months[parseInt(month)-1]} ${parseInt(day)}`;
+                return `${months[parseInt(month)-1]} ${parseInt(day)}${yearSuffix}`;
             }
             // Handle YYYY-MM-DD format
             const d = new Date(dateStr + 'T12:00:00');
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + yearSuffix;
         }
 
         function formatMonthLabel(key) {
@@ -1571,7 +2035,7 @@ createApp({
         }
 
         function filterTypeChar(type) {
-            return { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', tag: 't', text: 's' }[type] || '?';
+            return { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', daterange: 'dr', tag: 't', text: 's' }[type] || '?';
         }
 
         // Highlight search terms in transaction descriptions
@@ -1666,7 +2130,7 @@ createApp({
                 history.replaceState(null, '', location.pathname);
                 return;
             }
-            const typeChar = { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', tag: 't', text: 's' };
+            const typeChar = { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', daterange: 'dr', tag: 't', text: 's' };
             const parts = activeFilters.value.map(f => {
                 const mode = f.mode === 'exclude' ? '-' : '+';
                 return `${mode}${typeChar[f.type]}:${encodeURIComponent(f.text)}`;
@@ -1677,7 +2141,7 @@ createApp({
         function hashToFilters() {
             const hash = location.hash.slice(1);
             if (!hash) return;
-            const typeMap = { c: 'category', sc: 'subcategory', m: 'merchant', d: 'month', t: 'tag', s: 'text' };
+            const typeMap = { c: 'category', sc: 'subcategory', m: 'merchant', d: 'month', dr: 'daterange', t: 'tag', s: 'text' };
             hash.split('&').forEach(part => {
                 const mode = part[0] === '-' ? 'exclude' : 'include';
                 const start = part[0] === '+' || part[0] === '-' ? 1 : 0;
@@ -1963,6 +2427,7 @@ createApp({
         // ========== LIFECYCLE ==========
 
         onMounted(() => {
+            document.title = title.value;
             initTheme();
 
             // Wait for next tick to ensure computed properties are ready
@@ -1986,6 +2451,10 @@ createApp({
                         p.classList.remove('visible');
                     });
                 }
+                // Close the date-filter popover on outside click
+                if (!e.target.closest('.date-filter-wrap')) {
+                    datePopoverOpen.value = false;
+                }
             });
 
             // Hash change handler
@@ -2006,10 +2475,16 @@ createApp({
             monthlyChart, categoryPieChart, categoryByMonthChart,
             // Computed
             spendingData, title, subtitle,
-            visibleSections, filteredCategoryView, positiveCategoryView, subcategoryGroupedView, creditMerchants, filteredSectionView, positiveSectionView, hasSections,
+            visibleSections, filteredCategoryView, positiveCategoryView, subcategoryGroupedView, creditMerchants, filteredSectionView, positiveSectionView, hasSections, negativeTotalsCount,
             sectionTotals, grandTotal, grossSpending, creditsTotal, uncategorizedTotal,
             numFilteredMonths, filteredAutocomplete, availableMonths,
             categoryColorMap, tagColor,
+            // Date filter popover
+            datePopoverOpen, pendingMonths, activeYearTab, customStart, customEnd,
+            yearTabs, thisLastPresets, activeYearMonths,
+            isDateItemActive, toggleDateItem, yearTabHasPending,
+            toggleDatePopover, closeDatePopover, clearPendingMonths,
+            applyDateFilters, clearAllDateFilters,
             // Cash flow, transfers, and investments
             incomeTotal, spendingTotal, dataCreditsTotal, cashFlow,
             transfersIn, transfersOut, transfersNet,
@@ -2030,4 +2505,5 @@ createApp({
     }
 })
 .component('merchant-section', MerchantSection)
+.component('drill-calendar', DrillCalendar)
 .mount('#app');

@@ -316,7 +316,7 @@ def cmd_run(args):
             output_path = os.path.join(output_dir, config.get('html_filename', 'spending_summary.html'))
 
         # Collect source names for the report subtitle (exclude supplemental)
-        source_names = [s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)]
+        source_names = list(set(s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)))
         write_summary_file_vue(stats, output_path, title=title,
                                currency_format=currency_format, sources=source_names,
                                embedded_html=args.embedded_html)

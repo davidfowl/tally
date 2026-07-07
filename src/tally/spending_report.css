@@ -54,6 +54,7 @@
     --accent-pink-dark: #fa709a;
     --accent-red: #ff6b6b;
     --accent-green: #4ade80;
+    --accent-purple: #9b59b6;
     --accent-negative: #663636;
 
     /* Special */
@@ -172,7 +173,13 @@ h1 {
 }
 .search-box {
     margin: 1.5rem 0;
-    text-align: center;
+    /* Flex toolbar (like the datefilter prototype): the search input flexes to
+       fill the row and the date-filter button sits beside it at equal height;
+       filter chips wrap to their own full-width row below. */
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
     position: sticky;
     top: 0;
     z-index: 100;
@@ -189,7 +196,6 @@ h1 {
 }
 .search-box input {
     width: 100%;
-    max-width: 500px;
     padding: 0.75rem 1rem;
     border-radius: 8px;
     border: 1px solid var(--border-medium);
@@ -246,19 +252,294 @@ h1 {
     font-weight: 600;
     font-style: normal;
 }
+
+/* ============================================================
+   Date filter popover (Month / Quarter / Year / Custom range)
+   ============================================================ */
+.date-filter-wrap {
+    position: relative;
+    display: flex;
+    /* Stretch to the toolbar row height so the button matches the input. */
+    align-self: stretch;
+    text-align: left;
+}
+.date-filter-trigger {
+    margin-left: 0;
+    height: 100%;
+    background-image: none;
+    padding: 0.6rem 1rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+}
+.date-filter-trigger .chev {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    transition: transform 0.15s;
+}
+.date-filter-trigger.open .chev { transform: rotate(180deg); }
+
+.date-popover {
+    position: absolute;
+    top: calc(100% + 10px);
+    /* Anchor to the button's right edge (it sits at the far right of the
+       toolbar) so the popover opens leftward and stays on screen. */
+    right: 0;
+    left: auto;
+    min-width: 360px;
+    max-width: calc(100vw - 2rem);
+    background: var(--bg-gradient-start);
+    border: 1px solid var(--border-medium);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px var(--shadow-scrolled);
+    z-index: 1100;
+    padding: 1rem;
+}
+.date-popover .popover-divider { height: 1px; background: var(--border-light); margin: 0.9rem 0; }
+.date-popover .popover-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.9rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-light);
+}
+
+/* This / Last rows — two single-row 3-col grids with no divider between them */
+.date-popover .quick-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.4rem;
+}
+.date-popover .quick-grid-3col { margin-bottom: 0.4rem; }
+.date-popover .quick-pill {
+    width: 100%;
+    text-align: center;
+    padding: 0.55rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-medium);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.date-popover .quick-pill:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+.date-popover .quick-pill.active {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Year tabs + Clear */
+.date-popover .year-tabs { display: flex; gap: 0.3rem; margin-bottom: 0.7rem; align-items: center; }
+.date-popover .year-tab {
+    position: relative;
+    padding: 0.3rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+}
+.date-popover .year-tab.active {
+    background: var(--bg-card-hover);
+    color: var(--accent-blue);
+    border-color: var(--border-medium);
+    font-weight: 600;
+}
+.date-popover .year-tab .dot {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-blue);
+}
+.date-popover .year-tabs .link-btn { margin-left: auto; }
+.date-popover .link-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0;
+}
+.date-popover .link-btn:hover { color: var(--accent-red); }
+.date-popover .link-danger { color: var(--accent-red); opacity: 0.85; }
+.date-popover .link-danger:hover { color: var(--accent-red); opacity: 1; }
+.date-popover .apply-btn {
+    background: var(--accent-blue);
+    border: none;
+    color: #fff;
+    padding: 0.5rem 1.1rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s;
+}
+.date-popover .apply-btn:hover { filter: brightness(1.12); }
+
+/* Month grid */
+.date-popover .month-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+.date-popover .month-cell {
+    padding: 0.55rem 0;
+    text-align: center;
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+    background: var(--bg-table);
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.date-popover .month-cell:hover { border-color: var(--accent-blue); }
+.date-popover .month-cell.selected {
+    background: rgba(79, 172, 254, 0.22);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    font-weight: 700;
+}
+
+/* Custom Start / End range */
+.date-popover .daterange-row { display: flex; gap: 0.8rem; }
+.date-popover .date-input-wrap { flex: 1; }
+.date-popover .date-input-wrap > label {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-bottom: 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Drill-down calendar widget */
+.drill-calendar { position: relative; }
+.drill-calendar .date-input {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border-medium);
+    border-radius: 8px;
+    background: var(--bg-input);
+    overflow: hidden;
+    transition: border-color 0.15s;
+}
+.drill-calendar .date-input:focus-within { border-color: var(--accent-blue); }
+.drill-calendar .date-input input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    border: none;
+    background: transparent;
+    padding: 0.55rem 0.7rem;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    outline: none;
+}
+.drill-calendar .date-input input[type="text"].invalid { color: var(--accent-red); }
+.drill-calendar .cal-btn {
+    border: none;
+    border-left: 1px solid var(--border-light);
+    background: transparent;
+    padding: 0.5rem 0.6rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+.drill-calendar .cal-btn:hover { color: var(--accent-blue); }
+.drill-calendar .cal-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 60;
+    width: 232px;
+    background: var(--bg-gradient-start);
+    border: 1px solid var(--border-medium);
+    border-radius: 10px;
+    box-shadow: 0 12px 36px var(--shadow-scrolled);
+    padding: 0.75rem;
+}
+.drill-calendar.align-right .cal-popover { left: auto; right: 0; }
+.drill-calendar .cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.55rem;
+}
+.drill-calendar .cal-nav {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0.15rem 0.5rem;
+    border-radius: 6px;
+    line-height: 1;
+}
+.drill-calendar .cal-nav:hover { color: var(--accent-blue); background: var(--bg-card-hover); }
+.drill-calendar .cal-title { display: flex; gap: 0.35rem; font-size: 0.83rem; font-weight: 600; }
+.drill-calendar .cal-drill {
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: 0.83rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+}
+.drill-calendar .cal-drill:hover { color: var(--accent-blue); background: var(--bg-card-hover); }
+.drill-calendar .cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 0.2rem; }
+.drill-calendar .cal-dow span { text-align: center; font-size: 0.62rem; color: var(--text-dim); }
+.drill-calendar .cal-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.drill-calendar .cal-day {
+    aspect-ratio: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.76rem;
+    cursor: pointer;
+    border-radius: 6px;
+}
+.drill-calendar .cal-day:hover:not(.empty) { background: var(--bg-card-hover); }
+.drill-calendar .cal-day.empty { cursor: default; pointer-events: none; }
+.drill-calendar .cal-day.today { border: 1px solid var(--accent-blue); }
+.drill-calendar .cal-day.selected { background: var(--accent-blue); color: #fff; font-weight: 700; }
+.drill-calendar .cal-months,
+.drill-calendar .cal-years { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+.drill-calendar .cal-cell {
+    padding: 0.5rem 0;
+    text-align: center;
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+    background: var(--bg-table);
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.drill-calendar .cal-cell:hover { border-color: var(--accent-blue); }
+.drill-calendar .cal-cell.selected {
+    background: rgba(79, 172, 254, 0.22);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    font-weight: 700;
+}
 .autocomplete-container {
     position: relative;
-    display: inline-block;
-    width: 100%;
-    max-width: 500px;
+    flex: 1;
+    min-width: 200px;
 }
 .autocomplete-list {
     position: absolute;
     top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
     width: 100%;
-    max-width: 500px;
     background: var(--bg-gradient-start);
     border: 1px solid var(--border-medium);
     border-top: none;
@@ -313,6 +594,8 @@ h1 {
     gap: 0.5rem;
     margin-top: 0.75rem;
     justify-content: center;
+    /* Wrap onto its own full-width row beneath the search/date-filter toolbar. */
+    flex-basis: 100%;
 }
 .filter-chips:empty {
     display: none;
@@ -359,11 +642,11 @@ h1 {
 .filter-chip.subcategory.include { background: rgba(240, 147, 251, 0.2); color: var(--accent-pink); }
 .filter-chip.merchant { border-color: var(--accent-cyan); }
 .filter-chip.merchant.include { background: rgba(77, 255, 210, 0.2); color: var(--accent-cyan); }
-.filter-chip.month { border-color: var(--accent-purple); }
-.filter-chip.month.include { background: rgba(139, 92, 246, 0.2); color: var(--accent-purple); }
+.filter-chip.month, .filter-chip.daterange { border-color: var(--accent-purple); }
+.filter-chip.month.include, .filter-chip.daterange.include { background: rgba(139, 92, 246, 0.2); color: var(--accent-purple); }
 .filter-chip.tag { border-color: var(--accent-yellow); }
 .filter-chip.tag.include { background: rgba(245, 175, 25, 0.2); color: var(--accent-yellow); }
-.filter-chip.category.exclude, .filter-chip.subcategory.exclude, .filter-chip.merchant.exclude, .filter-chip.month.exclude, .filter-chip.tag.exclude {
+.filter-chip.category.exclude, .filter-chip.subcategory.exclude, .filter-chip.merchant.exclude, .filter-chip.month.exclude, .filter-chip.daterange.exclude, .filter-chip.tag.exclude {
     background: rgba(255, 107, 107, 0.15);
     border-color: var(--accent-red);
     color: var(--accent-red);
@@ -1447,5 +1730,15 @@ section:nth-child(5) { animation-delay: 0.4s; }
     background: var(--accent-negative);
     border-color: var(--accent-negative);
 }
-
-
+.negatives-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    background: var(--accent-red);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.4;
+    vertical-align: middle;
+}

@@ -3,7 +3,7 @@ Starter template strings for tally init command.
 """
 
 STARTER_SETTINGS = '''# Tally Settings
-title: "{year} Spending Analysis"
+title: "Tally Spending Analysis"
 
 # Data sources - add your statement files here
 # Run: tally inspect <file> to auto-detect the format string
