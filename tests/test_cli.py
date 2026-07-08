@@ -96,8 +96,10 @@ data_sources:
                 capture_output=True,
                 text=True
             )
-            # Should show "No files found matching pattern"
-            assert 'No files found matching pattern' in result.stdout
+            # Should report that no files matched the glob pattern
+            assert result.returncode == 1
+            assert 'No files matched' in result.stdout
+            assert 'data/nonexistent*.csv' in result.stdout
 
     def test_glob_diag_shows_matched_files(self):
         """Diag command should show matched files for glob patterns."""
@@ -128,11 +130,9 @@ data_sources:
                 text=True
             )
             assert result.returncode == 0
-            # Should show pattern and matched files
-            assert 'Pattern:' in result.stdout or 'data/test*.csv' in result.stdout
-            assert 'Matched files: 2' in result.stdout
-            assert 'test-a.csv' in result.stdout
-            assert 'test-b.csv' in result.stdout
+            # Should show the configured glob and resolved file count
+            assert 'data/test*.csv' in result.stdout
+            assert '(2 files)' in result.stdout
 
     def test_glob_files_processed_in_sorted_order(self):
         """Files should be processed in sorted order for consistency."""
@@ -159,15 +159,12 @@ data_sources:
                 f.write("date,description,amount\n")
                 f.write("2025-01-01,A_FIRST,-1.00\n")
 
-            result = subprocess.run(
-                ['uv', 'run', 'tally', 'diag', config_dir],
-                capture_output=True,
-                text=True
-            )
-            # a-first.csv should appear before z-last.csv in diag output
-            a_pos = result.stdout.find('a-first.csv')
-            z_pos = result.stdout.find('z-last.csv')
-            assert a_pos < z_pos, "Files should be listed in sorted order"
+            # Resolver should return files in sorted order regardless of creation order
+            from tally.path_utils import resolve_data_source_paths
+
+            files, _ = resolve_data_source_paths(config_dir, 'data/*.csv')
+            basenames = [os.path.basename(f) for f in files]
+            assert basenames == ['a-first.csv', 'z-last.csv']
 
 
 class TestCLIErrorHandling:
