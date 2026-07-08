@@ -72,7 +72,7 @@ data_sources:
                 text=True
             )
             assert result.returncode == 0
-            assert '1 file' in result.stdout
+            assert 'TestBank: 1 transactions' in result.stdout
             assert '1 transactions' in result.stdout
 
     def test_glob_pattern_no_matches_shows_error(self):
