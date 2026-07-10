@@ -421,7 +421,10 @@ class MerchantEngine:
     ) -> Dict[str, Any]:
         """Evaluate field expressions for a matching rule.
 
-        Returns dict of field_name -> evaluated_value.
+        Returns dict of field_name -> evaluated_value. Fields evaluating to an
+        empty value are omitted, so a transaction lacking the underlying data
+        carries no field at all rather than a blank one. Zero and False are
+        retained - only None and empty strings/lists/dicts are dropped.
         """
         evaluated = {}
         for field_name, expr in rule.fields.items():
@@ -429,6 +432,8 @@ class MerchantEngine:
                 result = expr_parser.evaluate_transaction(
                     expr, transaction, variables=variables, data_sources=data_sources
                 )
+                if result is None or (isinstance(result, (str, list, dict)) and not result):
+                    continue
                 evaluated[field_name] = result
             except expr_parser.ExpressionError:
                 # If field evaluation fails, skip it

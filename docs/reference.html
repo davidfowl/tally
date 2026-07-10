@@ -456,6 +456,47 @@ field.description = regex_replace(field.description, <span class="string">"^APLP
         <p>Use <code>exists(field.name)</code> to safely check if a field exists:</p>
         <pre><code><span class="keyword">match:</span> exists(field.memo) and contains(field.memo, <span class="string">"REF"</span>)</code></pre>
 
+        <h3 id="report-fields"><a href="#report-fields" class="anchor-link">#</a>Showing Fields in the Report</h3>
+        <p>Captured fields power rule expressions only. To also show one in the report's transaction details popup, name it in <code>report_fields</code>:</p>
+        <pre><code><span class="comment"># In settings.yaml - applies to every source:</span>
+<span class="keyword">report_fields:</span>
+  - memo
+
+<span class="comment"># Or per source, when columns differ per account:</span>
+<span class="keyword">data_sources:</span>
+  - <span class="keyword">name:</span> Visa
+    <span class="keyword">format:</span> <span class="string">"{date},{description},{memo},{amount}"</span>
+    <span class="keyword">report_fields:</span> [memo]</code></pre>
+
+        <p>Blank values are omitted, so transactions without a memo show no details badge. A global <code>report_fields</code> entry that a source does not capture is ignored, making it safe to use across accounts with different columns. A source-level <code>report_fields</code> replaces the global list for that source.</p>
+
+        <h3 id="report-fields-vs-field"><a href="#report-fields-vs-field" class="anchor-link">#</a>report_fields vs. the field: directive</h3>
+        <p>Both put values in the transaction details popup. They differ in what they can express and where they apply:</p>
+        <table>
+            <tr>
+                <th></th>
+                <th><code>report_fields</code></th>
+                <th><code>field:</code></th>
+            </tr>
+            <tr>
+                <td>Value</td>
+                <td>The captured column, as-is</td>
+                <td>Any expression &mdash; <code>extract()</code>, cross-source lookups, computed counts</td>
+            </tr>
+            <tr>
+                <td>Applies to</td>
+                <td>Every transaction from the source</td>
+                <td>Only transactions matching that rule</td>
+            </tr>
+            <tr>
+                <td>Declared in</td>
+                <td><code>settings.yaml</code> (global or per source)</td>
+                <td><code>merchants.rules</code> (per rule)</td>
+            </tr>
+        </table>
+        <p>Use <code>report_fields</code> to show a column verbatim; use <code>field:</code> when the value must be derived. A passthrough like <code>field: memo = field.memo</code> is redundant once <code>memo</code> is in <code>report_fields</code> &mdash; and narrower, since it only fires on that rule.</p>
+        <p>When both produce the same key, the <code>field:</code> directive wins. Neither is visible to other rules; they feed the report popup, CSV export columns, and report search only.</p>
+
         <h2 id="extraction"><a href="#extraction" class="anchor-link">#</a>Extraction Functions</h2>
         <table>
             <tr>
@@ -622,8 +663,8 @@ field.memo = trim(field.memo)</code></pre>
 <span class="keyword">category:</span> Shopping
 <span class="keyword">tags:</span> verified</code></pre>
 
-        <h3>The field: Directive</h3>
-        <p>Add computed fields to transactions (visible in HTML report):</p>
+        <h3 id="field-directive"><a href="#field-directive" class="anchor-link">#</a>The field: Directive</h3>
+        <p>Add computed fields to transactions (visible in HTML report). Not needed to read a field in <code>match:</code> &mdash; captured columns are already available there as <code>field.&lt;name&gt;</code>.</p>
         <pre><code><span class="highlight">[Amazon - Verified]</span>
 <span class="keyword">let:</span> orders = [r for r in amazon_orders if r.amount == txn.amount]
 <span class="keyword">match:</span> contains(<span class="string">"AMAZON"</span>) and len(orders) > 0

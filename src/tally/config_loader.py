@@ -24,7 +24,7 @@ def load_settings(config_dir, settings_file='settings.yaml'):
         return yaml.safe_load(f)
 
 
-def resolve_source_format(source, warnings=None):
+def resolve_source_format(source, warnings=None, report_fields=None):
     """
     Resolve the format specification for a data source.
 
@@ -36,10 +36,14 @@ def resolve_source_format(source, warnings=None):
     - columns.description: Template for combining custom captures
       Example: "{merchant} ({type})" when format uses {type}, {merchant}
     - supplemental: true (data source is query-only, doesn't generate transactions)
+    - report_fields: Capture names to surface in the report, e.g. [memo]
 
     Args:
         source: Data source configuration dict
         warnings: Optional list to append deprecation warnings to
+        report_fields: Global report_fields default, overridden by source-level
+            report_fields. Names absent from this source are silently ignored,
+            since a global default may reference fields only some sources have.
 
     Returns the source dict with additional keys:
     - '_parser_type': 'amex', 'boa', or 'generic'
@@ -93,6 +97,21 @@ def resolve_source_format(source, warnings=None):
                 format_spec.negate_amount = source['negate_amount']
             if 'tags_from_fields' in source:
                 format_spec.tags_from_fields = source['tags_from_fields']
+
+            available = set(format_spec.extra_fields or {}) | set(format_spec.custom_captures or {})
+            if 'report_fields' in source:
+                unknown = [f for f in source['report_fields'] if f not in available]
+                if unknown:
+                    raise ValueError(
+                        f"Source '{source_name}': report_fields references field(s) "
+                        f"{', '.join(sorted(unknown))} not captured by the format string.\n"
+                        f"Captured fields: {', '.join(sorted(available)) or '(none)'}\n"
+                        f"Add the field to your format, e.g. "
+                        f"format: \"{{date}},{{description}},{{{unknown[0]}}},{{amount}}\""
+                    )
+                format_spec.report_fields = list(source['report_fields'])
+            elif report_fields:
+                format_spec.report_fields = [f for f in report_fields if f in available]
 
             source['_format_spec'] = format_spec
             source['_parser_type'] = 'generic'
@@ -154,7 +173,8 @@ def load_config(config_dir, settings_file='settings.yaml'):
     # Process data sources to resolve format specs
     if config.get('data_sources'):
         config['data_sources'] = [
-            resolve_source_format(source, warnings=warnings)
+            resolve_source_format(source, warnings=warnings,
+                                  report_fields=config.get('report_fields'))
             for source in config['data_sources']
         ]
     else:
