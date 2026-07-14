@@ -779,6 +779,12 @@ const CATEGORY_COLORS = [
     '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 ];
 
+// Category charts show the top N categories; the rest roll up into "Other"
+// so totals still reflect all spending
+const TOP_CATEGORY_COUNT = 10;
+const OTHER_CATEGORY_LABEL = 'Other';
+const OTHER_CATEGORY_COLOR = '#6b7280';
+
 // Tag colors (distinct from category colors, warmer/earthier tones)
 const TAG_COLORS = [
     '#e879f9', '#c084fc', '#a78bfa', '#818cf8', '#6366f1',
@@ -814,6 +820,9 @@ createApp({
         let monthlyChartInstance = null;
         let pieChartInstance = null;
         let categoryMonthChartInstance = null;
+        // Months actually plotted on the monthly trend chart; bar clicks index into
+        // this, not availableMonths, since empty months and date filters drop months
+        let monthlyChartMonths = [];
 
         // ========== COMPUTED ==========
 
@@ -1091,6 +1100,30 @@ createApp({
 
         // Credit merchants (negative totals, shown separately)
         // Excludes income and transfer tagged merchants
+        //
+        // Not rendered right now: the "Credits Applied" section that consumed this was
+        // dropped from spending_report.html in ad9477e, though docs/reference.html still
+        // documents it (refund tag -> shown in "Credits Applied", nets against spending).
+        //
+        // KNOWN BUG, fix before re-enabling: isExcludedFromSpending(merchant.tags) below is
+        // a whole-merchant decision made from merchant.tags, which analyzer.py builds as the
+        // UNION of every tag across that merchant's transactions. A single transfer-tagged
+        // txn therefore discards all of the merchant's refunds - on a real dataset Amazon's
+        // union is [monthly-bill, refund, transfer], so every Amazon credit vanishes.
+        // filteredViewTotals and chartAggregations classify per transaction (txn.tags); this
+        // must too. Two ways, and they mean different things:
+        //   1. Net-negative merchants - net each merchant's per-txn spending against its
+        //      per-txn credits, list it when net < 0. Preserves what the section means today
+        //      and stays a short list, but "Total Credits" still won't equal the Credits KPI:
+        //      a refund absorbed inside a net-positive merchant stays invisible. Only works
+        //      when refunds arrive under their own merchant name (e.g. "Amazon Refund").
+        //   2. Any merchant with credits - list it when sum(txn credits) > 0 and show that
+        //      sum. Gives the identity sum(creditAmount) === filteredViewTotals.credits under
+        //      every filter, so the section reconciles with the Credits KPI and Python's
+        //      credits_total. Costs a longer list: a merchant can appear both as spending and
+        //      as a credit (Amazon: $6,910 spent, refunds back).
+        //
+        // grandTotal below has the same merchant-union flaw and is likewise unrendered.
         const unsortedCreditMerchants = computed(() => {
             const credits = [];
             for (const [catName, category] of Object.entries(filteredCategoryView.value)) {
@@ -1227,11 +1260,6 @@ createApp({
             return creditMerchants.value.reduce((sum, m) => sum + m.creditAmount, 0);
         });
 
-        // Gross spending (before credits)
-        const grossSpending = computed(() => {
-            return grandTotal.value + creditsTotal.value;
-        });
-
         // Filtered view totals - sum of ALL matching transactions
         // Simple: whatever matches the filters gets counted and categorized
         const filteredViewTotals = computed(() => {
@@ -1250,12 +1278,14 @@ createApp({
             for (const cat of Object.values(filteredCategoryView.value)) {
                 for (const subcat of Object.values(cat.filteredSubcategories || cat.subcategories || {})) {
                     for (const merchant of Object.values(subcat.filteredMerchants || subcat.merchants || {})) {
-                        const tags = merchant.tags || [];
                         const txns = merchant.filteredTxns || merchant.transactions || [];
 
                         for (const txn of txns) {
-                            // Use centralized categorizeAmount() for consistent classification
-                            const c = categorizeAmount(txn.amount || 0, tags);
+                            // Classify with the transaction's OWN tags. merchant.tags is a
+                            // union of every tag across the merchant's transactions
+                            // (analyzer.py builds it that way), so using it here would let a
+                            // single income/transfer-tagged txn re-bucket all the others.
+                            const c = categorizeAmount(txn.amount || 0, txn.tags || []);
                             totals.income += c.income;
                             totals.investment += c.investment;
                             totals.transferIn += c.transferIn;
@@ -1294,6 +1324,11 @@ createApp({
                 hasIncome: totals.income > 0  // For display formatting
             };
         });
+
+        // Gross spending (before credits). categorizeAmount() already separates positive
+        // spend from refunds per transaction, so this is the sum of spending-tagged
+        // amounts - no need to net merchants out and add their credits back in.
+        const grossSpending = computed(() => filteredViewTotals.value.spending);
 
         // Cash flow totals from data (excludes transfers and investments)
         const incomeTotal = computed(() => spendingData.value.incomeTotal || 0);
@@ -1418,11 +1453,12 @@ createApp({
         }
 
         // Chart data aggregations - always uses categoryView for consistent data
-        // Includes spending, income, and investment; excludes transfers (money moving between accounts)
+        // Includes spending, income, credits, and investment; excludes transfers (money moving between accounts)
         const chartAggregations = computed(() => {
             const spendingByMonth = {};
             const incomeByMonth = {};
             const investmentByMonth = {};
+            const creditsByMonth = {};
             const byCategory = {};  // Spending only (income doesn't have meaningful categories)
             const byCategoryByMonth = {};
 
@@ -1431,11 +1467,10 @@ createApp({
             for (const [catName, category] of Object.entries(categoryView)) {
                 for (const subcat of Object.values(category.filteredSubcategories || {})) {
                     for (const merchant of Object.values(subcat.filteredMerchants || {})) {
-                        const tags = merchant.tags || [];
-
                         for (const txn of merchant.filteredTxns || []) {
-                            // Use centralized categorization
-                            const c = categorizeAmount(txn.amount, tags);
+                            // Classify with the transaction's OWN tags, not merchant.tags
+                            // (a union across the merchant's txns) - see filteredViewTotals
+                            const c = categorizeAmount(txn.amount, txn.tags || []);
 
                             // Track spending by month and category
                             if (c.spending > 0) {
@@ -1456,13 +1491,18 @@ createApp({
                                 investmentByMonth[txn.month] = (investmentByMonth[txn.month] || 0) + c.investment;
                             }
 
+                            // Track credits by month (refunds are part of cash flow)
+                            if (c.credits > 0) {
+                                creditsByMonth[txn.month] = (creditsByMonth[txn.month] || 0) + c.credits;
+                            }
+
                             // Transfers excluded - they're just money moving between accounts
                         }
                     }
                 }
             }
 
-            return { spendingByMonth, incomeByMonth, investmentByMonth, byCategory, byCategoryByMonth };
+            return { spendingByMonth, incomeByMonth, investmentByMonth, creditsByMonth, byCategory, byCategoryByMonth };
         });
 
         // Map category names to colors (matches pie chart order)
@@ -2159,7 +2199,7 @@ createApp({
         // ========== CHARTS ==========
 
         function initCharts() {
-            // Monthly trend chart
+            // Cash flow trend chart (datasets are built per update so empty series drop out)
             if (monthlyChart.value) {
                 const ctx = monthlyChart.value.getContext('2d');
                 const labels = availableMonths.value.map(m => m.label);
@@ -2167,26 +2207,7 @@ createApp({
                     type: 'bar',
                     data: {
                         labels,
-                        datasets: [
-                            {
-                                label: 'Spending',
-                                data: [],
-                                backgroundColor: '#4facfe',
-                                borderRadius: 4
-                            },
-                            {
-                                label: 'Income',
-                                data: [],
-                                backgroundColor: '#00c9a7',
-                                borderRadius: 4
-                            },
-                            {
-                                label: 'Investment',
-                                data: [],
-                                backgroundColor: '#7c3aed',
-                                borderRadius: 4
-                            }
-                        ]
+                        datasets: []
                     },
                     options: {
                         responsive: true,
@@ -2206,7 +2227,7 @@ createApp({
                         onClick: (e, elements) => {
                             if (elements.length > 0) {
                                 const idx = elements[0].index;
-                                const month = availableMonths.value[idx];
+                                const month = monthlyChartMonths[idx];
                                 if (month) addFilter(month.key, 'month', month.label);
                             }
                         }
@@ -2223,7 +2244,7 @@ createApp({
                         labels: [],
                         datasets: [{
                             data: [],
-                            backgroundColor: CATEGORY_COLORS
+                            backgroundColor: []
                         }]
                     },
                     options: {
@@ -2233,13 +2254,6 @@ createApp({
                             legend: {
                                 position: 'right',
                                 labels: { boxWidth: 12, padding: 8 }
-                            }
-                        },
-                        onClick: (e, elements) => {
-                            if (elements.length > 0) {
-                                const idx = elements[0].index;
-                                const label = pieChartInstance.data.labels[idx];
-                                if (label) addFilter(label, 'category');
                             }
                         }
                     }
@@ -2262,18 +2276,7 @@ createApp({
                         plugins: {
                             legend: {
                                 position: 'top',
-                                labels: { boxWidth: 12, padding: 8 },
-                                onClick: (e, legendItem, legend) => {
-                                    // Add category filter when clicking legend
-                                    const category = legendItem.text;
-                                    if (category) addFilter(category, 'category');
-                                    // Also toggle visibility (default behavior)
-                                    const index = legendItem.datasetIndex;
-                                    const ci = legend.chart;
-                                    const meta = ci.getDatasetMeta(index);
-                                    meta.hidden = meta.hidden === null ? !ci.data.datasets[index].hidden : null;
-                                    ci.update();
-                                }
+                                labels: { boxWidth: 12, padding: 8 }
                             }
                         },
                         scales: {
@@ -2285,24 +2288,6 @@ createApp({
                                 ticks: {
                                     callback: v => formatCurrencyShort(v)
                                 }
-                            }
-                        },
-                        onClick: (e, elements) => {
-                            if (elements.length > 0) {
-                                const el = elements[0];
-                                const monthIndex = el.index;
-                                const datasetIndex = el.datasetIndex;
-
-                                // Get month from filtered months
-                                const monthsToShow = filteredMonthsForCharts.value;
-                                const month = monthsToShow[monthIndex];
-
-                                // Get category from dataset
-                                const category = categoryMonthChartInstance.data.datasets[datasetIndex]?.label;
-
-                                // Add both filters
-                                if (month) addFilter(month.key, 'month', month.label);
-                                if (category) addFilter(category, 'category');
                             }
                         }
                     }
@@ -2316,68 +2301,91 @@ createApp({
             const agg = chartAggregations.value;
             const monthsToShow = filteredMonthsForCharts.value;
 
-            // Update monthly trend (spending, income, and investment)
+            // Update cash flow trend. Months with nothing to plot (e.g. only transfers)
+            // are dropped so the axis doesn't carry empty columns, and series without
+            // data are left out entirely so they don't linger in the legend.
             if (monthlyChartInstance) {
-                const labels = monthsToShow.map(m => m.label);
-                const spendingData = monthsToShow.map(m => agg.spendingByMonth[m.key] || 0);
-                const incomeData = monthsToShow.map(m => agg.incomeByMonth[m.key] || 0);
-                const investmentData = monthsToShow.map(m => agg.investmentByMonth[m.key] || 0);
-                const maxVal = Math.max(...spendingData, ...incomeData, ...investmentData, 1);
-                monthlyChartInstance.data.labels = labels;
-                monthlyChartInstance.data.datasets[0].data = spendingData;
-                monthlyChartInstance.data.datasets[1].data = incomeData;
-                monthlyChartInstance.data.datasets[2].data = investmentData;
+                const CASH_FLOW_SERIES = [
+                    { label: 'Spending', byMonth: agg.spendingByMonth, color: '#4facfe' },
+                    { label: 'Income', byMonth: agg.incomeByMonth, color: '#00c9a7' },
+                    { label: 'Credits', byMonth: agg.creditsByMonth, color: '#ffa94d' },
+                    { label: 'Investment', byMonth: agg.investmentByMonth, color: '#7c3aed' }
+                ];
+
+                monthlyChartMonths = monthsToShow.filter(m =>
+                    CASH_FLOW_SERIES.some(s => (s.byMonth[m.key] || 0) > 0)
+                );
+
+                const datasets = [];
+                let maxVal = 1;
+                for (const series of CASH_FLOW_SERIES) {
+                    const data = monthlyChartMonths.map(m => series.byMonth[m.key] || 0);
+                    if (!data.some(v => v > 0)) continue;
+                    datasets.push({
+                        label: series.label,
+                        data,
+                        backgroundColor: series.color,
+                        borderRadius: 4
+                    });
+                    maxVal = Math.max(maxVal, ...data);
+                }
+
+                monthlyChartInstance.data.labels = monthlyChartMonths.map(m => m.label);
+                monthlyChartInstance.data.datasets = datasets;
                 monthlyChartInstance.options.scales.y.suggestedMax = maxVal * 1.1;
                 monthlyChartInstance.update();
             }
 
-            // Update category pie
+            // Both category charts share this ranking so their series and colors line up
+            const ranked = Object.entries(agg.byCategory)
+                .filter(([_, v]) => v > 0)
+                .sort((a, b) => b[1] - a[1])
+                .map(([name]) => name);
+            const topCategories = ranked.slice(0, TOP_CATEGORY_COUNT);
+            const otherCategories = ranked.slice(TOP_CATEGORY_COUNT);
+            const categoryColor = i => CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+
+            // Update category pie (top N + "Other")
             if (pieChartInstance) {
-                const entries = Object.entries(agg.byCategory)
-                    .filter(([_, v]) => v > 0)
-                    .sort((a, b) => b[1] - a[1]);
-                pieChartInstance.data.labels = entries.map(e => e[0]);
-                pieChartInstance.data.datasets[0].data = entries.map(e => e[1]);
+                const labels = topCategories.slice();
+                const data = topCategories.map(cat => agg.byCategory[cat]);
+                const colors = topCategories.map((_, i) => categoryColor(i));
+
+                if (otherCategories.length > 0) {
+                    labels.push(OTHER_CATEGORY_LABEL);
+                    data.push(otherCategories.reduce((sum, cat) => sum + agg.byCategory[cat], 0));
+                    colors.push(OTHER_CATEGORY_COLOR);
+                }
+
+                pieChartInstance.data.labels = labels;
+                pieChartInstance.data.datasets[0].data = data;
+                pieChartInstance.data.datasets[0].backgroundColor = colors;
                 pieChartInstance.update();
             }
 
-            // Update category by month (top 8 spending categories + income + investment)
+            // Update category by month (top N + "Other"). Months without spending
+            // are dropped so the axis doesn't carry empty columns.
             if (categoryMonthChartInstance) {
-                const labels = monthsToShow.map(m => m.label);
-                const categories = Object.keys(agg.byCategoryByMonth).sort((a, b) => {
-                    const totalA = Object.values(agg.byCategoryByMonth[a]).reduce((s, v) => s + v, 0);
-                    const totalB = Object.values(agg.byCategoryByMonth[b]).reduce((s, v) => s + v, 0);
-                    return totalB - totalA;
-                }).slice(0, 8); // Top 8 spending categories
-
-                const datasets = categories.map((cat, i) => ({
+                const spendingMonths = monthsToShow.filter(m => (agg.spendingByMonth[m.key] || 0) > 0);
+                const labels = spendingMonths.map(m => m.label);
+                const datasets = topCategories.map((cat, i) => ({
                     label: cat,
-                    data: monthsToShow.map(m => agg.byCategoryByMonth[cat][m.key] || 0),
-                    backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length]
+                    data: spendingMonths.map(m => agg.byCategoryByMonth[cat]?.[m.key] || 0),
+                    backgroundColor: categoryColor(i)
                 }));
 
-                // Add income as its own dataset (green, like monthly chart)
-                const incomeData = monthsToShow.map(m => agg.incomeByMonth[m.key] || 0);
-                if (incomeData.some(v => v > 0)) {
+                if (otherCategories.length > 0) {
                     datasets.push({
-                        label: 'Income',
-                        data: incomeData,
-                        backgroundColor: '#00c9a7'
-                    });
-                }
-
-                // Add investment as its own dataset (purple, like monthly chart)
-                const investmentData = monthsToShow.map(m => agg.investmentByMonth[m.key] || 0);
-                if (investmentData.some(v => v > 0)) {
-                    datasets.push({
-                        label: 'Investment',
-                        data: investmentData,
-                        backgroundColor: '#7c3aed'
+                        label: OTHER_CATEGORY_LABEL,
+                        data: spendingMonths.map(m => otherCategories.reduce(
+                            (sum, cat) => sum + (agg.byCategoryByMonth[cat]?.[m.key] || 0), 0
+                        )),
+                        backgroundColor: OTHER_CATEGORY_COLOR
                     });
                 }
 
                 // Calculate max for stacked bar (sum of all categories per month)
-                const monthTotals = monthsToShow.map((m, idx) =>
+                const monthTotals = spendingMonths.map((m, idx) =>
                     datasets.reduce((sum, ds) => sum + (ds.data[idx] || 0), 0)
                 );
                 const maxVal = Math.max(...monthTotals, 1); // At least 1 to avoid 0

@@ -1398,6 +1398,9 @@ th[data-tooltip] { cursor: pointer; }
 }
 .chart-container {
     position: relative;
+    /* min-width: 0 lets grid tracks shrink below the rendered canvas width;
+       the default min-width: auto locks the grid open and clips charts on re-widen */
+    min-width: 0;
     background: var(--bg-table);
     border-radius: 12px;
     padding: 1.5rem;
