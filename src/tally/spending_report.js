@@ -275,11 +275,11 @@ const MerchantSection = defineComponent({
         }
     },
     template: `
-        <section :class="[sectionKey.replace(':', '-') + '-section', 'category-section']" :data-testid="'section-' + sectionKey.replace(':', '-')">
+        <section :class="[sectionKey.replace(':', '-') + '-section', 'category-section', { 'is-collapsed': collapsedSections.has(sectionKey) }]" :data-testid="'section-' + sectionKey.replace(':', '-')">
             <div class="section-header" @click="toggleSection(sectionKey)">
                 <h2>
                     <span class="toggle">{{ collapsedSections.has(sectionKey) ? '▶' : '▼' }}</span>
-                    <span v-if="headerColor" class="category-dot" :style="{ backgroundColor: headerColor }"></span>
+                    <span v-if="headerColor" class="category-dot" :style="{ backgroundColor: headerColor, '--dot-color': headerColor }"></span>
                     {{ title }}
                 </h2>
                 <span class="section-total">
@@ -309,14 +309,14 @@ const MerchantSection = defineComponent({
                                 <th @click.stop="toggleSort(sectionKey, 'subcategory')"
                                     :class="getSortClass('subcategory')">{{ subcategoryMode ? 'Merchants' : (categoryMode ? 'Subcategory' : 'Category') }}</th>
                                 <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
-                                <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
+                                <th v-if="categoryMode" class="count-col" @click.stop="toggleSort(sectionKey, 'count')"
                                     :class="getSortClass('count')">Count</th>
                                 <th>Tags</th>
-                                <th v-if="!categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
+                                <th v-if="!categoryMode" class="count-col" @click.stop="toggleSort(sectionKey, 'count')"
                                     :class="getSortClass('count')">Count</th>
                                 <th class="money" @click.stop="toggleSort(sectionKey, 'total')"
                                     :class="getSortClass('total')">{{ creditMode ? 'Amount' : 'Total' }}</th>
-                                <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'total')"
+                                <th v-if="categoryMode" class="pct" @click.stop="toggleSort(sectionKey, 'total')"
                                     :class="getSortClass('total')">%</th>
                             </tr>
                         </thead>
@@ -396,13 +396,13 @@ const MerchantSection = defineComponent({
                                         <span v-else>{{ item.subcategory }}</span>
                                     </td>
                                     <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
-                                    <td v-if="categoryMode" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
+                                    <td v-if="categoryMode" class="count-col" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
                                     <td class="tags-cell">
                                         <span v-for="tag in getTags(item)" :key="tag" class="tag-badge" data-testid="tag-badge"
                                               :style="{ borderColor: tagColor(tag), color: tagColor(tag) }"
                                               @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
                                     </td>
-                                    <td v-if="!categoryMode" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
+                                    <td v-if="!categoryMode" class="count-col" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
                                     <td class="money" :class="getAmountClass(item)" data-testid="merchant-total">
                                         {{ formatAmount(item) }}
                                     </td>
@@ -451,6 +451,8 @@ const MerchantSection = defineComponent({
                                     </td>
                                 </tr>
                             </template>
+                        </tbody>
+                        <tfoot>
                             <tr class="total-row">
                                 <td :colspan="colSpan">{{ totalLabel }}</td>
                                 <td class="money" :class="{ 'credit-amount': creditMode }">
@@ -458,7 +460,7 @@ const MerchantSection = defineComponent({
                                 </td>
                                 <td v-if="categoryMode" class="pct">100%</td>
                             </tr>
-                        </tbody>
+                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -805,6 +807,7 @@ createApp({
         const isScrolled = ref(false);
         const isDarkTheme = ref(true);
         const chartsCollapsed = ref(false);
+        const detailsCollapsed = ref(false);
         const helpCollapsed = ref(true);
         const currentView = ref('category'); // 'category' or 'section'
         const groupByMode = ref('merchant'); // 'merchant' or 'subcategory'
@@ -1972,6 +1975,51 @@ createApp({
             }
         }
 
+        // Section keys currently visible in the active view (for collapse-all / expand-all)
+        const allSectionKeys = computed(() => {
+            if (currentView.value === 'section' && hasSections.value) {
+                return Object.keys(positiveSectionView.value).map(id => 'sec:' + id);
+            }
+            const view = groupByMode.value === 'subcategory' ? subcategoryGroupedView.value : positiveCategoryView.value;
+            return Object.keys(view).map(name => 'cat:' + name);
+        });
+        const allCollapsed = computed(() =>
+            allSectionKeys.value.length > 0 && allSectionKeys.value.every(k => collapsedSections.has(k))
+        );
+        // Collapse all: fold every category AND its open transaction lists ("the details")
+        function collapseAll() {
+            allSectionKeys.value.forEach(k => collapsedSections.add(k));
+            expandedMerchants.clear();
+        }
+        // Expand all: reopen top-level categories only (leave transaction lists folded)
+        function expandAll() {
+            collapsedSections.clear();
+        }
+        function toggleAllSections() {
+            if (allCollapsed.value) { expandAll(); } else { collapseAll(); }
+        }
+
+        // View-aware summary shown in the Transaction Details header
+        const pluralize = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+        const detailsSummary = computed(() => {
+            if (currentView.value === 'section' && hasSections.value) {
+                const views = positiveSectionView.value;
+                let merchants = 0;
+                Object.values(views).forEach(s => { merchants += Object.keys(s.filteredMerchants || {}).length; });
+                return `${pluralize(Object.keys(views).length, 'view', 'views')}, ${pluralize(merchants, 'merchant', 'merchants')}`;
+            }
+            if (groupByMode.value === 'subcategory') {
+                const cats = subcategoryGroupedView.value;
+                let subs = 0;
+                Object.values(cats).forEach(c => { subs += (c.sortedSubcategories || []).length; });
+                return `${pluralize(Object.keys(cats).length, 'category', 'categories')}, ${pluralize(subs, 'subcategory', 'subcategories')}`;
+            }
+            const cats = positiveCategoryView.value;
+            let merchants = 0;
+            Object.values(cats).forEach(c => { merchants += (c.sortedMerchants || []).length; });
+            return `${pluralize(Object.keys(cats).length, 'category', 'categories')}, ${pluralize(merchants, 'merchant', 'merchants')}`;
+        });
+
         // Sort merchants by configurable column and direction (for object-based sections)
         function sortMerchantEntries(merchants, column, dir) {
             return Object.entries(merchants || {})
@@ -2478,7 +2526,7 @@ createApp({
             // State
             activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
             showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
-            currentView, groupByMode, sortConfig, includeNegativeTotals,
+            currentView, groupByMode, sortConfig, includeNegativeTotals, detailsCollapsed, allCollapsed, detailsSummary,
             // Refs
             monthlyChart, categoryPieChart, categoryByMonthChart,
             // Computed
@@ -2504,7 +2552,7 @@ createApp({
             groupedTransactions, expandedTransactions,
             // Methods
             addFilter, removeFilter, toggleFilterMode, clearFilters, addMonthFilter,
-            toggleExpand, toggleSection, toggleSort, sortedMerchants,
+            toggleExpand, toggleSection, toggleSort, toggleAllSections, sortedMerchants,
             formatCurrency, formatDate, formatMonthLabel, formatPct, filterTypeChar,
             highlightDescription,
             onSearchInput, onSearchKeydown, selectAutocompleteItem,

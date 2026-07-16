@@ -186,7 +186,7 @@
             </div>
 
             <!-- Charts Section -->
-            <div class="chart-section">
+            <div class="chart-section" :class="{ collapsed: chartsCollapsed }">
                 <div class="section-header" @click="chartsCollapsed = !chartsCollapsed">
                     <h2>
                         <span class="toggle">{{ chartsCollapsed ? '▶' : '▼' }}</span>
@@ -217,6 +217,16 @@
                 </div>
             </div>
 
+            <!-- Transaction Details container -->
+            <div class="details-section" :class="{ collapsed: detailsCollapsed }">
+                <div class="section-header" @click="detailsCollapsed = !detailsCollapsed">
+                    <h2>
+                        <span class="toggle">{{ detailsCollapsed ? '▶' : '▼' }}</span>
+                        Transaction Details
+                    </h2>
+                    <span class="header-count" data-testid="details-summary">{{ detailsSummary }}</span>
+                </div>
+                <div class="details-body">
             <!-- Unified View Toggle -->
             <div class="view-toggle">
                 <button :class="{ active: currentView === 'category' && groupByMode === 'merchant' }"
@@ -240,6 +250,21 @@
                     {{ includeNegativeTotals ? 'Exclude Negatives' : 'Include Negatives' }}
                     <span v-if="!includeNegativeTotals" class="negatives-badge">{{ negativeTotalsCount > 99 ? '99+' : negativeTotalsCount }}</span>
                 </button>
+                <div class="collapse-controls">
+                    <button class="icon-btn collapse-all-btn" data-testid="collapse-all-toggle" :title="allCollapsed ? 'Expand all categories' : 'Collapse all categories'" @click="toggleAllSections()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <template v-if="allCollapsed">
+                                <polyline points="7 13 12 18 17 13"></polyline>
+                                <polyline points="7 6 12 11 17 6"></polyline>
+                            </template>
+                            <template v-else>
+                                <polyline points="17 11 12 6 7 11"></polyline>
+                                <polyline points="17 18 12 13 7 18"></polyline>
+                            </template>
+                        </svg>
+                        <span>{{ allCollapsed ? 'Expand all' : 'Collapse all' }}</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Section View -->
@@ -340,6 +365,8 @@
                     :tag-color="tagColor"
                 ></merchant-section>
             </template>
+                </div><!-- /.details-body -->
+            </div><!-- /.details-section -->
 
             <!-- Footer -->
             <footer>

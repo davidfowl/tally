@@ -324,6 +324,80 @@ class TestCalculationAccuracy:
 
 
 # =============================================================================
+# Category 2b: Transaction Details container & collapse controls
+# =============================================================================
+
+class TestTransactionDetailsContainer:
+    """Tests for the Transaction Details container, header summary, and collapse controls."""
+
+    def test_container_and_summary_present(self, page: Page, report_path):
+        """The Transaction Details container renders with a view-aware count summary."""
+        page.goto(f"file://{report_path}")
+        expect(page.locator(".details-section > .section-header h2")).to_contain_text("Transaction Details")
+        # Merchant view (default): "N categories, N merchants"
+        expect(page.get_by_test_id("details-summary")).to_have_text("2 categories, 4 merchants")
+
+    def test_summary_updates_for_subcategory_view(self, page: Page, report_path):
+        """Switching to Subcategory view changes the count label wording."""
+        page.goto(f"file://{report_path}")
+        page.get_by_role("button", name="Subcategory", exact=True).click()
+        expect(page.get_by_test_id("details-summary")).to_contain_text("subcategories")
+
+    def test_collapse_all_hides_category_rows(self, page: Page, report_path):
+        """Collapse-all folds every category; the button flips to Expand."""
+        page.goto(f"file://{report_path}")
+        shopping = page.get_by_test_id("section-cat-Shopping")
+        expect(shopping).not_to_have_class(re.compile("is-collapsed"))
+        page.get_by_test_id("collapse-all-toggle").click()
+        expect(shopping).to_have_class(re.compile("is-collapsed"))
+        expect(page.get_by_test_id("collapse-all-toggle")).to_have_attribute("title", "Expand all categories")
+
+    def test_expand_all_reopens_categories(self, page: Page, report_path):
+        """Expand-all re-opens the category sections."""
+        page.goto(f"file://{report_path}")
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        shopping = page.get_by_test_id("section-cat-Shopping")
+        toggle.click()  # collapse all
+        expect(shopping).to_have_class(re.compile("is-collapsed"))
+        toggle.click()  # expand all
+        expect(shopping).not_to_have_class(re.compile("is-collapsed"))
+
+    def test_collapse_all_folds_open_transactions_and_expand_leaves_them_folded(self, page: Page, report_path):
+        """Collapse-all folds open transaction lists; expand-all reopens categories only (txns stay folded)."""
+        page.goto(f"file://{report_path}")
+        page.get_by_test_id("merchant-row-Amazon").click()  # open transactions
+        expect(page.locator(".txn-row:has-text('AMAZON MARKETPLACE')").first).to_be_visible()
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        toggle.click()  # collapse all -> also folds open transactions
+        toggle.click()  # expand all -> reopens categories only
+        expect(page.locator(".txn-row:has-text('AMAZON MARKETPLACE')").first).not_to_be_visible()
+
+    def test_container_collapses_to_header_only(self, page: Page, report_path):
+        """Clicking the container header collapses the whole details body (header only)."""
+        page.goto(f"file://{report_path}")
+        details_body = page.locator(".details-body")
+        expect(details_body).to_be_visible()
+        page.locator(".details-section > .section-header").click()
+        expect(details_body).not_to_be_visible()
+
+    def test_column_alignment(self, page: Page, report_path):
+        """Count column is centered; Total column is right-aligned."""
+        page.goto(f"file://{report_path}")
+        count_align = page.locator("td.count-col").first.evaluate("el => getComputedStyle(el).textAlign")
+        total_align = page.locator("td.money").first.evaluate("el => getComputedStyle(el).textAlign")
+        assert count_align == "center", f"Count column should be centered, got {count_align}"
+        assert total_align == "right", f"Total column should be right-aligned, got {total_align}"
+
+    def test_total_row_pinned_in_tfoot(self, page: Page, report_path):
+        """The total row lives in a <tfoot> and is sticky to the bottom of the scroll box."""
+        page.goto(f"file://{report_path}")
+        total_cell = page.locator("tfoot .total-row td").first
+        expect(total_cell).to_be_attached()
+        position = total_cell.evaluate("el => getComputedStyle(el).position")
+        assert position == "sticky", f"Total row cells should be sticky, got {position}"
+
+
+# =============================================================================
 # Category 3: Edge Cases and Complex Calculations
 # =============================================================================
 
