@@ -227,30 +227,33 @@
                     <span class="header-count" data-testid="details-summary">{{ detailsSummary }}</span>
                 </div>
                 <div class="details-body">
-            <!-- Unified View Toggle -->
+            <!-- Unified View Toggle. Two groups so they wrap cleanly on mobile:
+                 view modes stay on one line, negatives + collapse drop to the next. -->
             <div class="view-toggle">
-                <button :class="{ active: currentView === 'category' && groupByMode === 'merchant' }"
-                        @click="currentView = 'category'; groupByMode = 'merchant'">
-                    Merchant
-                </button>
-                <button :class="{ active: currentView === 'category' && groupByMode === 'subcategory' }"
-                        @click="currentView = 'category'; groupByMode = 'subcategory'">
-                    Subcategory
-                </button>
-                <button v-if="hasSections"
-                        :class="{ active: currentView === 'section' }"
-                        @click="currentView = 'section'">
-                    View
-                </button>
-                <button v-if="(currentView === 'category' || hasSections) && negativeTotalsCount > 0"
-                        class="toggle-negatives"
-                        :class="{ active: includeNegativeTotals }"
-                        :title="includeNegativeTotals ? 'Exclude categories and merchants with net negative totals' : 'Include categories and merchants with net negative totals'"
-                        @click="includeNegativeTotals = !includeNegativeTotals">
-                    {{ includeNegativeTotals ? 'Exclude Negatives' : 'Include Negatives' }}
-                    <span v-if="!includeNegativeTotals" class="negatives-badge">{{ negativeTotalsCount > 99 ? '99+' : negativeTotalsCount }}</span>
-                </button>
-                <div class="collapse-controls">
+                <div class="view-modes">
+                    <button :class="{ active: currentView === 'category' && groupByMode === 'merchant' }"
+                            @click="currentView = 'category'; groupByMode = 'merchant'">
+                        Merchant
+                    </button>
+                    <button :class="{ active: currentView === 'category' && groupByMode === 'subcategory' }"
+                            @click="currentView = 'category'; groupByMode = 'subcategory'">
+                        Subcategory
+                    </button>
+                    <button v-if="hasSections"
+                            :class="{ active: currentView === 'section' }"
+                            @click="currentView = 'section'">
+                        View
+                    </button>
+                </div>
+                <div class="toggle-actions">
+                    <button v-if="(currentView === 'category' || hasSections) && negativeTotalsCount > 0"
+                            class="toggle-negatives"
+                            :class="{ active: includeNegativeTotals }"
+                            :title="includeNegativeTotals ? 'Exclude categories and merchants with net negative totals' : 'Include categories and merchants with net negative totals'"
+                            @click="includeNegativeTotals = !includeNegativeTotals">
+                        {{ includeNegativeTotals ? 'Exclude Negatives' : 'Include Negatives' }}
+                        <span v-if="!includeNegativeTotals" class="negatives-badge">{{ negativeTotalsCount > 99 ? '99+' : negativeTotalsCount }}</span>
+                    </button>
                     <button class="icon-btn collapse-all-btn" data-testid="collapse-all-toggle" :title="allCollapsed ? 'Expand all categories' : 'Collapse all categories'" @click="toggleAllSections()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <template v-if="allCollapsed">
