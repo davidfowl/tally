@@ -297,14 +297,17 @@
                 ></merchant-section>
             </template>
 
-            <!-- Category View - Grouped by Merchant -->
-            <template v-if="currentView === 'category' && groupByMode === 'merchant'">
+            <!-- Category View - one keyed v-for for both merchant & subcategory grouping.
+                 Both groupings key sections by the same category names, so a single
+                 v-for lets Vue patch <section> nodes in place across a groupByMode
+                 toggle instead of tearing them down and remounting them. -->
+            <template v-if="currentView === 'category'">
                 <merchant-section
-                    v-for="(category, categoryName) in positiveCategoryView"
+                    v-for="(category, categoryName) in (groupByMode === 'subcategory' ? subcategoryGroupedView : positiveCategoryView)"
                     :key="categoryName"
                     :section-key="'cat:' + categoryName"
                     :title="categoryName"
-                    :items="category.sortedMerchants"
+                    :items="groupByMode === 'subcategory' ? category.sortedSubcategories : category.sortedMerchants"
                     :total-amount="category.filteredTotal"
                     :category-total="category.filteredTotal"
                     :grand-total="grandTotal"
@@ -316,41 +319,7 @@
                     :num-months="numFilteredMonths"
                     :header-color="categoryColorMap[categoryName]"
                     :category-mode="true"
-                    :collapsed-sections="collapsedSections"
-                    :sort-config="sortConfig"
-                    :expanded-items="expandedMerchants"
-                    :extra-field-matches="extraFieldMatches"
-                    :toggle-section="toggleSection"
-                    :toggle-sort="toggleSort"
-                    :format-currency="formatCurrency"
-                    :format-date="formatDate"
-                    :format-pct="formatPct"
-                    :add-filter="addFilter"
-                    :highlight-description="highlightDescription"
-                    :tag-color="tagColor"
-                ></merchant-section>
-            </template>
-
-            <!-- Category View - Grouped by Subcategory -->
-            <template v-if="currentView === 'category' && groupByMode === 'subcategory'">
-                <merchant-section
-                    v-for="(category, categoryName) in subcategoryGroupedView"
-                    :key="categoryName"
-                    :section-key="'cat:' + categoryName"
-                    :title="categoryName"
-                    :items="category.sortedSubcategories"
-                    :total-amount="category.filteredTotal"
-                    :category-total="category.filteredTotal"
-                    :grand-total="grandTotal"
-                    :gross-spending="grossSpending"
-                    :total-unfiltered-spending="spendingTotal"
-                    :income-total="incomeTotal"
-                    :investment-total="investmentTotal"
-                    :type-totals="category.typeTotals"
-                    :num-months="numFilteredMonths"
-                    :header-color="categoryColorMap[categoryName]"
-                    :category-mode="true"
-                    :subcategory-mode="true"
+                    :subcategory-mode="groupByMode === 'subcategory'"
                     :collapsed-sections="collapsedSections"
                     :sort-config="sortConfig"
                     :expanded-items="expandedMerchants"
