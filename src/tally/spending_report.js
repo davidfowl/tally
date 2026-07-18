@@ -453,7 +453,7 @@ const MerchantSection = defineComponent({
                                                     </div>
                                                 </span>
                                             </span>
-                                            <span class="txn-date">{{ formatDate(txn.date, txn.month, getTransactionYears(item)) }}</span>
+                                            <span class="txn-date">{{ formatDate(txn.date, txn.month) }}</span>
                                             <span class="txn-account">
                                                 <span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
                                             </span>
@@ -488,10 +488,6 @@ const MerchantSection = defineComponent({
             </div>
         </section>
     `,
-    created() {
-        // Non-reactive cache for getTransactionYears (see method for rationale).
-        this._txnYearsCache = new WeakMap();
-    },
     methods: {
         getSortClass(column) {
             const cfg = this.sortConfig[this.sectionKey];
@@ -566,21 +562,6 @@ const MerchantSection = defineComponent({
                 const dateB = `${b.month || '0000-00'}-${(b.date || '00/00').slice(3, 5)}`;
                 return dateB.localeCompare(dateA);
             });
-        },
-        // True when this item's transactions span more than one calendar year,
-        // so transaction rows should show ", YYYY". Computed once per item and
-        // cached in a WeakMap (keyed by the item object, GC'd when the item is
-        // recreated on the next filtered-view recompute) to avoid re-deriving
-        // it for every transaction row.
-        getTransactionYears(item) {
-            if (this._txnYearsCache.has(item)) return this._txnYearsCache.get(item);
-            const years = new Set();
-            for (const t of (item.filteredTxns || item.transactions || [])) {
-                if (t.month) years.add(t.month.slice(0, 4));
-            }
-            const multi = years.size > 1;
-            this._txnYearsCache.set(item, multi);
-            return multi;
         },
         getAmountClass(item) {
             if (this.creditMode) return 'credit-amount';
@@ -2183,7 +2164,7 @@ createApp({
             return currencyFormat.replace('{amount}', amount.toFixed(0));
         }
 
-        function formatDate(dateStr, monthStr, showYear) {
+        function formatDate(dateStr, monthStr) {
             if (!dateStr) return '';
             const yearSuffix = monthStr ? `, ${monthStr.slice(0, 4)}` : '';
             // Handle MM/DD format from Python
@@ -2285,7 +2266,7 @@ createApp({
 
                 for (const txn of txns) {
                     if (txn.date) {
-                        const dateLabel = formatDate(txn.date, txn.month, true);
+                        const dateLabel = formatDate(txn.date, txn.month);
                         maxDate = Math.max(maxDate, measureTxnDatePx(dateLabel));
                     }
                     maxAccount = Math.max(maxAccount, measureTxnAccountPx(txn.source));
