@@ -3,11 +3,22 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Financial Report</title>
+    <title>__REPORT_TITLE__</title>
     <style>/* CSS_PLACEHOLDER */</style>
 </head>
-<body>
-    <div id="app">
+<body class="app-initializing">
+    <div id="app-loading" class="app-loading-shell" aria-live="polite" aria-busy="true">
+        <div class="container">
+            <header class="loading-header">
+                <h1 class="loading-title">__REPORT_TITLE__</h1>
+                <p class="loading-subtitle">Preparing your spending analysis...</p>
+            </header>
+            <div class="loading-progress-wrap" role="status" aria-label="Loading report">
+                <div class="loading-progress-bar"></div>
+            </div>
+        </div>
+    </div>
+    <div id="app" v-cloak>
         <div class="container">
             <!-- Header -->
             <header>
@@ -295,6 +306,8 @@
                     :format-date="formatDate"
                     :format-pct="formatPct"
                     :add-filter="addFilter"
+                    :is-include-filter-active="isIncludeFilterActive"
+                    :toggle-include-filter="toggleIncludeFilter"
                     :highlight-description="highlightDescription"
                     :tag-color="tagColor"
                 ></merchant-section>
@@ -333,6 +346,8 @@
                     :format-date="formatDate"
                     :format-pct="formatPct"
                     :add-filter="addFilter"
+                    :is-include-filter-active="isIncludeFilterActive"
+                    :toggle-include-filter="toggleIncludeFilter"
                     :highlight-description="highlightDescription"
                     :tag-color="tagColor"
                 ></merchant-section>

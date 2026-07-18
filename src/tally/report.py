@@ -154,6 +154,7 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
                 pattern = match_info.get('pattern', '')
                 match_info_json = {
                     'pattern': pattern,
+                    'ruleName': match_info.get('rule_name', ''),
                     'source': match_info.get('source', ''),
                     'explanation': explain_pattern(pattern),
                     'assignedMerchant': merchant_name,
@@ -332,6 +333,7 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     }
 
     # Assemble final HTML
+    resolved_title = title or 'Tally Spending Analysis'
     data_script = f'window.spendingData = {json.dumps(spending_data)};'
 
     if not embedded_html:
@@ -353,6 +355,8 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
 
         # Create HTML with external references
         final_html = html_template.replace(
+            '__REPORT_TITLE__', resolved_title
+        ).replace(
             '<style>/* CSS_PLACEHOLDER */</style>',
             '<link rel="stylesheet" href="spending_report.css">'
         ).replace(
@@ -365,6 +369,8 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     else:
         # Embed everything inline (default)
         final_html = html_template.replace(
+            '__REPORT_TITLE__', resolved_title
+        ).replace(
             '/* CSS_PLACEHOLDER */', css_content
         ).replace(
             '/* DATA_PLACEHOLDER */', data_script

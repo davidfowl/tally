@@ -3,6 +3,18 @@
 
 const { createApp, ref, reactive, computed, watch, onMounted, nextTick, defineComponent } = Vue;
 
+function setAppInitializingState() {
+    document.body.classList.add('app-initializing');
+    document.body.classList.remove('app-ready');
+}
+
+function setAppReadyState() {
+    document.body.classList.remove('app-initializing');
+    document.body.classList.add('app-ready');
+}
+
+setAppInitializingState();
+
 // =============================================================================
 // TRANSACTION CLASSIFICATION - Mirrors Python classification.py
 // =============================================================================
@@ -261,6 +273,8 @@ const MerchantSection = defineComponent({
         formatDate: { type: Function, required: true },
         formatPct: { type: Function, default: null },
         addFilter: { type: Function, required: true },
+        isIncludeFilterActive: { type: Function, required: true },
+        toggleIncludeFilter: { type: Function, required: true },
         highlightDescription: { type: Function, default: (d) => d },
         tagColor: { type: Function, default: () => '#888' }
     },
@@ -326,58 +340,63 @@ const MerchantSection = defineComponent({
                                     :class="{ expanded: isExpanded(item.id || idx) }"
                                     :data-testid="'merchant-row-' + (item.id || item.displayName || item.merchant || idx)"
                                     @click="toggleExpand(item.id || idx)">
-                                    <td class="merchant" :class="{ clickable: categoryMode }">
-                                        <span class="chevron">{{ isExpanded(item.id || idx) ? '▼' : '▶' }}</span>
-                                        <span class="merchant-name" @click.stop="categoryMode ? addFilter(item.id, subcategoryMode ? 'subcategory' : 'merchant', item.displayName) : null">
-                                            {{ item.displayName || item.merchant }}
-                                        </span>
-                                        <span v-if="item.matchInfo || item.viewInfo" class="match-info-trigger"
-                                                      @click.stop="togglePopup($event)">info
-                                            <span class="match-info-popup" ref="popup" @click.stop>
-                                                <button class="popup-close" @click="closePopup($event)">&times;</button>
-                                                <div class="popup-header">Why This Matched</div>
-                                                <template v-if="item.matchInfo">
-                                                    <div v-if="item.matchInfo.explanation" class="popup-explanation">{{ item.matchInfo.explanation }}</div>
-                                                    <div class="popup-section">
-                                                        <div class="popup-section-header">Merchant Pattern</div>
-                                                        <div class="popup-code">{{ item.matchInfo.pattern }}</div>
-                                                    </div>
-                                                    <div class="popup-section">
-                                                        <div class="popup-section-header">Assigned To</div>
-                                                        <div class="popup-row">
-                                                            <span class="popup-label">Merchant:</span>
-                                                            <span class="popup-value">{{ item.matchInfo.assignedMerchant }}</span>
+                                    <td class="merchant">
+                                        <div class="merchant-cell">
+                                            <span class="chevron">{{ isExpanded(item.id || idx) ? '▼' : '▶' }}</span>
+                                            <div class="merchant-body">
+                                                <span class="merchant-name">
+                                                    {{ item.displayName || item.merchant }}
+                                                </span>
+                                                <span class="merchant-actions" v-if="categoryMode">
+                                                    <span v-if="item.matchInfo || item.viewInfo" class="match-info-trigger"
+                                                          @click.stop="togglePopup($event)">info
+                                                <span class="match-info-popup" ref="popup" @click.stop>
+                                                    <button class="popup-close" @click="closePopup($event)">&times;</button>
+                                                    <div class="popup-header">Why This Matched</div>
+                                                    <template v-if="item.matchInfo">
+                                                        <div v-if="item.matchInfo.explanation" class="popup-explanation">{{ item.matchInfo.explanation }}</div>
+                                                        <div class="popup-section">
+                                                            <div class="popup-section-header">Merchant Pattern</div>
+                                                            <div class="popup-code">{{ item.matchInfo.pattern }}</div>
                                                         </div>
-                                                        <div class="popup-row">
-                                                            <span class="popup-label">Category:</span>
-                                                            <span class="popup-value">{{ item.matchInfo.assignedCategory }} / {{ item.matchInfo.assignedSubcategory }}</span>
+                                                        <div class="popup-section">
+                                                            <div class="popup-section-header">{{ item.matchInfo.ruleName ? 'Rule: [' + item.matchInfo.ruleName + ']' : 'Tag Rules Matched' }}</div>
+                                                            <div v-if="item.matchInfo.ruleName || (item.matchInfo.assignedCategory && item.matchInfo.assignedCategory !== 'Unknown')" class="popup-row">
+                                                                <span class="popup-label">Merchant:</span>
+                                                                <span class="popup-value">{{ item.matchInfo.assignedMerchant }}</span>
+                                                            </div>
+                                                            <div v-if="item.matchInfo.ruleName || (item.matchInfo.assignedCategory && item.matchInfo.assignedCategory !== 'Unknown')" class="popup-row">
+                                                                <span class="popup-label">Category:</span>
+                                                                <span class="popup-value">{{ item.matchInfo.assignedCategory }} / {{ item.matchInfo.assignedSubcategory }}</span>
+                                                            </div>
+                                                            <div v-for="(tag, tagIndex) in getTags(item)" :key="tag" class="popup-row popup-tag-row">
+                                                                <span class="popup-label">{{ tagIndex === 0 ? 'Tags:' : '' }}</span>
+                                                                <span class="popup-value">
+                                                                    <span class="tag-badge popup-tag-badge" :style="{ borderColor: tagColor(tag), color: tagColor(tag) }">{{ tag }}</span>
+                                                                    <span v-if="item.matchInfo.tagSources && item.matchInfo.tagSources[tag] && (!item.matchInfo.ruleName || item.matchInfo.tagSources[tag].rule !== item.matchInfo.ruleName)" class="popup-tag-source">
+                                                                        from [{{ item.matchInfo.tagSources[tag].rule }}]
+                                                                    </span>
+                                                                </span>
+                                                            </div>
                                                         </div>
-                                                        <div v-if="item.matchInfo.assignedTags && item.matchInfo.assignedTags.length" class="popup-row popup-tags-section">
-                                                            <span class="popup-label">Tags:</span>
-                                                            <span class="popup-value">
-                                                                <template v-if="item.matchInfo.tagSources && Object.keys(item.matchInfo.tagSources).length">
-                                                                    <div v-for="tag in item.matchInfo.assignedTags" :key="tag" class="popup-tag-item">
-                                                                        <span class="popup-tag-name">{{ tag }}</span>
-                                                                        <span v-if="item.matchInfo.tagSources[tag]" class="popup-tag-source">
-                                                                            from [{{ item.matchInfo.tagSources[tag].rule }}]
-                                                                        </span>
-                                                                    </div>
-                                                                </template>
-                                                                <template v-else>{{ item.matchInfo.assignedTags.join(', ') }}</template>
-                                                            </span>
+                                                    </template>
+                                                    <template v-if="item.viewInfo && item.viewInfo.filterExpr">
+                                                        <div class="popup-section popup-view-section">
+                                                            <div class="popup-section-header">View Filter ({{ item.viewInfo.viewName }})</div>
+                                                            <div v-if="item.viewInfo.explanation" class="popup-explanation" style="margin-top: 0.3em;">{{ item.viewInfo.explanation }}</div>
+                                                            <div class="popup-code">{{ item.viewInfo.filterExpr }}</div>
                                                         </div>
-                                                    </div>
-                                                </template>
-                                                <template v-if="item.viewInfo && item.viewInfo.filterExpr">
-                                                    <div class="popup-section">
-                                                        <div class="popup-section-header">View Filter ({{ item.viewInfo.viewName }})</div>
-                                                        <div v-if="item.viewInfo.explanation" class="popup-explanation" style="margin-top: 0.3em;">{{ item.viewInfo.explanation }}</div>
-                                                        <div class="popup-code">{{ item.viewInfo.filterExpr }}</div>
-                                                    </div>
-                                                </template>
-                                                <div v-if="item.matchInfo" class="popup-source">From: {{ item.matchInfo.source === 'user' ? 'merchants.rules' : item.matchInfo.source }}</div>
-                                            </span>
-                                        </span>
+                                                    </template>
+                                                    <div v-if="item.matchInfo" class="popup-source">From: {{ item.matchInfo.source === 'user' ? 'merchants.rules' : item.matchInfo.source }}</div>
+                                                </span>
+                                                    </span>
+                                                    <span v-if="item.matchInfo || item.viewInfo" class="merchant-action-sep">&middot;</span>
+                                                    <button type="button" class="merchant-filter-trigger" @click.stop="toggleMerchantFilter(item)">
+                                                        {{ isMerchantFiltered(item) ? 'clear' : 'filter' }}
+                                                    </button>
+                                                </span>
+                                            </div>
+                                        </div>
                                     </td>
                                     <td class="category" :class="{ clickable: categoryMode && !subcategoryMode }"
                                         @click.stop="categoryMode && !subcategoryMode && addFilter(item.subcategory, 'subcategory')">
@@ -435,7 +454,10 @@ const MerchantSection = defineComponent({
                                                 </span>
                                             </span>
                                             <span class="txn-date">{{ formatDate(txn.date, txn.month, getTransactionYears(item)) }}</span>
-                                            <span class="txn-desc"><span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span> <span v-html="highlightDescription(txn.description)"></span></span>
+                                            <span class="txn-account">
+                                                <span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
+                                            </span>
+                                            <span class="txn-desc"><span v-html="highlightDescription(txn.description)"></span></span>
                                             <span class="txn-badges">
                                                 <span v-for="tag in [...(txn.tags || [])].sort()"
                                                       :key="tag"
@@ -521,6 +543,20 @@ const MerchantSection = defineComponent({
                 tags = item.tags || [];
             }
             return [...tags].sort((a, b) => a.localeCompare(b));
+        },
+        getFilterDescriptor(item) {
+            const type = this.subcategoryMode ? 'subcategory' : 'merchant';
+            const text = this.subcategoryMode ? (item.subcategory || item.displayName || item.id) : item.id;
+            const displayText = item.displayName || item.merchant || text;
+            return { text, type, displayText };
+        },
+        isMerchantFiltered(item) {
+            const { text, type } = this.getFilterDescriptor(item);
+            return this.isIncludeFilterActive(text, type);
+        },
+        toggleMerchantFilter(item) {
+            const { text, type, displayText } = this.getFilterDescriptor(item);
+            this.toggleIncludeFilter(text, type, displayText);
         },
         getTransactions(item) {
             const txns = item.filteredTxns || item.transactions || [];
@@ -808,11 +844,16 @@ createApp({
         const isDarkTheme = ref(true);
         const chartsCollapsed = ref(false);
         const detailsCollapsed = ref(false);
-        const helpCollapsed = ref(true);
         const currentView = ref('category'); // 'category' or 'section'
         const groupByMode = ref('merchant'); // 'merchant' or 'subcategory'
         const sortConfig = reactive({}); // { 'cat:Food': { column: 'total', dir: 'desc' } }
         const includeNegativeTotals = ref(false); // show categories with negative filteredTotal
+        const txColumnProfiles = reactive({ merchant: null, subcategory: null, section: null });
+        let txMeasureHost = null;
+        let txMeasureDateEl = null;
+        let txMeasureAmountEl = null;
+        let txMeasureAccountEl = null;
+        let txResizeDebounceHandle = null;
 
         // Chart refs
         const monthlyChart = ref(null);
@@ -1823,6 +1864,23 @@ createApp({
             if (removed && removed.type === 'daterange') clearCustomRange();
         }
 
+        function toggleIncludeFilter(text, type, displayText = null) {
+            const index = activeFilters.value.findIndex(f =>
+                f.mode === 'include' && f.text === text && f.type === type
+            );
+            if (index >= 0) {
+                removeFilter(index);
+            } else {
+                addFilter(text, type, displayText);
+            }
+        }
+
+        function isIncludeFilterActive(text, type) {
+            return activeFilters.value.some(f =>
+                f.mode === 'include' && f.text === text && f.type === type
+            );
+        }
+
         function toggleFilterMode(index) {
             const f = activeFilters.value[index];
             f.mode = f.mode === 'include' ? 'exclude' : 'include';
@@ -2108,6 +2166,135 @@ createApp({
             // Handle YYYY-MM-DD format
             const d = new Date(dateStr + 'T12:00:00');
             return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + yearSuffix;
+        }
+
+        function getTxnModeKey() {
+            if (currentView.value === 'section' && hasSections.value) return 'section';
+            return groupByMode.value === 'subcategory' ? 'subcategory' : 'merchant';
+        }
+
+        function getTxnItemsForMode(mode) {
+            const items = [];
+            if (mode === 'section') {
+                const sections = spendingData.value.sections || {};
+                for (const section of Object.values(sections)) {
+                    items.push(...Object.values(section.merchants || {}));
+                }
+                return items;
+            }
+            const categoryView = spendingData.value.categoryView || {};
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    items.push(...Object.values(subcat.merchants || {}));
+                }
+            }
+            return items;
+        }
+
+        function ensureTxnMeasureElements() {
+            if (txMeasureHost) return;
+            txMeasureHost = document.createElement('div');
+            txMeasureHost.style.position = 'fixed';
+            txMeasureHost.style.left = '-10000px';
+            txMeasureHost.style.top = '-10000px';
+            txMeasureHost.style.visibility = 'hidden';
+            txMeasureHost.style.pointerEvents = 'none';
+            txMeasureHost.style.whiteSpace = 'nowrap';
+            txMeasureHost.style.fontSize = '0.85rem';
+
+            txMeasureDateEl = document.createElement('span');
+            txMeasureDateEl.className = 'txn-date';
+            txMeasureAmountEl = document.createElement('span');
+            txMeasureAmountEl.className = 'txn-amount';
+            txMeasureAccountEl = document.createElement('span');
+            txMeasureAccountEl.className = 'txn-source';
+
+            txMeasureHost.appendChild(txMeasureDateEl);
+            txMeasureHost.appendChild(txMeasureAmountEl);
+            txMeasureHost.appendChild(txMeasureAccountEl);
+            document.body.appendChild(txMeasureHost);
+        }
+
+        function measureTxnDatePx(label) {
+            txMeasureDateEl.textContent = label || '';
+            return Math.ceil(txMeasureDateEl.getBoundingClientRect().width);
+        }
+
+        function measureTxnAmountPx(label) {
+            txMeasureAmountEl.textContent = label || '';
+            return Math.ceil(txMeasureAmountEl.getBoundingClientRect().width);
+        }
+
+        function measureTxnAccountPx(source) {
+            if (!source) return 0;
+            txMeasureAccountEl.className = 'txn-source ' + source.toLowerCase();
+            txMeasureAccountEl.textContent = source;
+            return Math.ceil(txMeasureAccountEl.getBoundingClientRect().width);
+        }
+
+        function formatTxnAmountLabel(txn) {
+            const tags = txn.tags || [];
+            if (isIncome(tags)) {
+                return '+' + formatCurrency(Math.abs(txn.amount));
+            }
+            return formatCurrency(txn.amount);
+        }
+
+        function clampPx(value, min, max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
+        function measureTxnColumnsForMode(mode) {
+            ensureTxnMeasureElements();
+            const items = getTxnItemsForMode(mode);
+            let maxDate = 0;
+            let maxAccount = 0;
+            let maxAmount = 0;
+
+            for (const item of items) {
+                const txns = item.filteredTxns || item.transactions || [];
+                const years = new Set(txns.map(t => (t.month || '').slice(0, 4)).filter(Boolean));
+                const showYear = years.size > 1;
+
+                for (const txn of txns) {
+                    if (txn.date) {
+                        const dateLabel = formatDate(txn.date, txn.month, showYear);
+                        maxDate = Math.max(maxDate, measureTxnDatePx(dateLabel));
+                    }
+                    maxAccount = Math.max(maxAccount, measureTxnAccountPx(txn.source));
+                    maxAmount = Math.max(maxAmount, measureTxnAmountPx(formatTxnAmountLabel(txn)));
+                }
+            }
+
+            // Add small padding guardrails and clamp to desktop-appropriate bounds.
+            return {
+                date: clampPx(maxDate + 1, 70, 112),
+                account: clampPx(maxAccount + 10, 110, 260),
+                amount: clampPx(maxAmount + 4, 56, 160)
+            };
+        }
+
+        function applyTxnColumnProfile(mode = getTxnModeKey()) {
+            const profile = txColumnProfiles[mode];
+            if (!profile) return;
+            const rootStyle = document.documentElement.style;
+            rootStyle.setProperty('--txn-date-col', profile.date + 'px');
+            rootStyle.setProperty('--txn-account-col', profile.account + 'px');
+            rootStyle.setProperty('--txn-amount-col', profile.amount + 'px');
+        }
+
+        function recomputeTxnColumnProfiles() {
+            txColumnProfiles.merchant = measureTxnColumnsForMode('merchant');
+            txColumnProfiles.subcategory = measureTxnColumnsForMode('subcategory');
+            txColumnProfiles.section = hasSections.value ? measureTxnColumnsForMode('section') : txColumnProfiles.merchant;
+            applyTxnColumnProfile();
+        }
+
+        function recomputeTxnColumnsDebounced() {
+            if (txResizeDebounceHandle) clearTimeout(txResizeDebounceHandle);
+            txResizeDebounceHandle = setTimeout(() => {
+                recomputeTxnColumnProfiles();
+            }, 200);
         }
 
         function formatMonthLabel(key) {
@@ -2455,6 +2642,9 @@ createApp({
 
         watch(activeFilters, filtersToHash, { deep: true });
         watch(chartAggregations, updateCharts);
+        watch([currentView, groupByMode, hasSections], () => {
+            nextTick(() => applyTxnColumnProfile());
+        });
 
         // Track extra_field matches and auto-expand merchants
         watch(activeFilters, () => {
@@ -2489,11 +2679,18 @@ createApp({
             // Wait for next tick to ensure computed properties are ready
             nextTick(() => {
                 hashToFilters();
+                recomputeTxnColumnProfiles();
                 initCharts();
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        setAppReadyState();
+                    });
+                });
             });
 
             // Scroll handling
             window.addEventListener('scroll', handleScroll);
+            window.addEventListener('resize', recomputeTxnColumnsDebounced);
 
             // Close autocomplete on outside click
             document.addEventListener('click', e => {
@@ -2525,7 +2722,7 @@ createApp({
         return {
             // State
             activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
-            showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
+            showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed,
             currentView, groupByMode, sortConfig, includeNegativeTotals, detailsCollapsed, allCollapsed, detailsSummary,
             // Refs
             monthlyChart, categoryPieChart, categoryByMonthChart,
@@ -2551,7 +2748,7 @@ createApp({
             // All transactions section
             groupedTransactions, expandedTransactions,
             // Methods
-            addFilter, removeFilter, toggleFilterMode, clearFilters, addMonthFilter,
+            addFilter, removeFilter, toggleIncludeFilter, isIncludeFilterActive, toggleFilterMode, clearFilters, addMonthFilter,
             toggleExpand, toggleSection, toggleSort, toggleAllSections, sortedMerchants,
             formatCurrency, formatDate, formatMonthLabel, formatPct, filterTypeChar,
             highlightDescription,
