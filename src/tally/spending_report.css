@@ -1433,7 +1433,8 @@ td.merchant.clickable:hover {
 }
 .txn-detail {
     display: grid;
-    grid-template-columns: 0.85rem var(--txn-date-col, 7.25rem) var(--txn-account-col, 11.5rem) minmax(0, 1fr) auto var(--txn-amount-col, 12ch);
+    --txn-extra-col: 2.1rem;
+    grid-template-columns: var(--txn-extra-col) var(--txn-date-col, 7.25rem) var(--txn-account-col, 11.5rem) minmax(0, 1fr) auto var(--txn-amount-col, 12ch);
     align-items: center;
     justify-items: start;
     column-gap: 0.3rem;
@@ -1441,7 +1442,7 @@ td.merchant.clickable:hover {
 }
 .txn-detail:not(.has-extra)::before {
     content: '';
-    width: 0.85rem;
+    width: var(--txn-extra-col);
 }
 .txn-date {
     color: var(--text-muted);
@@ -1493,11 +1494,18 @@ td.merchant.clickable:hover {
 /* Extra fields trigger and popup */
 .extra-fields-trigger {
     position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-size: 0.7rem;
+    line-height: 1.1;
     color: var(--accent-blue);
     cursor: pointer;
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
+    padding: 0.15rem 0.35rem;
+    min-width: 1.75rem;
+    margin-left: 0.15rem;
+    border: 1px solid rgba(79, 172, 254, 0.18);
+    border-radius: 4px;
     background: rgba(79, 172, 254, 0.15);
     font-weight: 600;
 }

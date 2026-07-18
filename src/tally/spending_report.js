@@ -2185,9 +2185,7 @@ createApp({
 
         function formatDate(dateStr, monthStr, showYear) {
             if (!dateStr) return '';
-            // Year suffix (from monthStr YYYY-MM) only when the caller's list
-            // spans multiple calendar years.
-            const yearSuffix = showYear && monthStr ? `, ${monthStr.slice(0, 4)}` : '';
+            const yearSuffix = monthStr ? `, ${monthStr.slice(0, 4)}` : '';
             // Handle MM/DD format from Python
             if (dateStr.match(/^\d{1,2}\/\d{1,2}$/)) {
                 const [month, day] = dateStr.split('/');
@@ -2196,7 +2194,7 @@ createApp({
             }
             // Handle YYYY-MM-DD format
             const d = new Date(dateStr + 'T12:00:00');
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + yearSuffix;
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         }
 
         function getTxnModeKey() {
@@ -2284,12 +2282,10 @@ createApp({
 
             for (const item of items) {
                 const txns = item.filteredTxns || item.transactions || [];
-                const years = new Set(txns.map(t => (t.month || '').slice(0, 4)).filter(Boolean));
-                const showYear = years.size > 1;
 
                 for (const txn of txns) {
                     if (txn.date) {
-                        const dateLabel = formatDate(txn.date, txn.month, showYear);
+                        const dateLabel = formatDate(txn.date, txn.month, true);
                         maxDate = Math.max(maxDate, measureTxnDatePx(dateLabel));
                     }
                     maxAccount = Math.max(maxAccount, measureTxnAccountPx(txn.source));
