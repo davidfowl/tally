@@ -24,9 +24,12 @@
             <header>
                 <h1 data-testid="report-title">{{ title }}</h1>
                 <p class="subtitle">{{ subtitle }}</p>
-                <button class="theme-toggle" data-testid="theme-toggle" @click="toggleTheme" :title="isDarkTheme ? 'Switch to light mode' : 'Switch to dark mode'">
-                    {{ isDarkTheme ? '☀️' : '🌙' }}
-                </button>
+                <div class="header-actions">
+                    <button class="reset-settings-btn" data-testid="reset-settings" @click="resetUiSettings" title="Reset Layout Settings">↺</button>
+                    <button class="theme-toggle" data-testid="theme-toggle" @click="toggleTheme" :title="isDarkTheme ? 'Switch to light mode' : 'Switch to dark mode'">
+                        {{ isDarkTheme ? '☀️' : '🌙' }}
+                    </button>
+                </div>
             </header>
 
             <!-- Search & Filters -->

@@ -830,6 +830,8 @@ const TAG_COLORS = [
     '#a3e635', '#4ade80', '#34d399', '#2dd4bf', '#22d3ee'
 ];
 
+const UI_STATE_KEY = 'spending-report-ui-state-v1';
+
 createApp({
     setup() {
         // ========== STATE ==========
@@ -849,6 +851,7 @@ createApp({
         const sortConfig = reactive({}); // { 'cat:Food': { column: 'total', dir: 'desc' } }
         const includeNegativeTotals = ref(false); // show categories with negative filteredTotal
         const txColumnProfiles = reactive({ merchant: null, subcategory: null, section: null });
+        let isHydratingUiState = true;
         let txMeasureHost = null;
         let txMeasureDateEl = null;
         let txMeasureAmountEl = null;
@@ -879,6 +882,34 @@ createApp({
             const data = spendingData.value;
             const sources = data.sources || [];
             return sources.length > 0 ? `Data from ${sources.join(', ')}` : '';
+        });
+
+        const allPersistableSectionKeys = computed(() => {
+            const keys = new Set();
+            Object.keys(spendingData.value.categoryView || {}).forEach(name => keys.add('cat:' + name));
+            Object.keys(spendingData.value.sections || {}).forEach(id => keys.add('sec:' + id));
+            return keys;
+        });
+
+        const allPersistableItemIds = computed(() => {
+            const ids = new Set();
+
+            for (const category of Object.values(spendingData.value.categoryView || {})) {
+                for (const [subName, subcat] of Object.entries(category.subcategories || {})) {
+                    ids.add(subName);
+                    for (const merchantId of Object.keys(subcat.merchants || {})) {
+                        ids.add(String(merchantId));
+                    }
+                }
+            }
+
+            for (const section of Object.values(spendingData.value.sections || {})) {
+                for (const merchantId of Object.keys(section.merchants || {})) {
+                    ids.add(String(merchantId));
+                }
+            }
+
+            return ids;
         });
 
         // Core filtering - returns sections with filtered merchants and transactions
@@ -2398,6 +2429,133 @@ createApp({
             }
         }
 
+        function toSortedArray(values) {
+            return [...values].map(v => String(v)).sort((a, b) => a.localeCompare(b));
+        }
+
+        function parseDetailsViewMode(currentViewMode, groupMode) {
+            if (currentViewMode === 'section') return 'section';
+            return groupMode === 'subcategory' ? 'subcategory' : 'merchant';
+        }
+
+        function applyDetailsViewMode(mode) {
+            if (mode === 'section' && hasSections.value) {
+                currentView.value = 'section';
+                return;
+            }
+            currentView.value = 'category';
+            groupByMode.value = mode === 'subcategory' ? 'subcategory' : 'merchant';
+        }
+
+        function saveUiState() {
+            if (isHydratingUiState) return;
+            try {
+                const state = {
+                    version: 1,
+                    detailsViewMode: parseDetailsViewMode(currentView.value, groupByMode.value),
+                    includeNegativeTotals: !!includeNegativeTotals.value,
+                    chartsCollapsed: !!chartsCollapsed.value,
+                    detailsCollapsed: !!detailsCollapsed.value,
+                    knownSectionKeys: toSortedArray(allPersistableSectionKeys.value),
+                    collapsedSectionKeys: toSortedArray(collapsedSections),
+                    knownItemIds: toSortedArray(allPersistableItemIds.value),
+                    expandedItemIds: toSortedArray(expandedMerchants),
+                    sortConfig: Object.fromEntries(
+                        Object.entries(sortConfig).map(([key, cfg]) => [key, {
+                            column: cfg?.column || 'total',
+                            dir: cfg?.dir === 'asc' ? 'asc' : 'desc'
+                        }])
+                    )
+                };
+                localStorage.setItem(UI_STATE_KEY, JSON.stringify(state));
+            } catch {
+                // Ignore localStorage failures (private mode/quota/security settings).
+            }
+        }
+
+        function normalizeUiStateForCurrentData() {
+            const validSectionKeys = allPersistableSectionKeys.value;
+            const validItemIds = allPersistableItemIds.value;
+
+            for (const key of [...collapsedSections]) {
+                if (!validSectionKeys.has(String(key))) collapsedSections.delete(key);
+            }
+            for (const id of [...expandedMerchants]) {
+                if (!validItemIds.has(String(id))) expandedMerchants.delete(id);
+            }
+            for (const key of Object.keys(sortConfig)) {
+                if (!validSectionKeys.has(String(key))) delete sortConfig[key];
+            }
+        }
+
+        function initUiState() {
+            const validSectionKeys = allPersistableSectionKeys.value;
+            const validItemIds = allPersistableItemIds.value;
+
+            collapsedSections.clear();
+            expandedMerchants.clear();
+            Object.keys(sortConfig).forEach(key => delete sortConfig[key]);
+
+            let state = null;
+            try {
+                const raw = localStorage.getItem(UI_STATE_KEY);
+                if (raw) state = JSON.parse(raw);
+            } catch {
+                state = null;
+            }
+
+            if (!state || typeof state !== 'object') {
+                validSectionKeys.forEach(key => collapsedSections.add(key));
+                applyDetailsViewMode('merchant');
+                includeNegativeTotals.value = false;
+                chartsCollapsed.value = false;
+                detailsCollapsed.value = false;
+                return;
+            }
+
+            const knownSectionKeys = new Set((state.knownSectionKeys || []).map(k => String(k)));
+            const savedCollapsedSectionKeys = new Set((state.collapsedSectionKeys || []).map(k => String(k)));
+
+            for (const key of validSectionKeys) {
+                if (!knownSectionKeys.has(key) || savedCollapsedSectionKeys.has(key)) {
+                    collapsedSections.add(key);
+                }
+            }
+
+            const knownItemIds = new Set((state.knownItemIds || []).map(id => String(id)));
+            const expandedItemIds = new Set((state.expandedItemIds || []).map(id => String(id)));
+            for (const id of validItemIds) {
+                if (knownItemIds.has(id) && expandedItemIds.has(id)) {
+                    expandedMerchants.add(id);
+                }
+            }
+
+            if (state.sortConfig && typeof state.sortConfig === 'object') {
+                for (const [key, cfg] of Object.entries(state.sortConfig)) {
+                    if (!validSectionKeys.has(String(key))) continue;
+                    const column = cfg?.column || 'total';
+                    const dir = cfg?.dir === 'asc' ? 'asc' : 'desc';
+                    sortConfig[key] = { column, dir };
+                }
+            }
+
+            applyDetailsViewMode(state.detailsViewMode);
+            includeNegativeTotals.value = !!state.includeNegativeTotals;
+            chartsCollapsed.value = !!state.chartsCollapsed;
+            detailsCollapsed.value = !!state.detailsCollapsed;
+            normalizeUiStateForCurrentData();
+        }
+
+        function resetUiSettings() {
+            try {
+                localStorage.removeItem(UI_STATE_KEY);
+            } catch {
+                // Ignore localStorage failures.
+            }
+            initUiState();
+            saveUiState();
+        }
+
         // ========== URL HASH ==========
 
         function filtersToHash() {
@@ -2645,6 +2803,28 @@ createApp({
         watch([currentView, groupByMode, hasSections], () => {
             nextTick(() => applyTxnColumnProfile());
         });
+        watch([currentView, groupByMode], saveUiState);
+        watch([chartsCollapsed, detailsCollapsed, includeNegativeTotals], saveUiState);
+        watch(
+            () => Array.from(collapsedSections).map(v => String(v)).sort(),
+            saveUiState
+        );
+        watch(
+            () => Array.from(expandedMerchants).map(v => String(v)).sort(),
+            saveUiState
+        );
+        watch(
+            () => JSON.stringify(sortConfig),
+            saveUiState
+        );
+        watch(allPersistableSectionKeys, () => {
+            normalizeUiStateForCurrentData();
+            saveUiState();
+        });
+        watch(allPersistableItemIds, () => {
+            normalizeUiStateForCurrentData();
+            saveUiState();
+        });
 
         // Track extra_field matches and auto-expand merchants
         watch(activeFilters, () => {
@@ -2675,6 +2855,9 @@ createApp({
         onMounted(() => {
             document.title = title.value;
             initTheme();
+            initUiState();
+            isHydratingUiState = false;
+            saveUiState();
 
             // Wait for next tick to ensure computed properties are ready
             nextTick(() => {
@@ -2753,7 +2936,7 @@ createApp({
             formatCurrency, formatDate, formatMonthLabel, formatPct, filterTypeChar,
             highlightDescription,
             onSearchInput, onSearchKeydown, selectAutocompleteItem,
-            toggleTheme
+            toggleTheme, resetUiSettings
         };
     }
 })

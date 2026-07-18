@@ -224,10 +224,15 @@ h1 {
     color: var(--text-secondary);
     font-size: 0.9rem;
 }
-.theme-toggle {
+.header-actions {
     position: absolute;
     top: 0;
     right: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.theme-toggle {
     background: var(--bg-card);
     border: 1px solid var(--border-medium);
     border-radius: 50%;
@@ -242,6 +247,27 @@ h1 {
 }
 .theme-toggle:hover {
     background: var(--bg-card-hover);
+    transform: scale(1.1);
+}
+.reset-settings-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border-medium);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.reset-settings-btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--accent-orange);
     transform: scale(1.1);
 }
 .search-box {
