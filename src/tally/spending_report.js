@@ -542,7 +542,7 @@ const MerchantSection = defineComponent({
         },
         getFilterDescriptor(item) {
             const type = this.subcategoryMode ? 'subcategory' : 'merchant';
-            const text = this.subcategoryMode ? (item.subcategory || item.displayName || item.id) : item.id;
+            const text = this.subcategoryMode ? (item.subcategory || item.displayName || item.id) : (item.displayName || item.id);
             const displayText = item.displayName || item.merchant || text;
             return { text, type, displayText };
         },

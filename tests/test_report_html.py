@@ -39,6 +39,27 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _expand_categories_after_navigation(page: Page):
+    """Category sections default to collapsed on a fresh load ("Save Layout
+    Settings to Local Storage": no saved state means everything starts
+    collapsed). This suite predates that feature and assumes the old
+    expanded-by-default state, so expand everything after each navigation
+    instead of adding an expand step to every test.
+    """
+    original_goto = page.goto
+
+    def goto_and_expand(url, **kwargs):
+        response = original_goto(url, **kwargs)
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        if toggle.get_attribute("title") == "Expand all categories":
+            toggle.click()
+        return response
+
+    page.goto = goto_and_expand
+    yield
+
+
 @pytest.fixture(scope="module")
 def report_path(tmp_path_factory):
     """Generate a test report with known fixture data.
@@ -183,8 +204,8 @@ class TestUINavigation:
         # Amazon has transactions on: Jan 5, Jan 10, Feb 1, Mar 1
         # Should be sorted descending: Mar 1, Feb 1, Jan 10, Jan 5
         assert len(dates) == 4, f"Expected 4 Amazon transactions, got {len(dates)}: {dates}"
-        # Verify descending order
-        assert dates == ["Mar 1", "Feb 1", "Jan 10", "Jan 5"], f"Expected descending order, got {dates}"
+        # Verify descending order (dates always include the year)
+        assert dates == ["Mar 1, 2024", "Feb 1, 2024", "Jan 10, 2024", "Jan 5, 2024"], f"Expected descending order, got {dates}"
 
     def test_tag_click_adds_filter(self, page: Page, report_path):
         """Clicking a tag adds it as a filter."""
@@ -1584,16 +1605,16 @@ class TestGroupingToggle:
         expect(online_row).to_contain_text("1 merchant")
 
     def test_subcategory_filter_adds_correct_type(self, page: Page, report_path):
-        """Clicking subcategory name adds subcategory filter, not merchant filter."""
+        """Clicking the filter button on a subcategory row adds a subcategory filter, not a merchant filter."""
         page.goto(f"file://{report_path}")
 
         # Switch to subcategory mode
         page.locator(".view-toggle button", has_text="Subcategory").click()
 
-        # Click on the subcategory name (first cell) in Online row
+        # Click the filter button on the Online row
         shopping_section = page.get_by_test_id("section-cat-Shopping")
-        online_name = shopping_section.locator(".merchant-name", has_text="Online")
-        online_name.click()
+        online_row = shopping_section.locator("tr.merchant-row", has_text="Online")
+        online_row.locator(".merchant-filter-trigger").click()
 
         # Should have a subcategory filter chip (class contains 'subcategory')
         filter_chip = page.locator(".filter-chip.subcategory")
@@ -2418,7 +2439,7 @@ class TestDateFilter:
 
 
 class TestMultiYearTransactionRows:
-    """Part 3: transaction rows show the year only when the list spans years."""
+    """Part 3: transaction rows always show the year, regardless of whether the merchant's list spans years."""
 
     def test_multiyear_merchant_rows_show_year(self, page: Page, multiyear_report_path):
         """Netflix spans 2025 and 2026, so its transaction rows include ', YYYY'."""
@@ -2429,14 +2450,14 @@ class TestMultiYearTransactionRows:
         assert dates, "expected Netflix transaction rows"
         assert all(", 20" in d for d in dates), dates
 
-    def test_single_year_merchant_rows_omit_year(self, page: Page, multiyear_report_path):
-        """Target has only 2026 transactions, so its rows stay compact (no year)."""
+    def test_single_year_merchant_rows_also_show_year(self, page: Page, multiyear_report_path):
+        """Target has only 2026 transactions, but rows still include ', YYYY' (year is always shown)."""
         page.goto(f"file://{multiyear_report_path}")
         page.get_by_test_id("merchant-row-Target").click()
         page.wait_for_timeout(150)
         dates = page.locator(".txn-row:has-text('TARGET') .txn-date").all_text_contents()
         assert dates, "expected Target transaction rows"
-        assert all(", 20" not in d for d in dates), dates
+        assert all(", 20" in d for d in dates), dates
 
 
 @pytest.fixture(scope="module")
