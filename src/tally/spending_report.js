@@ -2972,6 +2972,26 @@ createApp({
             return total;
         }
 
+        function stripEmptyAxisSlots(labels, datasets) {
+            if (!labels?.length || !datasets?.length) return { labels, datasets };
+
+            const keepIndexes = [];
+            for (let i = 0; i < labels.length; i += 1) {
+                const hasValue = datasets.some(ds => Number(ds?.data?.[i] || 0) > 0);
+                if (hasValue) keepIndexes.push(i);
+            }
+
+            if (keepIndexes.length === labels.length) return { labels, datasets };
+
+            return {
+                labels: keepIndexes.map(i => labels[i]),
+                datasets: datasets.map(ds => ({
+                    ...ds,
+                    data: keepIndexes.map(i => Number(ds?.data?.[i] || 0)),
+                })),
+            };
+        }
+
         function pagedBuckets(buckets, state, pageSize = CHART_PAGE_SIZE) {
             const total = buckets.length;
             const maxPage = Math.max(0, Math.ceil(total / pageSize) - 1);
@@ -3895,6 +3915,8 @@ createApp({
                 }
             }
 
+            ({ labels, datasets } = stripEmptyAxisSlots(labels, datasets));
+
             renderChart('category', categoryTrendChart, {
                 type: 'bar',
                 data: { labels, datasets },
@@ -4036,6 +4058,8 @@ createApp({
                     }))
                     .filter(ds => ds.data.some(v => v > 0));
             }
+
+                    ({ labels, datasets } = stripEmptyAxisSlots(labels, datasets));
 
             renderChart('cashFlow', cashFlowTrendChart, {
                 type: 'bar',
@@ -4200,6 +4224,8 @@ createApp({
                         hidden: fixedHidden.has(s.label),
                     }));
                 }
+
+                ({ labels, datasets } = stripEmptyAxisSlots(labels, datasets));
 
                 renderChart('fixedVariable', fixedVariableChart, {
                     type: 'bar',
