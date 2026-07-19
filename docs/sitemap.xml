@@ -7,12 +7,12 @@
         <changefreq>weekly</changefreq>
         <priority>1.0</priority>
         <image:image>
-            <image:loc>https://tallyai.money/screenshot.png</image:loc>
+            <image:loc>https://tallyai.money/images/screenshot.png</image:loc>
             <image:caption>Tally spending report showing categorized transactions and budget analysis</image:caption>
             <image:title>Tally Report Screenshot</image:title>
         </image:image>
         <image:image>
-            <image:loc>https://tallyai.money/demo.gif</image:loc>
+            <image:loc>https://tallyai.money/images/demo.gif</image:loc>
             <image:caption>Animated demo of Tally workflow with AI assistant</image:caption>
             <image:title>Tally Demo</image:title>
         </image:image>
@@ -45,5 +45,56 @@
         <lastmod>2026-01-01</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
+    </url>
+    <url>
+        <loc>https://tallyai.money/charts.html</loc>
+        <lastmod>2026-07-19</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.8</priority>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/dashboard-kpi-cards.png</image:loc>
+            <image:caption>Dashboard at a glance with KPI cards for income, spending, and cash flow</image:caption>
+            <image:title>Dashboard KPI Cards</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/spending-by-category.png</image:loc>
+            <image:caption>Stacked monthly bars showing spending composition by category</image:caption>
+            <image:title>Spending by Category</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/spending-by-category-compare-years.png</image:loc>
+            <image:caption>Compare-years view aligning periods to inspect season-over-season spending</image:caption>
+            <image:title>Spending by Category Compare Years</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/spending-by-category-focused.png</image:loc>
+            <image:caption>Focused mode emphasizing one category while retaining contextual totals</image:caption>
+            <image:title>Spending by Category Focused Mode</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/spending-seasonality.png</image:loc>
+            <image:caption>Seasonality heatmap highlighting recurring monthly peaks and lows</image:caption>
+            <image:title>Spending Seasonality</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/expense-volatility.png</image:loc>
+            <image:caption>Volatility chart comparing average, minimum, and maximum spend ranges by category</image:caption>
+            <image:title>Expense Volatility</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/subscription-recurring-audit.png</image:loc>
+            <image:caption>Recurring spend audit identifying subscriptions and annualized merchant totals</image:caption>
+            <image:title>Subscription and Recurring Audit</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/cash-flow.png</image:loc>
+            <image:caption>Cash flow trend chart showing monthly inflow, outflow, and net movement</image:caption>
+            <image:title>Cash Flow</image:title>
+        </image:image>
+        <image:image>
+            <image:loc>https://tallyai.money/images/charts/fixed-vs-variable.png</image:loc>
+            <image:caption>Fixed versus variable spending split for baseline versus flexible expense planning</image:caption>
+            <image:title>Fixed vs Variable Spending</image:title>
+        </image:image>
     </url>
 </urlset>

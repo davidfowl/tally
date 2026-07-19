@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Charts - Tally</title>
+    <meta name="description" content="Tally chart guide: what each chart shows, how it is built from transaction data, and why it matters for budgeting decisions.">
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 3rem 2rem 5rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 50%, #16a34a 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: rgba(255,255,255,0.65);
+            font-size: 1.08rem;
+            margin-bottom: 1.5rem;
+        }
+
+        h2 {
+            font-size: 1.45rem;
+            font-weight: 600;
+            color: #fff;
+            margin: 3rem 0 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+
+        h2:first-of-type {
+            border-top: none;
+            margin-top: 0;
+            padding-top: 0;
+        }
+
+        h2[id] {
+            position: relative;
+        }
+
+        h2[id] .anchor-link {
+            position: absolute;
+            left: -1.5rem;
+            color: rgba(255,255,255,0.25);
+            text-decoration: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-weight: 400;
+        }
+
+        h2[id]:hover .anchor-link {
+            opacity: 1;
+        }
+
+        h2[id] .anchor-link:hover {
+            color: #4ade80;
+            text-decoration: none;
+        }
+
+        p {
+            color: rgba(255,255,255,0.82);
+            margin-bottom: 0.9rem;
+        }
+
+        ul {
+            margin: 0.35rem 0 1rem 1.25rem;
+            color: rgba(255,255,255,0.82);
+        }
+
+        li {
+            margin-bottom: 0.35rem;
+        }
+
+        .chart-card {
+            background: rgba(0,0,0,0.24);
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .chart-card img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.02);
+        }
+
+        .toc {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 0 0 2rem;
+        }
+
+        .toc-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 0.8rem;
+        }
+
+        .toc-columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.45rem 1.2rem;
+        }
+
+        .toc a {
+            color: rgba(255,255,255,0.74);
+            text-decoration: none;
+            font-size: 0.92rem;
+        }
+
+        .toc a:hover {
+            color: #4ade80;
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 2rem; }
+            .container { padding: 2rem 1.25rem 3rem; }
+            .toc-columns { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-inner">
+            <a href="index.html" class="nav-logo"><img src="logo.svg" alt="Tally">tally</a>
+            <div class="hamburger" onclick="this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('active')">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+            <div class="nav-links">
+                <span class="close-menu" onclick="document.querySelector('.nav-links').classList.remove('active'); document.querySelector('.hamburger').classList.remove('active')">&times;</span>
+                <a href="quickstart.html">Quick Start</a>
+                <a href="guide.html">Guide</a>
+                <a href="reference.html">Reference</a>
+                <a href="formats.html">Formats</a>
+                <a href="charts.html" class="active">Charts</a>
+                <a href="https://github.com/davidfowl/tally" class="mobile-github" style="display:none;">GitHub</a>
+            </div>
+            <a href="https://github.com/davidfowl/tally" class="nav-github">GitHub</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <h1>Charts</h1>
+        <p class="subtitle">What each report chart is doing, the data behind it, and why it matters for budgeting.</p>
+
+        <div class="toc">
+            <div class="toc-title">Contents</div>
+            <div class="toc-columns">
+                <a href="#dashboard-at-a-glance">Dashboard At A Glance</a>
+                <a href="#spending-by-category">Spending by Category</a>
+                <a href="#compare-years">Compare Years</a>
+                <a href="#focused-mode">Focused Mode</a>
+                <a href="#seasonality">Spending Seasonality</a>
+                <a href="#volatility">Expense Volatility</a>
+                <a href="#recurring-audit">Subscription &amp; Recurring Audit</a>
+                <a href="#cash-flow">Cash Flow</a>
+                <a href="#fixed-variable">Fixed vs Variable</a>
+            </div>
+        </div>
+
+        <h2 id="dashboard-at-a-glance"><a href="#dashboard-at-a-glance" class="anchor-link">#</a>Dashboard At A Glance</h2>
+        <ul>
+            <li>Data used: four headline KPIs from the same report context, typically income, spending, cash flow, and savings rate.</li>
+            <li>Why it matters: this is your five-second health check before you dive into trend charts and category breakdowns.</li>
+            <li>What it tells you: whether your current period is net-positive, spending-heavy, or tracking toward a healthier savings posture.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/dashboard-kpi-cards.png" alt="Dashboard KPI cards screenshot placeholder">
+        </div>
+
+        <h2 id="spending-by-category"><a href="#spending-by-category" class="anchor-link">#</a>Spending by Category</h2>
+        <ul>
+            <li>Data used: monthly transaction totals grouped by category, stacked so each bar shows total spend composition.</li>
+            <li>Why it matters: this is your top-level budget map, showing where money goes and which categories dominate each month.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/spending-by-category.png" alt="Spending by Category chart placeholder">
+        </div>
+
+        <h2 id="compare-years"><a href="#compare-years" class="anchor-link">#</a>Compare Years</h2>
+        <ul>
+            <li>Data used: the same category totals, pivoted so month or quarter buckets align across multiple years.</li>
+            <li>Why it matters: it makes season-over-season comparisons faster, such as Jan vs Jan or Q3 vs Q3, instead of eyeballing separate timelines.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/spending-by-category-compare-years.png" alt="Spending by Category compare years chart placeholder">
+        </div>
+
+        <h2 id="focused-mode"><a href="#focused-mode" class="anchor-link">#</a>Focused Mode</h2>
+        <ul>
+            <li>Data used: one selected category remains emphasized while other categories are de-emphasized as context.</li>
+            <li>Why it matters: emphasis beats color noise when the question is specific, like what Food is doing over time.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/spending-by-category-focused.png" alt="Spending by Category focused mode chart placeholder">
+        </div>
+
+        <h2 id="seasonality"><a href="#seasonality" class="anchor-link">#</a>Spending Seasonality</h2>
+        <ul>
+            <li>Data used: category-by-month matrix, with each row shaded relative to its own low/high range.</li>
+            <li>Why it matters: it reveals timing patterns quickly, such as holiday spikes or summer travel bursts that are easy to miss in totals-only charts.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/spending-seasonality.png" alt="Spending seasonality heatmap placeholder">
+        </div>
+
+        <h2 id="volatility"><a href="#volatility" class="anchor-link">#</a>Expense Volatility</h2>
+        <ul>
+            <li>Data used: monthly spread per category using min, max, and average values over the selected period.</li>
+            <li>Why it matters: volatile categories are budget-breakers, so this highlights where sinking-fund buffers are most valuable.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/expense-volatility.png" alt="Expense volatility chart placeholder">
+        </div>
+
+        <h2 id="recurring-audit"><a href="#recurring-audit" class="anchor-link">#</a>Subscription &amp; Recurring Audit</h2>
+        <ul>
+            <li>Data used: recurring merchants detected by cadence and consistency, annualized from monthly equivalents.</li>
+            <li>Why it matters: recurring spend can hide in plain sight; this view exposes total yearly drag and fast cancellation targets.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/subscription-recurring-audit.png" alt="Subscription and recurring audit table placeholder">
+        </div>
+
+        <h2 id="cash-flow"><a href="#cash-flow" class="anchor-link">#</a>Cash Flow</h2>
+        <ul>
+            <li>Data used: income and spending month-by-month, transformed into net movement over time.</li>
+            <li>Why it matters: this is your runway signal; it shows whether your month pattern compounds toward stability or burn.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/cash-flow.png" alt="Cash flow chart placeholder">
+        </div>
+
+        <h2 id="fixed-variable"><a href="#fixed-variable" class="anchor-link">#</a>Fixed vs Variable Spending</h2>
+        <ul>
+            <li>Data used: categories mapped into baseline fixed costs and flexible variable costs, then stacked by month.</li>
+            <li>Why it matters: fixed spend defines your minimum operating cost, while variable spend shows where optimization and cuts are possible.</li>
+        </ul>
+        <div class="chart-card">
+            <img src="images/charts/fixed-vs-variable.png" alt="Fixed vs variable spending chart placeholder">
+        </div>
+    </div>
+</body>
+</html>
