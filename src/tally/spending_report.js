@@ -3386,14 +3386,16 @@ createApp({
 
             grid.textContent = '';
 
-            function createCard(className, title, headline, details, spark, subtitle) {
+            function createCard(className, title, headline, details, spark, subtitle, options = {}) {
                 const card = document.createElement('div');
                 card.className = `kpi-card ${className}`;
+                if (options.cardTestId) card.setAttribute('data-testid', options.cardTestId);
                 const h = document.createElement('h4');
                 h.textContent = title;
                 const value = document.createElement('div');
                 value.className = 'kpi-value';
                 value.textContent = headline;
+                if (options.amountTestId) value.setAttribute('data-testid', options.amountTestId);
                 card.append(h, value);
 
                 if (subtitle) {
@@ -3425,9 +3427,15 @@ createApp({
                 for (const detail of details) {
                     const row = document.createElement('div');
                     row.className = 'kpi-detail';
+                    if (detail.breakdown) row.classList.add('breakdown-item');
                     const name = document.createElement('span');
                     name.className = 'name';
+                    if (detail.nameClass) name.classList.add(detail.nameClass);
                     name.textContent = detail.name;
+                    if (detail.onClick) {
+                        name.style.cursor = 'pointer';
+                        name.addEventListener('click', detail.onClick);
+                    }
                     const val = document.createElement('span');
                     val.className = 'value';
                     val.textContent = detail.value;
@@ -3462,11 +3470,34 @@ createApp({
             createCard('spending', 'Spending', formatCurrency(spending), [
                 { name: 'Avg / month', value: formatCurrency(spending / months) },
                 { name: 'Fixed / month', value: formatCurrency(fixedMonthlyBaseline) },
-            ], spark(spendingSeries, false));
+            ], spark(spendingSeries, false), null, {
+                cardTestId: 'filtered-spending-card',
+                amountTestId: 'filtered-amount',
+            });
 
             createCard(`cashflow ${cashFlowTotal >= 0 ? 'positive' : 'negative'}`, 'Cash Flow', formatCurrency(cashFlowTotal), [
+                {
+                    name: 'Income',
+                    nameClass: 'income-label',
+                    value: `+${formatCurrency(income)}`,
+                    breakdown: true,
+                    onClick: () => addFilter('income', 'tag'),
+                },
+                {
+                    name: 'Credits',
+                    value: `+${formatCurrency(credits)}`,
+                    breakdown: true,
+                },
+                {
+                    name: 'Spending',
+                    value: `-${formatCurrency(spending)}`,
+                    breakdown: true,
+                },
                 { name: 'Avg / month', value: formatCurrency(cashFlowTotal / months) },
-            ], spark(cashFlowSeries, true));
+            ], spark(cashFlowSeries, true), null, {
+                cardTestId: 'cashflow-card',
+                amountTestId: 'cashflow-amount',
+            });
 
             createCard('details', 'Details', txCount.toLocaleString('en-US'), [
                 { name: 'Transfers', value: formatCurrency(transfers) },
