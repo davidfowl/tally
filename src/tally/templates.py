@@ -96,6 +96,8 @@ STARTER_MERCHANTS = '''# Tally Merchant Rules
 #
 #   income   - Deposits, salary, interest (excluded from spending)
 #   transfer - Account transfers, CC payments (excluded from spending)
+#   fixed    - Force merchant into fixed/recurring spend in charts
+#   variable - Force merchant out of fixed/recurring spend in charts
 #   refund   - Returns and credits (shown in Credits Applied section)
 #
 # Example:

@@ -817,34 +817,42 @@ class TestEdgeCasesAndCalculations:
         page.goto(f"file://{edge_case_report_path}")
         page.wait_for_timeout(500)  # Wait for Vue and Chart.js to initialize
 
-        # Access the Chart.js instance data from the monthly chart canvas
+        # Access the category trend chart and sum all stacked category datasets for Jan 2024.
         result = page.evaluate("""() => {
-            // Chart.js stores chart instance as a property on canvas
-            const canvas = document.querySelector('canvas');
-            if (!canvas) return { error: 'No canvas found' };
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
 
-            // Chart.js 3+ stores instance in Chart.instances or on element
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+
             const chartInstance = Chart.getChart(canvas);
             if (!chartInstance) return { error: 'No chart instance found' };
 
-            // Get the data from the chart
-            const labels = chartInstance.data.labels;
-            const data = chartInstance.data.datasets[0].data;
+            const labels = chartInstance.data.labels || [];
+            const janIdx = labels.findIndex(label => /^Jan(?:\\s|\\b)/i.test(String(label || '')));
+            if (janIdx < 0) return { error: 'January label not found', labels };
 
-            // Return as object with month labels as keys
-            const byMonth = {};
-            labels.forEach((label, idx) => {
-                byMonth[label] = data[idx];
-            });
-            return { byMonth, labels, data };
+            const datasets = chartInstance.data.datasets || [];
+            const monthlyTotal = datasets.reduce((sum, ds) => {
+                const val = Number(ds?.data?.[janIdx]) || 0;
+                return sum + val;
+            }, 0);
+
+            const negatives = datasets
+                .map(ds => ({
+                    label: ds?.label || '',
+                    value: Number(ds?.data?.[janIdx]) || 0,
+                }))
+                .filter(row => row.value < 0);
+
+            return { monthlyTotal, janIdx, labels, negatives };
         }""")
 
         if 'error' in result:
             pytest.fail(f"Could not access chart data: {result['error']}")
 
         # January should show $550 (positive amounts only), not $450 (with refund subtracted)
-        # The month label format is "Jan 2024"
-        january_total = result['byMonth'].get('Jan 2024', 0)
+        january_total = result['monthlyTotal']
 
         # This assertion documents the expected behavior after the fix:
         # Only positive amounts should be included in the chart
@@ -856,42 +864,51 @@ class TestEdgeCasesAndCalculations:
             f"Chart data: {result}"
         )
 
+        assert not result['negatives'], (
+            f"Found negative category values in Jan 2024 stacked data: {result['negatives']}"
+        )
+
     def test_chart_category_totals_exclude_negative_amounts(self, page: Page, edge_case_report_path):
         """Category totals in chart should only include positive amounts.
 
         Bug: chartAggregations.byCategory sums ALL transaction amounts including
-        negative ones, incorrectly reducing category totals in the pie/bar charts.
+        negative ones, incorrectly reducing category totals in the category chart.
 
         Fixture Refunds category total: -$150 (should NOT appear in chart data)
         """
         page.goto(f"file://{edge_case_report_path}")
         page.wait_for_timeout(500)
 
-        # Access the category pie chart data
+        # Access the category chart datasets and aggregate totals by dataset label.
         result = page.evaluate("""() => {
-            // Find the pie chart canvas (second canvas)
-            const canvases = document.querySelectorAll('canvas');
-            if (canvases.length < 2) return { error: 'Pie chart canvas not found' };
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
 
-            const pieCanvas = canvases[1];  // Pie chart is second
-            const chartInstance = Chart.getChart(pieCanvas);
-            if (!chartInstance) return { error: 'No pie chart instance found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
 
-            // Get category labels and values
-            const labels = chartInstance.data.labels;
-            const data = chartInstance.data.datasets[0].data;
+            const chartInstance = Chart.getChart(canvas);
+            if (!chartInstance) return { error: 'No category chart instance found' };
 
+            const datasets = chartInstance.data.datasets || [];
             const byCategory = {};
-            labels.forEach((label, idx) => {
-                byCategory[label] = data[idx];
+            const minByCategory = {};
+
+            datasets.forEach(ds => {
+                const label = ds?.label || '';
+                const values = (Array.isArray(ds?.data) ? ds.data : []).map(v => Number(v) || 0);
+                byCategory[label] = values.reduce((sum, v) => sum + v, 0);
+                minByCategory[label] = values.length ? Math.min(...values) : 0;
             });
-            return { byCategory, labels, data };
+
+            return { byCategory, minByCategory, datasetCount: datasets.length };
         }""")
 
         if 'error' in result:
-            pytest.fail(f"Could not access pie chart data: {result['error']}")
+            pytest.fail(f"Could not access category chart data: {result['error']}")
 
         by_category = result['byCategory']
+        min_by_category = result['minByCategory']
 
         # Refunds category should NOT be in chart data (all negative amounts)
         # or if present, should have 0 value (not -150)
@@ -900,6 +917,54 @@ class TestEdgeCasesAndCalculations:
             f"Refunds category total should be 0 or not present in chart data, "
             f"but got ${refunds_total}. Negative amounts should be excluded from charts. "
             f"Chart data: {result}"
+        )
+
+        refunds_min = min_by_category.get('Refunds', 0)
+        assert refunds_min >= 0, (
+            f"Refunds category contains negative monthly values in chart datasets: {refunds_min}. "
+            f"Chart data: {result}"
+        )
+
+    def test_volatility_chart_applies_top10_and_edge_padding(self, page: Page, edge_case_report_path):
+        """Volatility chart keeps top-10 rows and applies y-axis edge breathing room."""
+        page.goto(f"file://{edge_case_report_path}")
+        page.wait_for_timeout(500)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-volatility');
+            if (!panel) return { error: 'Volatility chart panel not found' };
+
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No volatility chart canvas found' };
+
+            const chartInstance = Chart.getChart(canvas);
+            if (!chartInstance) return { error: 'No volatility chart instance found' };
+
+            const labels = chartInstance.data?.labels || [];
+            const yOffset = chartInstance.options?.scales?.y?.offset;
+            const layoutPadding = chartInstance.options?.layout?.padding || {};
+            const topPadding = Number(layoutPadding.top || 0);
+            const bottomPadding = Number(layoutPadding.bottom || 0);
+
+            return {
+                labelCount: labels.length,
+                yOffset,
+                topPadding,
+                bottomPadding,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not access volatility chart data: {result['error']}")
+
+        assert result['labelCount'] <= 10, (
+            f"Volatility chart should render at most 10 rows, got {result['labelCount']}"
+        )
+        assert result['yOffset'] is True, (
+            f"Expected volatility y-axis offset=true for edge spacing, got {result['yOffset']}"
+        )
+        assert result['topPadding'] >= 10 and result['bottomPadding'] >= 10, (
+            f"Expected volatility layout padding top/bottom >= 10, got {result}"
         )
 
 

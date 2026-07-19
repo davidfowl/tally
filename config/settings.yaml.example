@@ -60,6 +60,13 @@ data_sources:
 report_fields:
   - memo
 
+# Recurrence override tags (used by report charts)
+# ------------------------------------------------
+# Add these tags in merchants.rules when you want to override inferred
+# recurring classification in the charts:
+#   fixed    -> force merchant into fixed/recurring spend
+#   variable -> force merchant out of fixed/recurring spend
+
 # Output settings
 output_dir: output
 html_filename: spending_summary.html
