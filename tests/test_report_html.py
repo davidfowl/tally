@@ -968,6 +968,289 @@ class TestEdgeCasesAndCalculations:
         )
 
 
+@pytest.fixture(scope="module")
+def chart_controls_report_path(tmp_path_factory):
+    """Generate a multi-year report for chart-control interaction tests.
+
+    Fixture properties:
+    - 30 months of data (2024-01 through 2026-06) so month paging is required.
+    - Multiple categories so focused/tooltip behavior can be validated.
+    - One category present only on alternating months to create zero-value buckets.
+    """
+    tmp_dir = tmp_path_factory.mktemp("chart_controls_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = []
+    for idx in range(30):
+        year = 2024 + (idx // 12)
+        month = (idx % 12) + 1
+        rows.append(f"{month:02d}/10/{year},ALPHA STORE,{120 + (idx % 5) * 10:.2f}")
+        if idx % 2 == 0:
+            rows.append(f"{month:02d}/12/{year},BETA SHOP,{55 + (idx % 4) * 5:.2f}")
+
+    csv_content = "Date,Description,Amount\n" + "\n".join(rows) + "\n"
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    settings_content = """title: "Tally Spending Analysis"
+
+data_sources:
+  - name: Test
+    file: data/transactions.csv
+    format: "{date},{description},{amount}"
+
+merchants_file: config/merchants.rules
+"""
+    (config_dir / "settings.yaml").write_text(settings_content)
+
+    rules_content = """[Alpha]
+match: contains("ALPHA STORE")
+category: Housing
+subcategory: Rent
+
+[Beta]
+match: contains("BETA SHOP")
+category: Shopping
+subcategory: Retail
+"""
+    (config_dir / "merchants.rules").write_text(rules_content)
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+
+    return str(report_file)
+
+
+def _goto_chart_report_fresh(page: Page, report_path: str):
+    """Reset persisted chart UI state so chart-control tests are deterministic."""
+    page.goto(f"file://{report_path}")
+    page.evaluate("""() => {
+        localStorage.removeItem('spending-report-ui-state-v1');
+    }""")
+    page.reload()
+    page.wait_for_timeout(250)
+
+
+class TestChartControlsMinimum:
+    """Minimum chart interaction coverage for core controls and tooltip behavior."""
+
+    def test_category_chart_grouping_switches_to_years(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        years_btn = page.locator("#cat-group-pills .proto-pill", has_text="Years")
+        expect(years_btn).to_be_visible()
+        years_btn.click()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const labels = chart.data?.labels || [];
+            const allYears = labels.every(label => /^\\d{4}$/.test(String(label || '')));
+            return { labels, allYears };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect category grouping chart: {result['error']}")
+
+        assert len(result['labels']) >= 3, f"Expected 3+ year labels, got {result['labels']}"
+        assert result['allYears'], f"Expected year-form labels after Years grouping, got {result['labels']}"
+
+    def test_category_chart_focused_mode_uses_line_and_bold_label(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        focused_box = page.locator("#cat-unstack-checkbox")
+        expect(focused_box).to_be_visible()
+        focused_box.check()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const focusedCount = (chart.data?.datasets || []).filter(ds => Number(ds.borderWidth || 0) >= 3).length;
+            const compareDisabled = !!document.getElementById('cat-compare-checkbox')?.disabled;
+
+            return {
+                type: chart.config?.type,
+                ttBoldLabel: chart.options?.ttBoldLabel || null,
+                focusedCount,
+                compareDisabled,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect focused chart mode: {result['error']}")
+
+        assert result['type'] == 'line', f"Focused mode should render a line chart, got {result['type']}"
+        assert result['ttBoldLabel'], f"Focused mode should set ttBoldLabel, got {result}"
+        assert result['focusedCount'] == 1, f"Expected exactly one focused series, got {result}"
+        assert result['compareDisabled'] is True, f"Compare should be disabled in focused mode: {result}"
+
+    def test_category_chart_compare_years_builds_year_split_datasets(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        compare_box = page.locator("#cat-compare-checkbox")
+        expect(compare_box).to_be_visible()
+        compare_box.check()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const datasets = chart.data?.datasets || [];
+            const years = [...new Set(datasets.map(ds => ds.ttYear).filter(Boolean))];
+            const labels = chart.data?.labels || [];
+
+            return {
+                labels,
+                years,
+                yearSubLabels: !!chart.options?.yearSubLabels,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect compare-years chart mode: {result['error']}")
+
+        assert len(result['years']) >= 2, f"Expected at least two compare years, got {result}"
+        assert result['yearSubLabels'] is True, f"Expected yearSubLabels enabled in compare mode, got {result}"
+        assert len(result['labels']) == 12, f"Expected month compare labels (12), got {result['labels']}"
+
+    def test_category_chart_month_grouping_pages_when_over_24_months(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        months_btn = page.locator("#cat-group-pills .proto-pill", has_text="Months")
+        expect(months_btn).to_be_visible()
+        months_btn.click()
+        page.wait_for_timeout(150)
+
+        pager_range = page.locator("#cat-chart-pager .pager-range")
+        expect(pager_range).to_be_visible()
+        expect(pager_range).to_contain_text("showing 24 of 30 months")
+
+        prev_btn = page.locator("#cat-chart-pager button").first
+        expect(prev_btn).to_be_enabled()
+        prev_btn.click()
+        page.wait_for_timeout(150)
+
+        expect(pager_range).to_contain_text("showing 6 of 30 months")
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+            return { labelCount: (chart.data?.labels || []).length };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect category pager state: {result['error']}")
+
+        assert result['labelCount'] == 6, f"Expected 6 labels on older page, got {result}"
+
+    def test_category_tooltip_hides_zero_rows(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const datasets = chart.data?.datasets || [];
+            const labels = chart.data?.labels || [];
+            let targetDataIndex = -1;
+            let hoveredDatasetIndex = -1;
+
+            for (let idx = 0; idx < labels.length; idx += 1) {
+                const vals = datasets.map(ds => Number(ds?.data?.[idx]) || 0);
+                const positiveCount = vals.filter(v => v > 0).length;
+                const zeroCount = vals.filter(v => Math.abs(v) < 1e-9).length;
+                if (positiveCount >= 1 && zeroCount >= 1) {
+                    targetDataIndex = idx;
+                    hoveredDatasetIndex = vals.findIndex(v => v > 0);
+                    break;
+                }
+            }
+
+            if (targetDataIndex < 0 || hoveredDatasetIndex < 0) {
+                return { error: 'No mixed zero/non-zero bucket found for tooltip test' };
+            }
+
+            const external = chart.options?.plugins?.tooltip?.external;
+            if (typeof external !== 'function') {
+                return { error: 'External tooltip handler unavailable' };
+            }
+
+            external({
+                chart,
+                tooltip: {
+                    opacity: 1,
+                    dataPoints: [{ dataIndex: targetDataIndex, datasetIndex: hoveredDatasetIndex }],
+                    caretX: 40,
+                    caretY: 40,
+                },
+            });
+
+            const tip = document.getElementById('ext-tooltip');
+            if (!tip) return { error: 'Tooltip element missing' };
+
+            const rowNames = Array.from(tip.querySelectorAll('.tt-row .tt-name'))
+                .map(el => (el.textContent || '').trim())
+                .filter(Boolean);
+            const zeroNames = datasets
+                .filter(ds => Math.abs(Number(ds?.data?.[targetDataIndex]) || 0) < 1e-9)
+                .map(ds => ds.label)
+                .filter(Boolean);
+
+            const includesZeroName = zeroNames.some(name => rowNames.includes(name));
+            return {
+                rowNames,
+                zeroNames,
+                includesZeroName,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not validate tooltip zero-row behavior: {result['error']}")
+
+        assert result['zeroNames'], f"Expected at least one zero-valued dataset in sampled bucket: {result}"
+        assert result['includesZeroName'] is False, (
+            f"Tooltip should hide zero rows but included one: {result}"
+        )
+
+
 # =============================================================================
 # Autocomplete Category/Subcategory Tests
 # =============================================================================
