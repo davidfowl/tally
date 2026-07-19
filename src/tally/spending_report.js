@@ -565,7 +565,10 @@ const MerchantSection = defineComponent({
         },
         getFilterDescriptor(item) {
             const type = this.subcategoryMode ? 'subcategory' : 'merchant';
-            const text = this.subcategoryMode ? (item.subcategory || item.displayName || item.id) : (item.displayName || item.id);
+            // In subcategory mode `item.subcategory` is NOT the subcategory name -
+            // subcategoryGroupedView puts the "N merchants" summary there for the
+            // second column. The name lives in id/displayName.
+            const text = this.subcategoryMode ? (item.id || item.displayName) : (item.displayName || item.id);
             const displayText = item.displayName || item.merchant || text;
             return { text, type, displayText };
         },
@@ -1585,16 +1588,7 @@ createApp({
                         const recurrence = merchant.recurrence || null;
                         const recurringMonthlyCost = Number(merchant.recurringMonthlyCost || 0);
                         const isRecurringMerchant = recurrence && recurringMonthlyCost > 0;
-                        if (isRecurringMerchant && !seenRecurring.has(merchantId)) {
-                            seenRecurring.add(merchantId);
-                            recurringMerchants.push({
-                                id: merchantId,
-                                merchant: merchant.displayName,
-                                category: merchant.category,
-                                cadence: recurrence,
-                                recurringMonthlyCost,
-                            });
-                        }
+                        let recurringSpendingForMerchant = 0;
 
                         for (const txn of merchant.filteredTxns || []) {
                             const c = categorizeAmount(txn.amount, txn.tags || []);
@@ -1607,6 +1601,7 @@ createApp({
                                 byCategoryByMonth[catName][txn.month] =
                                     (byCategoryByMonth[catName][txn.month] || 0) + c.spending;
                                 if (isRecurringMerchant) {
+                                    recurringSpendingForMerchant += c.spending;
                                     recurringSpendingByMonth[txn.month] =
                                         (recurringSpendingByMonth[txn.month] || 0) + c.spending;
                                 }
@@ -1625,6 +1620,19 @@ createApp({
                                     (transfersByMonth[txn.month] || 0) + c.transferIn - c.transferOut;
                             }
                         }
+
+                        // Keep fixed outputs aligned with spending logic by excluding
+                        // recurring merchants that have only transfer/income/investment txns.
+                        if (isRecurringMerchant && recurringSpendingForMerchant > 0 && !seenRecurring.has(merchantId)) {
+                            seenRecurring.add(merchantId);
+                            recurringMerchants.push({
+                                id: merchantId,
+                                merchant: merchant.displayName,
+                                category: merchant.category,
+                                cadence: recurrence,
+                                recurringMonthlyCost,
+                            });
+                        }
                     }
                 }
             }
@@ -1642,6 +1650,57 @@ createApp({
                 recurringSpendingByMonth,
             };
         });
+
+        // Category-exempt aggregation: mirrors chartAggregations' byCategory /
+        // byCategoryByMonth but ignores include-mode category filters so the
+        // Spending by Category chart's own bars never lose peer categories when
+        // a category chip/filter is toggled - only its dataset visibility changes.
+        const categoryExemptAggregations = computed(() => {
+            const byCategory = {};
+            const byCategoryByMonth = {};
+            const categoryView = spendingData.value.categoryView || {};
+            for (const [catName, category] of Object.entries(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const merchant of Object.values(subcat.merchants || {})) {
+                        for (const txn of merchant.transactions || []) {
+                            if (!passesFilters(txn, merchant, { skipCategory: true })) continue;
+                            const c = categorizeAmount(txn.amount, txn.tags || []);
+                            if (c.spending > 0) {
+                                byCategory[catName] = (byCategory[catName] || 0) + c.spending;
+                                if (!byCategoryByMonth[catName]) byCategoryByMonth[catName] = {};
+                                byCategoryByMonth[catName][txn.month] =
+                                    (byCategoryByMonth[catName][txn.month] || 0) + c.spending;
+                            }
+                        }
+                    }
+                }
+            }
+            return { byCategory, byCategoryByMonth };
+        });
+
+        // Category names currently selected via 'category'-type include filters
+        // (chip clicks, canvas clicks, or hand-typed) - the single source of
+        // truth the legend chips derive their tri-state from.
+        const selectedCategoryChips = computed(() =>
+            activeFilters.value
+                .filter(f => f.type === 'category' && f.mode === 'include')
+                .map(f => f.text)
+        );
+
+        // Top-10 chip list for the category chart, sourced from the
+        // category-exempt aggregation so it depends only on the date/text/
+        // merchant/tag filters - never on the category selection itself. That
+        // keeps the chip list (and therefore the chart's dataset composition)
+        // fixed across chip toggles, which is what makes the no-rebuild
+        // visibility fast path safe.
+        //
+        // Deliberately NOT pinned: a category filter for a name inside the
+        // "Other" tail gets no chip of its own, so the legend shows every chip
+        // `not-selected` with none selected. Keeping the chip row at a fixed
+        // width beats guaranteeing a chip for every filtered category.
+        const chipCategories = computed(() =>
+            buildCategoryBreakdown(categoryExemptAggregations.value)
+        );
 
         // Assign category colors from a stable global ranking so filtering/regrouping
         // never repaints surviving categories.
@@ -1887,9 +1946,15 @@ createApp({
 
         // ========== METHODS ==========
 
-        function passesFilters(txn, merchant) {
-            const includes = activeFilters.value.filter(f => f.mode === 'include');
-            const excludes = activeFilters.value.filter(f => f.mode === 'exclude');
+        // `skipCategory` exempts only *include*-mode category filters - the ones the
+        // legend chips drive. Exclude-mode category chips stay applied so hiding a
+        // category from the report also hides it from the category chart.
+        function passesFilters(txn, merchant, options = {}) {
+            const relevantFilters = options.skipCategory
+                ? activeFilters.value.filter(f => !(f.type === 'category' && f.mode === 'include'))
+                : activeFilters.value;
+            const includes = relevantFilters.filter(f => f.mode === 'include');
+            const excludes = relevantFilters.filter(f => f.mode === 'exclude');
 
             // Check excludes first
             for (const f of excludes) {
@@ -1968,9 +2033,18 @@ createApp({
             return txnMonth === filterText;
         }
 
-        function addFilter(text, type, displayText = null) {
+        // Chart-driven filters (source: 'chart') are transient "peek" state. Any
+        // deliberate filter the user adds by hand - search box, a table's filter
+        // button, a date preset - ends the peek: the chart's drill-down filters are
+        // dropped first so they can't linger invisibly behind the real filter. A
+        // by-hand re-add of a category that was only chart-tagged therefore lands as
+        // a normal, hash-persisted filter.
+        function addFilter(text, type, displayText = null, source = null) {
+            if (source !== 'chart') clearChartFilters();
             if (activeFilters.value.some(f => f.text === text && f.type === type)) return;
-            activeFilters.value.push({ text, type, mode: 'include', displayText: displayText || text });
+            const filter = { text, type, mode: 'include', displayText: displayText || text };
+            if (source) filter.source = source;
+            activeFilters.value.push(filter);
             searchQuery.value = '';
             showAutocomplete.value = false;
             autocompleteIndex.value = -1;
@@ -2131,13 +2205,16 @@ createApp({
         }
 
         // Apply: re-aggregate pending months into the fewest chips, then append
-        // the (independent) custom range. Existing date chips are replaced.
+        // the (independent) custom range. Existing date chips are replaced, and
+        // chart "peek" filters are dropped - applying a date range by hand is a
+        // deliberate filter action, same as typing one (see addFilter).
         function applyDateFilters() {
             // Replace the include-mode date chips this popover owns; excluded
             // date chips are not editable here, so they survive untouched.
-            activeFilters.value = activeFilters.value.filter(f =>
-                filterCategory(f.type) !== 'date' || f.mode !== 'include'
-            );
+            activeFilters.value = activeFilters.value.filter(f => {
+                const ownedDateChip = filterCategory(f.type) === 'date' && f.mode === 'include';
+                return !ownedDateChip && f.source !== 'chart';
+            });
             aggregateMonthKeys([...pendingMonths]).forEach(entry =>
                 activeFilters.value.push(aggregateEntryToChip(entry))
             );
@@ -2490,22 +2567,22 @@ createApp({
             if (typeof ResizeObserver === 'undefined') return;
             if (chartLayoutObserver) chartLayoutObserver.disconnect();
 
-            chartLayoutObserver = new ResizeObserver(() => {
-                rerenderChartsDebounced();
+            const chartSection = document.querySelector('.chart-section');
+            if (!chartSection) return;
+
+            let lastWidth = Math.round(chartSection.getBoundingClientRect().width);
+
+            chartLayoutObserver = new ResizeObserver(entries => {
+                for (const entry of entries) {
+                    if (entry.target !== chartSection) continue;
+                    const nextWidth = Math.round(entry.contentRect.width);
+                    if (nextWidth === lastWidth) return;
+                    lastWidth = nextWidth;
+                    rerenderChartsDebounced();
+                }
             });
 
-            const targets = [
-                document.getElementById('app'),
-                document.querySelector('.chart-section'),
-                categoryTrendChart.value?.closest('.chart-wrapper'),
-                cashFlowTrendChart.value?.closest('.chart-wrapper'),
-                fixedVariableChart.value?.closest('.chart-wrapper'),
-                volatilityChart.value?.closest('.chart-wrapper'),
-            ].filter(Boolean);
-
-            for (const target of targets) {
-                chartLayoutObserver.observe(target);
-            }
+            chartLayoutObserver.observe(chartSection);
         }
 
         function formatMonthLabel(key) {
@@ -2655,7 +2732,6 @@ createApp({
 
             heatmapState.page = 0;
 
-            categoryHidden.clear();
             cashHidden.clear();
             fixedHidden.clear();
 
@@ -2850,12 +2926,15 @@ createApp({
         // ========== URL HASH ==========
 
         function filtersToHash() {
-            if (activeFilters.value.length === 0) {
+            // Chart-tagged filters (chip/canvas-driven, source: 'chart') are session-only
+            // convenience state and are intentionally not persisted across reloads.
+            const persistable = activeFilters.value.filter(f => f.source !== 'chart');
+            if (persistable.length === 0) {
                 history.replaceState(null, '', location.pathname);
                 return;
             }
             const typeChar = { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', daterange: 'dr', tag: 't', text: 's' };
-            const parts = activeFilters.value.map(f => {
+            const parts = persistable.map(f => {
                 const mode = f.mode === 'exclude' ? '-' : '+';
                 return `${mode}${typeChar[f.type]}:${encodeURIComponent(f.text)}`;
             });
@@ -2906,7 +2985,6 @@ createApp({
             fixed: false,
         });
 
-        const categoryHidden = new Set();
         const cashHidden = new Set();
         const fixedHidden = new Set();
         let categoryFocusedHasAnimated = false;
@@ -2915,13 +2993,67 @@ createApp({
         let tooltipEl = null;
         let tooltipAnchorKey = null;
 
+        // Set right before a chip-driven category selection change mutates
+        // activeFilters, so the resulting chartAggregations-watch renderAllCharts()
+        // pass can fast-path the category chart (dataset visibility toggle only,
+        // no destroy/recreate, no reanimation) instead of a full rebuild.
+        let categoryChipToggleInFlight = false;
+
+        function categoryChipHidden(name, selected) {
+            return selected.length > 0 && !selected.includes(name);
+        }
+
+        // Add/remove 'category'-type include filters so activeFilters matches
+        // the desired selection set exactly (bidirectional single source of truth).
+        function applyCategorySelection(next) {
+            for (let i = activeFilters.value.length - 1; i >= 0; i -= 1) {
+                const f = activeFilters.value[i];
+                if (f.type === 'category' && f.mode === 'include' && !next.includes(f.text)) {
+                    activeFilters.value.splice(i, 1);
+                }
+            }
+            for (const name of next) {
+                addFilter(name, 'category', name, 'chart');
+            }
+        }
+
+        function toggleCategoryChip(name) {
+            if (name === OTHER_CATEGORY_LABEL) return;
+            const current = selectedCategoryChips.value;
+            const clickable = chipCategories.value.topCategories;
+            let next = current.includes(name)
+                ? current.filter(n => n !== name)
+                : [...current, name];
+            // All-on or all-off collapses back to "no category filter" (every chip
+            // `regular`). Counted over chip-backed names only, so a hand-typed
+            // filter for a category inside "Other" - which has no chip - can't trip
+            // the all-on threshold early. Reaching either end clears every category
+            // filter, including that chip-less one; leaving it behind would strand
+            // the legend in the all-`not-selected` state instead of `regular`.
+            const onChips = next.filter(n => clickable.includes(n));
+            if (onChips.length === 0 || onChips.length >= clickable.length) next = [];
+            categoryChipToggleInFlight = true;
+            applyCategorySelection(next);
+        }
+
+        const hasChartFilters = computed(() => activeFilters.value.some(f => f.source === 'chart'));
+
+        function clearChartFilters() {
+            activeFilters.value = activeFilters.value.filter(f => f.source !== 'chart');
+        }
+
+        // A chart rendered while its panel is collapsed measures a zero-width
+        // canvas (CSS display:none), so xTickOptions falls back to its 320px floor
+        // and bakes rotated, heavily-skipped x labels into the config. Expanding
+        // only unhides the canvas - Chart.js resizes it but never recomputes those
+        // static tick options, and the layout ResizeObserver stays quiet because
+        // the chart section's *width* never changed. So re-render on expand.
         function toggleChartPanel(panelKey) {
             if (!(panelKey in chartPanels)) return;
+            const expanding = chartPanels[panelKey];
             chartPanels[panelKey] = !chartPanels[panelKey];
             saveUiState();
-            if (chartsInitialized) {
-                nextTick(() => renderAllCharts());
-            }
+            if (expanding) rerenderChartsDebounced();
         }
 
         function cssVar(name) {
@@ -3078,8 +3210,23 @@ createApp({
             return total;
         }
 
-        function stripEmptyAxisSlots(labels, datasets) {
-            if (!labels?.length || !datasets?.length) return { labels, datasets };
+        // Resolve a compare-mode bar click (a comparePeriods() period rendered
+        // under a specific dataset.ttYear) to an {type,key,label} entry compatible
+        // with aggregateEntryToChip - i.e. the clicked year, not the current year.
+        function compareClickToEntry(year, period, grouping) {
+            if (grouping === 'quarter') {
+                const q = parseInt(period.label.slice(1), 10);
+                return { type: 'quarter', key: `${year}-Q${q}`, label: `${period.label} '${String(year).slice(2)}` };
+            }
+            const key = `${year}-${pad2(period.months[0])}`;
+            return { type: 'month', key, label: monthKeyLabel(key) };
+        }
+
+        // `meta` is an optional parallel array (e.g. chart buckets/periods used
+        // for canvas-click date-filter lookups) that gets trimmed in lockstep
+        // with labels/datasets so index-based lookups stay aligned.
+        function stripEmptyAxisSlots(labels, datasets, meta = null) {
+            if (!labels?.length || !datasets?.length) return { labels, datasets, meta };
 
             const keepIndexes = [];
             for (let i = 0; i < labels.length; i += 1) {
@@ -3087,7 +3234,7 @@ createApp({
                 if (hasValue) keepIndexes.push(i);
             }
 
-            if (keepIndexes.length === labels.length) return { labels, datasets };
+            if (keepIndexes.length === labels.length) return { labels, datasets, meta };
 
             return {
                 labels: keepIndexes.map(i => labels[i]),
@@ -3095,6 +3242,7 @@ createApp({
                     ...ds,
                     data: keepIndexes.map(i => Number(ds?.data?.[i] || 0)),
                 })),
+                meta: meta ? keepIndexes.map(i => meta[i]) : meta,
             };
         }
 
@@ -3170,7 +3318,11 @@ createApp({
 
             const totalLabel = chart.options.ttNet ? 'Net' : 'Total';
             const total = chart.options.ttNet
-                ? rows.reduce((sum, row) => sum + ((row.name === 'Income' || row.name === 'Credits') ? row.value : -row.value), 0)
+                ? rows.reduce((sum, row) => {
+                    if (row.name === 'Income' || row.name === 'Credits') return sum + row.value;
+                    if (row.name === 'Spending') return sum - row.value;
+                    return sum;
+                }, 0)
                 : rows.reduce((sum, row) => sum + row.value, 0);
 
             el.textContent = '';
@@ -3397,18 +3549,40 @@ createApp({
             }
         }
 
+        // `item.state` ('regular' | 'selected' | 'not-selected') drives the
+        // category chart's tri-state filter chips; other legends (cash flow,
+        // fixed/variable, focused-mode) keep the plain boolean `item.active`
+        // show/hide toggle. `item.disabled` renders an inert, unclickable chip
+        // (the "Other" bucket, which can never be filtered on).
         function chipLegend(el, items) {
             if (!el) return;
             el.textContent = '';
+
+            const hasNonZeroValues = values =>
+                Array.isArray(values) && values.some(v => Math.abs(Number(v) || 0) > 0.0001);
+
             for (const item of items) {
+                const isVisible = typeof item.visible === 'boolean'
+                    ? item.visible
+                    : (Array.isArray(item.values) ? hasNonZeroValues(item.values) : true);
+                if (!isVisible) continue;
+                const state = item.state || (item.active ? 'selected' : null);
+                const dotColored = state ? state !== 'not-selected' : false;
+                const borderHighlighted = state === 'selected';
                 const b = document.createElement('button');
-                b.className = `legend-chip${item.active ? ' active' : ''}`;
-                if (item.active) b.style.borderColor = item.color;
+                b.className = [
+                    'legend-chip',
+                    borderHighlighted ? 'active' : '',
+                    state === 'not-selected' ? 'not-selected' : '',
+                    state === 'regular' ? 'regular' : '',
+                    item.disabled ? 'disabled' : '',
+                ].filter(Boolean).join(' ');
+                if (borderHighlighted) b.style.borderColor = item.color;
                 const dot = document.createElement('span');
                 dot.className = 'chip-dot';
-                dot.style.background = item.active ? item.color : 'rgba(128,134,150,0.6)';
+                dot.style.background = dotColored ? item.color : 'rgba(128,134,150,0.6)';
                 b.append(dot, document.createTextNode(item.label));
-                b.addEventListener('click', item.onClick);
+                if (!item.disabled && item.onClick) b.addEventListener('click', item.onClick);
                 el.appendChild(b);
             }
         }
@@ -3449,19 +3623,40 @@ createApp({
             return svg;
         }
 
-        function trendStatement(series, upIsGood) {
+        function trimTrailingZeroMonths(series, monthKeys) {
+            let lastNonZero = -1;
+            for (let i = series.length - 1; i >= 0; i--) {
+                if (Math.abs(series[i] || 0) > 0.0001) {
+                    lastNonZero = i;
+                    break;
+                }
+            }
+
+            if (lastNonZero < 0) {
+                return { series, monthKeys };
+            }
+
+            return {
+                series: series.slice(0, lastNonZero + 1),
+                monthKeys: monthKeys.slice(0, lastNonZero + 1),
+            };
+        }
+
+        function trendStatement(series, monthKeys, upIsGood) {
             const len = series.length;
-            const n = len > 12 ? 12 : len > 6 ? 6 : len > 3 ? 3 : len > 1 ? 1 : 0;
-            if (!n) return null;
+            const n = Math.min(12, len - 1);
+            if (n < 1) return null;
 
             const last = series[len - 1] || 0;
             const baseline = series.slice(len - 1 - n, len - 1).reduce((sum, v) => sum + v, 0) / n;
+            if (!baseline) return null;
+
             const delta = last - baseline;
-            const pct = baseline ? Math.abs(delta / baseline * 100) : 0;
+            const pct = Math.abs(delta / baseline * 100);
             return {
                 arrow: delta >= 0 ? '↑' : '↓',
                 value: `${delta >= 0 ? '+' : '-'}${pct.toFixed(1)}%`,
-                sentence: n === 1 ? ' this month vs last month' : ` this month vs prior ${n} mo`,
+                sentence: ` vs prior ${n} month${n === 1 ? '' : 's'}`,
                 cls: (delta >= 0) === upIsGood ? 'pos' : 'neg',
             };
         }
@@ -3474,46 +3669,73 @@ createApp({
                 return;
             }
 
-            const sum = byMonth => monthKeys.reduce((total, mk) => total + (byMonth?.[mk] || 0), 0);
+            const orderedMonthKeys = [...monthKeys].sort();
+
+            const sum = byMonth => orderedMonthKeys.reduce((total, mk) => total + (byMonth?.[mk] || 0), 0);
             const income = sum(agg.incomeByMonth);
             const credits = sum(agg.creditsByMonth);
             const spending = sum(agg.spendingByMonth);
             const investment = sum(agg.investmentByMonth);
             const transfers = sum(agg.transfersByMonth);
-            const txCount = monthKeys.reduce((total, mk) => total + (agg.txnCountByMonth?.[mk] || 0), 0);
-            const months = Math.max(monthKeys.length, 1);
-            const cashFlowTotal = income + credits - spending - investment;
+            const txCount = orderedMonthKeys.reduce((total, mk) => total + (agg.txnCountByMonth?.[mk] || 0), 0);
+            const cashFlowTotal = calculateCashFlow(income, spending, credits);
 
-            const incomeSeries = monthKeys.map(mk => (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0));
-            const spendingSeries = monthKeys.map(mk => agg.spendingByMonth[mk] || 0);
-            const cashFlowSeries = monthKeys.map(mk =>
-                (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0) - (agg.spendingByMonth[mk] || 0) - (agg.investmentByMonth[mk] || 0)
+            const incomeOnlySeries = orderedMonthKeys.map(mk => agg.incomeByMonth[mk] || 0);
+            const creditsSeries = orderedMonthKeys.map(mk => agg.creditsByMonth[mk] || 0);
+            const incomeSeries = orderedMonthKeys.map(mk => (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0));
+            const spendingSeries = orderedMonthKeys.map(mk => agg.spendingByMonth[mk] || 0);
+            const recurringSeries = orderedMonthKeys.map(mk => agg.recurringSpendingByMonth?.[mk] || 0);
+            const cashFlowSeries = orderedMonthKeys.map(mk =>
+                calculateCashFlow(
+                    agg.incomeByMonth[mk] || 0,
+                    agg.spendingByMonth[mk] || 0,
+                    agg.creditsByMonth[mk] || 0,
+                )
             );
 
             grid.textContent = '';
 
-            function createCard(className, title, headline, details, spark, subtitle) {
+			function createCard(className, title, headline, details, spark, subtitle, options = {}) {
                 const card = document.createElement('div');
                 card.className = `kpi-card ${className}`;
+                if (options.cardTestId) card.setAttribute('data-testid', options.cardTestId);
+
+                const topWrap = document.createElement('div');
+                topWrap.className = 'kpi-top';
+
                 const h = document.createElement('h4');
                 h.textContent = title;
+
                 const value = document.createElement('div');
                 value.className = 'kpi-value';
-                value.textContent = headline;
-                card.append(h, value);
+                if (options.amountTestId) value.setAttribute('data-testid', options.amountTestId);
+
+                const primary = document.createElement('span');
+                primary.className = 'kpi-value-primary';
+                primary.textContent = headline;
+                value.appendChild(primary);
+
+                if (options.headlineSecondary) {
+                    const secondary = document.createElement('span');
+                    secondary.className = 'kpi-value-secondary';
+					secondary.textContent = options.headlineSecondary;
+                    value.appendChild(secondary);
+                }
+
+                topWrap.append(h, value);
 
                 if (subtitle) {
                     const sub = document.createElement('div');
                     sub.className = 'kpi-sub';
                     sub.textContent = subtitle;
-                    card.appendChild(sub);
+                    topWrap.appendChild(sub);
                 }
 
                 if (spark) {
                     const sparkWrap = document.createElement('div');
                     sparkWrap.className = 'kpi-spark';
                     sparkWrap.appendChild(sparklineSVG(spark.values, spark.dotColor));
-                    card.appendChild(sparkWrap);
+                    topWrap.appendChild(sparkWrap);
 
                     if (spark.trend) {
                         const trend = document.createElement('div');
@@ -3522,21 +3744,45 @@ createApp({
                         val.className = `val ${spark.trend.cls}`;
                         val.textContent = `${spark.trend.arrow} ${spark.trend.value}`;
                         trend.append(val, document.createTextNode(spark.trend.sentence));
-                        card.appendChild(trend);
+                        topWrap.appendChild(trend);
                     }
                 }
 
+                card.appendChild(topWrap);
+
                 const detailWrap = document.createElement('div');
                 detailWrap.className = 'kpi-details';
+                if (options.detailsClass) detailWrap.classList.add(options.detailsClass);
                 for (const detail of details) {
+                    if (detail.dividerBefore) {
+                        const divider = document.createElement('div');
+                        divider.className = 'kpi-detail-divider';
+                        detailWrap.appendChild(divider);
+                    }
                     const row = document.createElement('div');
                     row.className = 'kpi-detail';
+                    if (detail.breakdown) row.classList.add('breakdown-item');
                     const name = document.createElement('span');
                     name.className = 'name';
+                    if (detail.nameClass) name.classList.add(detail.nameClass);
                     name.textContent = detail.name;
+                    if (detail.onClick) {
+                        name.style.cursor = 'pointer';
+                        name.addEventListener('click', detail.onClick);
+                    }
                     const val = document.createElement('span');
                     val.className = 'value';
+                    if (detail.valueTone) val.classList.add(detail.valueTone);
                     val.textContent = detail.value;
+                    if (detail.secondaryValue) {
+                        const detailSecondary = document.createElement('span');
+                        detailSecondary.className = 'kpi-detail-secondary';
+                        detailSecondary.textContent = ` / ${detail.secondaryValue}`;
+						val.appendChild(detailSecondary);
+						val.setAttribute('title', className == "income"
+							? `${detail.value} total income including ${detail.secondaryValue} in credits.`
+							: `${detail.value} total spending including ${detail.secondaryValue} in fixed spending.`);
+                    }
                     if (detail.perMonth) {
                         const perMo = document.createElement('span');
                         perMo.className = 'permo';
@@ -3550,34 +3796,240 @@ createApp({
                 grid.appendChild(card);
             }
 
+            function lastActiveIndex(series) {
+                for (let i = series.length - 1; i >= 0; i--) {
+                    if (Math.abs(series[i] || 0) > 0.0001) return i;
+                }
+                return Math.max(0, series.length - 1);
+            }
+
+            function rangeSum(series, startIdx, endIdx) {
+                if (!series.length) return 0;
+                let total = 0;
+                for (let i = Math.max(0, startIdx); i <= Math.min(endIdx, series.length - 1); i++) {
+                    total += series[i] || 0;
+                }
+                return total;
+            }
+
+            function lastNSeriesTotal(series, endIdx, count) {
+                return rangeSum(series, endIdx - count + 1, endIdx);
+            }
+
+            function parseMonthKey(mk) {
+                const [yearStr, monthStr] = mk.split('-');
+                const year = parseInt(yearStr, 10);
+                const month = parseInt(monthStr, 10);
+                return {
+                    year,
+                    month,
+                    serial: year * 12 + month,
+                };
+            }
+
+            function sumWithPredicate(series, predicate) {
+                let total = 0;
+                for (let i = 0; i < orderedMonthKeys.length; i++) {
+                    const info = parseMonthKey(orderedMonthKeys[i]);
+                    if (predicate(info)) total += series[i] || 0;
+                }
+                return total;
+            }
+
+            function countWithPredicate(predicate) {
+                let count = 0;
+                for (let i = 0; i < orderedMonthKeys.length; i++) {
+                    const info = parseMonthKey(orderedMonthKeys[i]);
+                    if (predicate(info)) count += 1;
+                }
+                return count;
+            }
+
+            function monthLabelComma(mk) {
+                return monthLabel(mk).replace(" '", ", '");
+            }
+
+            function periodMetrics(primarySeries, secondarySeries, anchorIdx) {
+                const anchorKey = orderedMonthKeys[anchorIdx];
+                const anchorInfo = parseMonthKey(anchorKey);
+                const quarter = Math.floor((anchorInfo.month - 1) / 3) + 1;
+                const quarterStart = (quarter - 1) * 3 + 1;
+
+                const inQuarter = info =>
+                    info.year === anchorInfo.year && info.month >= quarterStart && info.month <= anchorInfo.month;
+                const inYtd = info =>
+                    info.year === anchorInfo.year && info.month <= anchorInfo.month;
+                const inLast12 = info =>
+                    info.serial >= (anchorInfo.serial - 11) && info.serial <= anchorInfo.serial;
+
+                // Use the same baseline as trend: average of prior up-to-12 months,
+                // excluding the anchor/current month.
+                const priorCount = Math.min(12, anchorIdx);
+                const quarterPrimary = sumWithPredicate(primarySeries, inQuarter);
+                const ytdPrimary = sumWithPredicate(primarySeries, inYtd);
+                const last12Primary = priorCount > 0
+                    ? rangeSum(primarySeries, anchorIdx - priorCount, anchorIdx - 1)
+                    : (primarySeries[anchorIdx] || 0);
+                const allTimePrimary = primarySeries.reduce((sum, value) => sum + (value || 0), 0);
+
+                const quarterSecondary = secondarySeries ? sumWithPredicate(secondarySeries, inQuarter) : null;
+                const ytdSecondary = secondarySeries ? sumWithPredicate(secondarySeries, inYtd) : null;
+                const last12Secondary = secondarySeries
+                    ? (priorCount > 0
+                        ? rangeSum(secondarySeries, anchorIdx - priorCount, anchorIdx - 1)
+                        : (secondarySeries[anchorIdx] || 0))
+                    : null;
+                const allTimeSecondary = secondarySeries
+                    ? secondarySeries.reduce((sum, value) => sum + (value || 0), 0)
+                    : null;
+
+                return {
+                    anchorLabel: monthLabelComma(anchorKey),
+                    quarterLabel: `Q${quarter} ${anchorInfo.year}`,
+                    ytdLabel: `${anchorInfo.year} To Date`,
+                    anchorPrimary: primarySeries[anchorIdx] || 0,
+                    anchorSecondary: secondarySeries ? (secondarySeries[anchorIdx] || 0) : null,
+                    quarterPrimary,
+                    quarterSecondary,
+                    ytdPrimary,
+                    ytdSecondary,
+                    last12Primary,
+                    last12Secondary,
+                    last12AvgPrimary: priorCount > 0 ? (last12Primary / priorCount) : last12Primary,
+                    last12AvgSecondary: secondarySeries
+                        ? (priorCount > 0 ? (last12Secondary / priorCount) : last12Secondary)
+                        : null,
+                    allTimePrimary,
+                    allTimeSecondary,
+                };
+            }
+
+            const incomeIdx = lastActiveIndex(incomeSeries);
+            const spendingIdx = lastActiveIndex(spendingSeries);
+            const cashFlowIdx = lastActiveIndex(cashFlowSeries);
+
+            const incomeMonthKey = orderedMonthKeys[incomeIdx];
+            const spendingMonthKey = orderedMonthKeys[spendingIdx];
+            const cashFlowMonthKey = orderedMonthKeys[cashFlowIdx];
+
+            const incomeMonth = incomeSeries[incomeIdx] || 0;
+            const creditsMonth = creditsSeries[incomeIdx] || 0;
+            const incomeLast3 = lastNSeriesTotal(incomeOnlySeries, incomeIdx, 3);
+            const creditsLast3 = lastNSeriesTotal(creditsSeries, incomeIdx, 3);
+
+            const spendingMonth = spendingSeries[spendingIdx] || 0;
+            const recurringMonth = recurringSeries[spendingIdx] || 0;
+
+            const cashFlowMonth = cashFlowSeries[cashFlowIdx] || 0;
+
+            const incomePeriods = periodMetrics(incomeSeries, creditsSeries, incomeIdx);
+            const spendingPeriods = periodMetrics(spendingSeries, recurringSeries, spendingIdx);
+            const cashFlowPeriods = periodMetrics(cashFlowSeries, null, cashFlowIdx);
+
             function spark(series, upIsGood) {
-                const trend = trendStatement(series, upIsGood);
+                const trimmed = trimTrailingZeroMonths(series, orderedMonthKeys);
+                const trend = trendStatement(trimmed.series, trimmed.monthKeys, upIsGood);
                 const good = trend && trend.cls === 'pos';
                 return {
-                    values: series,
+                    values: trimmed.series,
                     trend,
                     dotColor: good ? (cssVar('--accent-green') || '#4ade80') : (cssVar('--accent-red') || '#ff6b6b'),
                 };
             }
 
-            createCard('income', 'Income', formatCurrency(income + credits), [
-                { name: 'Income', value: formatCurrency(income), perMonth: `${formatCurrency(income / months)}/mo` },
-                { name: 'Credits', value: formatCurrency(credits), perMonth: `${formatCurrency(credits / months)}/mo` },
-            ], spark(incomeSeries, true));
+            createCard('income', `${incomePeriods.anchorLabel} Income`, formatCurrency(incomeMonth), [
+                {
+                    name: incomePeriods.quarterLabel,
+                    value: formatCurrency(incomePeriods.quarterPrimary),
+                    secondaryValue: formatCurrency(incomePeriods.quarterSecondary),
+                },
+                {
+                    name: incomePeriods.ytdLabel,
+                    value: formatCurrency(incomePeriods.ytdPrimary),
+                    secondaryValue: formatCurrency(incomePeriods.ytdSecondary),
+                },
+                {
+                    name: '12 Month Avg',
+                    value: formatCurrency(incomePeriods.last12AvgPrimary),
+                    secondaryValue: formatCurrency(incomePeriods.last12AvgSecondary),
+                },
+                {
+                    name: 'All Time',
+                    value: formatCurrency(incomePeriods.allTimePrimary),
+                    secondaryValue: formatCurrency(incomePeriods.allTimeSecondary),
+                },
+            ], spark(incomeSeries, true), null, {
+                headlineSecondary: `${formatCurrency(creditsMonth)} in credits`,
+            });
 
-            createCard('spending', 'Spending', formatCurrency(spending), [
-                { name: 'Avg / month', value: formatCurrency(spending / months) },
-                { name: 'Fixed / month', value: formatCurrency(fixedMonthlyBaseline) },
-            ], spark(spendingSeries, false));
+            createCard('spending', `${spendingPeriods.anchorLabel} Spending`, formatCurrency(spendingMonth), [
+                {
+                    name: spendingPeriods.quarterLabel,
+                    value: formatCurrency(spendingPeriods.quarterPrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.quarterSecondary),
+                },
+                {
+                    name: spendingPeriods.ytdLabel,
+                    value: formatCurrency(spendingPeriods.ytdPrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.ytdSecondary),
+                },
+                {
+                    name: '12 Month Avg',
+                    value: formatCurrency(spendingPeriods.last12AvgPrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.last12AvgSecondary),
+                },
+                {
+                    name: 'All Time',
+                    value: formatCurrency(spendingPeriods.allTimePrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.allTimeSecondary),
+                },
+            ], spark(spendingSeries, false), null, {
+                headlineSecondary: `${formatCurrency(recurringMonth)} are fixed`,
+                cardTestId: 'filtered-spending-card',
+                amountTestId: 'filtered-amount',
+            });
 
-            createCard(`cashflow ${cashFlowTotal >= 0 ? 'positive' : 'negative'}`, 'Cash Flow', formatCurrency(cashFlowTotal), [
-                { name: 'Avg / month', value: formatCurrency(cashFlowTotal / months) },
-            ], spark(cashFlowSeries, true));
+            createCard(
+                `cashflow ${cashFlowMonth >= 0 ? 'positive' : 'negative'}`,
+                `${cashFlowPeriods.anchorLabel} Cash Flow`,
+                formatCurrency(cashFlowMonth),
+                [
+                    {
+                        name: cashFlowPeriods.quarterLabel,
+                        value: formatCurrency(cashFlowPeriods.quarterPrimary),
+                        valueTone: cashFlowPeriods.quarterPrimary >= 0 ? 'pos' : 'neg',
+                    },
+                    {
+                        name: cashFlowPeriods.ytdLabel,
+                        value: formatCurrency(cashFlowPeriods.ytdPrimary),
+                        valueTone: cashFlowPeriods.ytdPrimary >= 0 ? 'pos' : 'neg',
+                    },
+                    {
+                        name: '12 Month Avg',
+                        value: formatCurrency(cashFlowPeriods.last12AvgPrimary),
+                        valueTone: cashFlowPeriods.last12AvgPrimary >= 0 ? 'pos' : 'neg',
+                    },
+                    {
+                        name: 'All Time',
+                        value: formatCurrency(cashFlowPeriods.allTimePrimary),
+                        valueTone: cashFlowPeriods.allTimePrimary >= 0 ? 'pos' : 'neg',
+                    },
+                ],
+                spark(cashFlowSeries, true),
+                null,
+                {
+                    detailsClass: 'cashflow-details',
+                    cardTestId: 'cashflow-card',
+                    amountTestId: 'cashflow-amount',
+                }
+            );
 
             createCard('details', 'Details', txCount.toLocaleString('en-US'), [
                 { name: 'Transfers', value: formatCurrency(transfers) },
                 { name: 'Investments', value: formatCurrency(investment) },
-            ], null, 'transactions');
+            ], null, null, {
+                headlineSecondary: 'transactions',
+            });
         }
 
         function buildCategoryBreakdown(agg) {
@@ -3834,7 +4286,66 @@ createApp({
             container.append(strip, list);
         }
 
-        function renderCategoryTrend(agg, monthKeys, topCategories, otherCategories) {
+        // Category-chart legend chips: tri-state (regular / selected / not-selected)
+        // derived from the current category-type filter selection. "Other" is
+        // always rendered inert (decision: no click handler, no pointer cursor).
+        function renderCategoryFilterLegend(legendEl, categories, hasOther, selected) {
+            const items = categories.concat(hasOther ? [OTHER_CATEGORY_LABEL] : []).map(name => ({
+                label: name,
+                color: name === OTHER_CATEGORY_LABEL ? OTHER_CATEGORY_COLOR : categoryColorMap.value[name],
+                state: selected.includes(name) ? 'selected' : (selected.length > 0 ? 'not-selected' : 'regular'),
+                disabled: name === OTHER_CATEGORY_LABEL,
+                onClick: () => toggleCategoryChip(name),
+            }));
+            chipLegend(legendEl, items);
+        }
+
+        // Both the "Peek" title badge and the Clear Filters button are visible for
+        // exactly as long as this chart has filters of its own applied.
+        function updateChartFilterIndicators() {
+            const peeking = hasChartFilters.value;
+            const btn = document.getElementById('cat-clear-filters-btn');
+            if (btn) btn.hidden = !peeking;
+            const badge = document.getElementById('cat-peek-badge');
+            if (badge) badge.hidden = !peeking;
+        }
+
+        // Fast path for a pure chip toggle: the category-exempt data driving the
+        // chart's bars is unchanged (only category-type filters moved), so just
+        // flip dataset visibility on the live Chart instance instead of a full
+        // destroy/rebuild - avoids the reanimation a normal renderChart() causes.
+        function applyCategoryChartFastVisibility() {
+            const chart = chartInstances.category;
+            if (!chart || categoryState.grouping === 'none' || categoryState.unstack) return false;
+            const { topCategories: chartTopCategories, otherCategories: chartOtherCategories } = chipCategories.value;
+            // chipCategories can't move on a chip toggle (it reads the
+            // category-exempt aggregation), but bail to a full rebuild rather than
+            // trust that: flipping visibility on a stale dataset list would leave
+            // series on the canvas that the legend no longer lists, and fold their
+            // spend out of "Other". Labels repeat per year in compare mode, hence
+            // the Set.
+            const expected = chartTopCategories.concat(chartOtherCategories.length ? [OTHER_CATEGORY_LABEL] : []);
+            const present = new Set(chart.data.datasets.map(ds => ds.label));
+            if (present.size !== expected.length || expected.some(name => !present.has(name))) return false;
+
+            const selected = selectedCategoryChips.value;
+            chart.data.datasets.forEach((ds, i) => {
+                chart.setDatasetVisibility(i, !categoryChipHidden(ds.label, selected));
+            });
+            chart.update('none');
+            renderCategoryFilterLegend(
+                document.getElementById('cat-legend-chips'),
+                chartTopCategories,
+                chartOtherCategories.length > 0,
+                selected
+            );
+            updateChartFilterIndicators();
+            return true;
+        }
+
+        function renderCategoryTrend(agg, monthKeys, topCategories, otherCategories, fastVisibilityOnly) {
+            if (fastVisibilityOnly && applyCategoryChartFastVisibility()) return;
+
             const groupingOptions = getGroupingOptions(monthKeys);
             ensureGroupingState(categoryState, groupingOptions);
             const groupEl = document.getElementById('cat-group-pills');
@@ -3871,6 +4382,7 @@ createApp({
             }
             if (compareBox) compareBox.disabled = !!categoryState.unstack;
             if (caption) caption.textContent = '';
+            updateChartFilterIndicators();
 
             if (!grouped) {
                 destroyChart('category');
@@ -3954,7 +4466,8 @@ createApp({
                     label: name,
                     color: name === OTHER_CATEGORY_LABEL ? OTHER_CATEGORY_COLOR : categoryColorMap.value[name],
                     active: focused === name,
-                    onClick: () => {
+                    disabled: name === OTHER_CATEGORY_LABEL,
+                    onClick: name === OTHER_CATEGORY_LABEL ? null : () => {
                         categoryState.focused = name;
                         saveUiState();
                         renderAllCharts();
@@ -3964,15 +4477,25 @@ createApp({
             }
             categoryFocusedHasAnimated = false;
 
+            // Stacked/compare bars source from the category-exempt aggregation so
+            // toggling a category chip never changes which categories are present -
+            // only which datasets render hidden. Share view and Focused mode above
+            // stay on the fully-filtered `agg`/`topCategories`/`otherCategories`.
+            const exemptAgg = categoryExemptAggregations.value;
+            const { topCategories: chartTopCategories, otherCategories: chartOtherCategories } = chipCategories.value;
+            const selected = selectedCategoryChips.value;
+
             const gap = surfaceColor();
             let labels = [];
             let datasets = [];
+            let meta = null;
 
             if (compareActive) {
                 const periods = comparePeriods(categoryState.grouping);
                 const monthSet = new Set(monthKeys);
                 labels = periods.map(p => p.label);
-                const categories = topCategories.concat(otherCategories.length ? [OTHER_CATEGORY_LABEL] : []);
+                meta = periods;
+                const categories = chartTopCategories.concat(chartOtherCategories.length ? [OTHER_CATEGORY_LABEL] : []);
 
                 for (const year of compareYears) {
                     const alpha = yearAlpha(compareYears, year);
@@ -3982,10 +4505,10 @@ createApp({
                             label: name,
                             data: periods.map(period => {
                                 if (name === OTHER_CATEGORY_LABEL) {
-                                    return otherCategories.reduce((sum, cat) =>
-                                        sum + sumForPeriod(agg.byCategoryByMonth[cat], year, period, monthSet), 0);
+                                    return chartOtherCategories.reduce((sum, cat) =>
+                                        sum + sumForPeriod(exemptAgg.byCategoryByMonth[cat], year, period, monthSet), 0);
                                 }
-                                return sumForPeriod(agg.byCategoryByMonth[name], year, period, monthSet);
+                                return sumForPeriod(exemptAgg.byCategoryByMonth[name], year, period, monthSet);
                             }),
                             backgroundColor: withAlpha(color, alpha),
                             borderColor: gap,
@@ -3993,35 +4516,37 @@ createApp({
                             stack: `y${year}`,
                             ttYear: year,
                             baseColor: color,
-                            hidden: categoryHidden.has(name),
+                            hidden: categoryChipHidden(name, selected),
                         });
                     }
                 }
             } else {
                 labels = pageInfo.page.map(b => b.label);
-                datasets = topCategories.map(name => ({
+                meta = pageInfo.page;
+                datasets = chartTopCategories.map(name => ({
                     label: name,
-                    data: pageInfo.page.map(bucket => sumFor(agg.byCategoryByMonth[name], bucket)),
+                    data: pageInfo.page.map(bucket => sumFor(exemptAgg.byCategoryByMonth[name], bucket)),
                     backgroundColor: categoryColorMap.value[name],
                     borderColor: gap,
                     borderWidth: 1,
                     stack: 'spend',
-                    hidden: categoryHidden.has(name),
+                    hidden: categoryChipHidden(name, selected),
                 }));
-                if (otherCategories.length) {
+                if (chartOtherCategories.length) {
                     datasets.push({
                         label: OTHER_CATEGORY_LABEL,
-                        data: pageInfo.page.map(bucket => otherCategories.reduce((sum, cat) => sum + sumFor(agg.byCategoryByMonth[cat], bucket), 0)),
+                        data: pageInfo.page.map(bucket => chartOtherCategories.reduce((sum, cat) => sum + sumFor(exemptAgg.byCategoryByMonth[cat], bucket), 0)),
                         backgroundColor: OTHER_CATEGORY_COLOR,
                         borderColor: gap,
                         borderWidth: 1,
                         stack: 'spend',
-                        hidden: categoryHidden.has(OTHER_CATEGORY_LABEL),
+                        hidden: categoryChipHidden(OTHER_CATEGORY_LABEL, selected),
                     });
                 }
             }
 
-            ({ labels, datasets } = stripEmptyAxisSlots(labels, datasets));
+            let clickMeta;
+            ({ labels, datasets, meta: clickMeta } = stripEmptyAxisSlots(labels, datasets, meta));
 
             renderChart('category', categoryTrendChart, {
                 type: 'bar',
@@ -4050,20 +4575,30 @@ createApp({
                             },
                         y: { stacked: true, ticks: { callback: v => formatCurrencyShort(v) } },
                     },
+                    onHover: (evt, elements, chart) => {
+                        const el = elements[0];
+                        const clickable = !!el && chart.data.datasets[el.datasetIndex].label !== OTHER_CATEGORY_LABEL;
+                        if (evt.native) evt.native.target.style.cursor = clickable ? 'pointer' : 'default';
+                    },
+                    onClick: (evt, elements, chart) => {
+                        const el = elements[0];
+                        if (!el) return;
+                        const dataset = chart.data.datasets[el.datasetIndex];
+                        const category = dataset.label;
+                        if (category === OTHER_CATEGORY_LABEL) return;
+                        const item = clickMeta?.[el.index];
+                        if (!item) return;
+                        const entry = compareActive
+                            ? compareClickToEntry(dataset.ttYear, item, categoryState.grouping)
+                            : { type: categoryState.grouping, key: item.key, label: item.label };
+                        const dateChip = aggregateEntryToChip(entry);
+                        addFilter(category, 'category', category, 'chart');
+                        addFilter(dateChip.text, dateChip.type, dateChip.displayText, 'chart');
+                    },
                 },
             });
 
-            const legendCategories = topCategories.concat(otherCategories.length ? [OTHER_CATEGORY_LABEL] : []);
-            chipLegend(legend, legendCategories.map(name => ({
-                label: name,
-                color: name === OTHER_CATEGORY_LABEL ? OTHER_CATEGORY_COLOR : categoryColorMap.value[name],
-                active: !categoryHidden.has(name),
-                onClick: () => {
-                    if (categoryHidden.has(name)) categoryHidden.delete(name);
-                    else categoryHidden.add(name);
-                    renderAllCharts();
-                },
-            })));
+            renderCategoryFilterLegend(legend, chartTopCategories, chartOtherCategories.length > 0, selected);
 
             if (caption) {
                 caption.textContent = spanYears.length > compareYears.length && compareActive ? `showing last ${COMPARE_YEARS_MAX} years` : '';
@@ -4079,7 +4614,7 @@ createApp({
                 cashState.page = 0;
                 cashState.comparePage = 0;
                 saveUiState();
-                renderAllCharts();
+                rerenderCashFlow();
             });
 
             const compareWrap = document.getElementById('cash-compare-wrap');
@@ -4116,7 +4651,7 @@ createApp({
                     },
                 });
                 if (legend) legend.textContent = '';
-                renderBucketPager('cash-chart-pager', [], cashState, 'none', renderAllCharts);
+                renderBucketPager('cash-chart-pager', [], cashState, 'none', rerenderCashFlow);
                 return;
             }
 
@@ -4125,10 +4660,10 @@ createApp({
             if (compareActive) {
                 renderCompareYearPager('cash-chart-pager', comparePageInfo, direction => {
                     cashState.comparePage += direction === 'older' ? 1 : -1;
-                    renderAllCharts();
+                    rerenderCashFlow();
                 });
             } else {
-                renderBucketPager('cash-chart-pager', allBuckets, cashState, cashState.grouping, renderAllCharts);
+                renderBucketPager('cash-chart-pager', allBuckets, cashState, cashState.grouping, rerenderCashFlow);
             }
 
             let labels = [];
@@ -4197,11 +4732,12 @@ createApp({
             chipLegend(legend, CASH_FLOW_SERIES.map(series => ({
                 label: series.label,
                 color: series.color,
+                values: monthKeys.map(mk => agg[series.byMonthKey]?.[mk] || 0),
                 active: !cashHidden.has(series.label),
                 onClick: () => {
                     if (cashHidden.has(series.label)) cashHidden.delete(series.label);
                     else cashHidden.add(series.label);
-                    renderAllCharts();
+                    rerenderCashFlow();
                 },
             })));
 
@@ -4243,7 +4779,7 @@ createApp({
                 fixedState.page = 0;
                 fixedState.comparePage = 0;
                 saveUiState();
-                renderAllCharts();
+                rerenderFixedVariable();
             });
 
             const compareWrap = document.getElementById('fixed-compare-wrap');
@@ -4258,9 +4794,12 @@ createApp({
             if (compareWrap) compareWrap.classList.toggle('hidden', !compareAllowed);
             if (compareBox) compareBox.checked = compareActive;
 
-            const fixedNames = fvModel.recurringMerchants
-                .map(row => row.merchant)
-                .sort((a, b) => a.localeCompare(b));
+            // Rank by monthly cost so "Top 10 Fixed" really is the top 10 and the
+            // "+ N more" tail is the cheap end. Copy first: recurringMerchants is
+            // shared with the Fixed Spending Audit table.
+            const fixedNames = [...fvModel.recurringMerchants]
+                .sort((a, b) => (b.recurringMonthlyCost || 0) - (a.recurringMonthlyCost || 0))
+                .map(row => row.merchant);
 
             if (fixedState.grouping === 'none') {
                 const allBucket = { months: monthKeys };
@@ -4283,17 +4822,17 @@ createApp({
                     },
                 });
                 if (legend) legend.textContent = '';
-                renderBucketPager('fixed-chart-pager', [], fixedState, 'none', renderAllCharts);
+                renderBucketPager('fixed-chart-pager', [], fixedState, 'none', rerenderFixedVariable);
             } else {
                 const allBuckets = buildBuckets(fixedState.grouping, monthKeys);
                 const pageInfo = pagedBuckets(allBuckets, fixedState, CHART_PAGE_SIZE);
                 if (compareActive) {
                     renderCompareYearPager('fixed-chart-pager', comparePageInfo, direction => {
                         fixedState.comparePage += direction === 'older' ? 1 : -1;
-                        renderAllCharts();
+                        rerenderFixedVariable();
                     });
                 } else {
-                    renderBucketPager('fixed-chart-pager', allBuckets, fixedState, fixedState.grouping, renderAllCharts);
+                    renderBucketPager('fixed-chart-pager', allBuckets, fixedState, fixedState.grouping, rerenderFixedVariable);
                 }
 
                 const gap = surfaceColor();
@@ -4364,19 +4903,23 @@ createApp({
                 chipLegend(legend, series.map(s => ({
                     label: s.label,
                     color: s.color,
+                    values: monthKeys.map(mk => s.byMonth?.[mk] || 0),
                     active: !fixedHidden.has(s.label),
                     onClick: () => {
                         if (fixedHidden.has(s.label)) fixedHidden.delete(s.label);
                         else fixedHidden.add(s.label);
-                        renderAllCharts();
+                        rerenderFixedVariable();
                     },
                 })));
             }
 
             if (caption) {
-                const names = fixedNames.length ? fixedNames.join(', ') : 'none in current filter';
+                const topFixedNames = fixedNames.slice(0, 10);
+                const names = topFixedNames.length ? topFixedNames.join(', ') : 'none in current filter';
+                const hiddenCount = Math.max(fixedNames.length - topFixedNames.length, 0);
+                const more = hiddenCount ? `, + ${hiddenCount} more` : '';
                 const truncation = compareActive && spanYears.length > compareYears.length ? ` · showing last ${COMPARE_YEARS_MAX} years` : '';
-                caption.textContent = `Fixed (${fixedNames.length}): ${names}${truncation}`;
+                caption.textContent = `Top 10 Fixed: ${names}${more}${truncation}`;
             }
         }
 
@@ -4563,13 +5106,30 @@ createApp({
             const agg = chartAggregations.value;
             const { topCategories, otherCategories } = buildCategoryBreakdown(agg);
             const fvModel = buildFixedVariableSeries(agg, monthKeys);
+            const fastCategoryUpdate = categoryChipToggleInFlight;
+            categoryChipToggleInFlight = false;
 
             renderKpis(monthKeys, agg, fvModel.fixedMonthly);
-            renderCategoryTrend(agg, monthKeys, topCategories, otherCategories);
+            renderCategoryTrend(agg, monthKeys, topCategories, otherCategories, fastCategoryUpdate);
             renderPagedHeatmap(agg, monthKeys, topCategories);
-            renderVolatility(agg, monthKeys);
-            renderAuditTable(agg.recurringMerchants);
             renderCashFlow(agg, monthKeys);
+            renderVolatility(agg, monthKeys);
+            renderFixedVariable(agg, monthKeys, fvModel);
+            renderAuditTable(agg.recurringMerchants);
+        }
+
+        function rerenderCashFlow() {
+            if (!chartsInitialized) return;
+            const monthKeys = getMonthKeys();
+            const agg = chartAggregations.value;
+            renderCashFlow(agg, monthKeys);
+        }
+
+        function rerenderFixedVariable() {
+            if (!chartsInitialized) return;
+            const monthKeys = getMonthKeys();
+            const agg = chartAggregations.value;
+            const fvModel = buildFixedVariableSeries(agg, monthKeys);
             renderFixedVariable(agg, monthKeys, fvModel);
         }
 
@@ -4599,6 +5159,21 @@ createApp({
                 });
             }
 
+            const catClearFiltersBtn = document.getElementById('cat-clear-filters-btn');
+            if (catClearFiltersBtn) {
+                catClearFiltersBtn.addEventListener('click', clearChartFilters);
+            }
+
+            // The badge lives inside the title, whose click collapses the panel -
+            // stop the chip from folding the chart on its way out of peek mode.
+            const catPeekClear = document.getElementById('cat-peek-badge');
+            if (catPeekClear) {
+                catPeekClear.addEventListener('click', e => {
+                    e.stopPropagation();
+                    clearChartFilters();
+                });
+            }
+
             const cashCompare = document.getElementById('cash-compare-checkbox');
             if (cashCompare) {
                 cashCompare.addEventListener('change', () => {
@@ -4606,7 +5181,7 @@ createApp({
                     cashState.page = 0;
                     cashState.comparePage = 0;
                     saveUiState();
-                    renderAllCharts();
+                    rerenderCashFlow();
                 });
             }
 
@@ -4617,7 +5192,7 @@ createApp({
                     fixedState.page = 0;
                     fixedState.comparePage = 0;
                     saveUiState();
-                    renderAllCharts();
+                    rerenderFixedVariable();
                 });
             }
 
@@ -4655,6 +5230,12 @@ createApp({
         });
         watch([currentView, groupByMode], saveUiState);
         watch([chartsCollapsed, detailsCollapsed, includeNegativeTotals], saveUiState);
+        // Expanding the whole Transaction Trends section has the same zero-width
+        // problem as expanding a single panel (see toggleChartPanel): every chart
+        // inside it was measured while display:none.
+        watch(chartsCollapsed, collapsed => {
+            if (!collapsed) rerenderChartsDebounced();
+        });
         watch(
             () => Array.from(collapsedSections).map(v => String(v)).sort(),
             saveUiState

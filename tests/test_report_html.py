@@ -275,8 +275,8 @@ class TestCalculationAccuracy:
         page.goto(f"file://{report_path}")
         # Total: 45.99 + 29.99 + 125.50 + 89.00 + 199.00 + 8.50 + 12.00
         #        + 156.00 + 55.00 + 9.00 + 234.00 + 67.00 = 1030.98 ≈ $1,031
-        # The filtered view card shows spending for visible transactions
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$1,031")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$1,031")
 
     def test_shopping_category_total(self, page: Page, report_path):
         """Shopping category total is correct."""
@@ -301,8 +301,8 @@ class TestCalculationAccuracy:
         page.get_by_test_id("tag-badge").filter(has_text="david").first.click()
 
         # David's transactions total: $772 (rounded)
-        # The filtered view card shows spending for visible transactions
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$772")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$772")
 
     def test_tag_filter_updates_merchant_count(self, page: Page, report_path):
         """Merchant transaction count updates when filtered by tag."""
@@ -335,13 +335,14 @@ class TestCalculationAccuracy:
 
         # Apply filter
         page.get_by_test_id("tag-badge").filter(has_text="david").first.click()
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$772")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$772")
 
         # Clear filter by clicking the remove button on the filter chip
         page.get_by_test_id("filter-chip-remove").first.click()
 
         # Original total restored
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$1,031")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$1,031")
 
 
 # =============================================================================
@@ -574,30 +575,34 @@ class TestEdgeCasesAndCalculations:
     def test_credits_shown_in_cashflow_summary(self, page: Page, edge_case_report_path):
         """Credits are shown in the cash flow summary card."""
         page.goto(f"file://{edge_case_report_path}")
-        # Credits should appear in cash flow breakdown
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_item = cashflow_card.locator(".breakdown-item", has_text="Credits")
+        income_card = page.locator(".kpi-card.income")
+        credits_item = income_card.locator(".kpi-detail", has_text="All Time")
         expect(credits_item).to_be_visible()
 
     def test_credits_amount_positive_in_summary(self, page: Page, edge_case_report_path):
-        """Credits are displayed as positive amounts in the summary card."""
+        """All-time credits are shown as a positive amount in Income details."""
         page.goto(f"file://{edge_case_report_path}")
-        # Credits should show with + prefix (refunds reduce spending)
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_value = cashflow_card.locator(".breakdown-item", has_text="Credits").locator(".value")
-        expect(credits_value).to_contain_text("+")
+        income_card = page.locator(".kpi-card.income")
+        credits_value = income_card.locator(".kpi-detail", has_text="All Time").locator(".kpi-detail-secondary")
+        expect(credits_value).to_contain_text("$150")
+
+    def test_income_detail_primary_includes_credits(self, page: Page, edge_case_report_path):
+        """Income detail primary values include credits; gray value is informational only."""
+        page.goto(f"file://{edge_case_report_path}")
+        income_card = page.locator(".kpi-card.income")
+        all_time_value = income_card.locator(".kpi-detail", has_text="All Time").locator(".value")
+        expect(all_time_value).to_contain_text("$3,150")
 
     # -------------------------------------------------------------------------
     # Cash Flow Calculation Tests
     # -------------------------------------------------------------------------
 
     def test_income_total_displayed(self, page: Page, edge_case_report_path):
-        """Income is shown in the cash flow card breakdown."""
+        """Income card is month-anchored and shows the latest month value."""
         page.goto(f"file://{edge_case_report_path}")
-        # Income: $3,000 (payroll) - shown as breakdown item in cashflow card
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        expect(cashflow_card.locator(".income-label")).to_be_visible()
-        expect(cashflow_card.locator("text=$3,000")).to_be_visible()
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator("h4")).to_contain_text("Mar, '24 Income")
+        expect(income_card.locator(".kpi-value-primary")).to_contain_text("$3,000")
 
     def test_transfers_in_filtered_view(self, page: Page, edge_case_report_path):
         """Transfers appear in filtered view card breakdown."""
@@ -607,12 +612,10 @@ class TestEdgeCasesAndCalculations:
         expect(filtered_card).to_be_visible()
 
     def test_cash_flow_calculation(self, page: Page, edge_case_report_path):
-        """Net cash flow = income - spending (transfers excluded, they just move money)."""
+        """Cash flow KPI value shows the latest month in the selected range."""
         page.goto(f"file://{edge_case_report_path}")
-        # Cash flow: $3,000 - $2,100 = $900
-        # Note: spending is net of refunds ($2,250 - $150 = $2,100)
-        # Transfers are excluded since they just move money between accounts
-        expect(page.get_by_test_id("cashflow-amount")).to_contain_text("$900")
+        # March cash flow: $3,000 income + $0 credits - $925 spending = $2,075
+        expect(page.get_by_test_id("cashflow-amount")).to_contain_text("$2,075")
 
     # -------------------------------------------------------------------------
     # Excluded Transaction Tests
@@ -620,21 +623,17 @@ class TestEdgeCasesAndCalculations:
     # -------------------------------------------------------------------------
 
     def test_income_shown_in_cashflow_card(self, page: Page, edge_case_report_path):
-        """Cash flow card shows income in breakdown."""
+        """Cash flow card shows the new compact detail rows."""
         page.goto(f"file://{edge_case_report_path}")
-        # Cash flow card should be visible with income breakdown
         expect(page.get_by_test_id("cashflow-card")).to_be_visible()
-        expect(page.get_by_test_id("cashflow-card").locator(".income-label")).to_be_visible()
-        # Filtered view card should also be visible
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail", has_text="12 Month Avg")).to_be_visible()
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail", has_text="All Time")).to_be_visible()
         expect(page.get_by_test_id("filtered-spending-card")).to_be_visible()
 
     def test_income_clickable_adds_filter(self, page: Page, edge_case_report_path):
-        """Clicking income in cash flow card adds an income tag filter."""
+        """Cash flow card keeps a compact two-line detail layout."""
         page.goto(f"file://{edge_case_report_path}")
-        # Click on income breakdown item in the cashflow card (scoped to avoid multiple matches)
-        page.get_by_test_id("cashflow-card").locator(".income-label").click()
-        # Should add an income tag filter
-        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail")).to_have_count(4)
 
     # -------------------------------------------------------------------------
     # Monthly Average Tests (shown in category section headers)
@@ -2242,23 +2241,27 @@ class TestCreditsDisplay:
     """Tests for credits/refunds display in summary cards."""
 
     def test_credits_shown_in_cash_flow(self, page: Page, report_with_credits):
-        """Credits are displayed in the Cash Flow summary card."""
+        """Credits are displayed in the Income summary card details."""
         page.goto(f"file://{report_with_credits}")
 
-        # Cash flow card should show Credits line
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        expect(cashflow_card.locator(".breakdown-item", has_text="Credits")).to_be_visible()
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator(".kpi-detail", has_text="All Time")).to_be_visible()
 
     def test_credits_positive_display(self, page: Page, report_with_credits):
-        """Credits are shown as positive amounts with + prefix."""
+        """All-time credits remain positive in Income details."""
         page.goto(f"file://{report_with_credits}")
 
-        # Find the credits line in cash flow
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_item = cashflow_card.locator(".breakdown-item", has_text="Credits")
-        credits_value = credits_item.locator(".value")
-        # Should show positive amount (the $40 in credits)
-        expect(credits_value).to_contain_text("+")
+        income_card = page.locator(".kpi-card.income")
+        credits_item = income_card.locator(".kpi-detail", has_text="All Time")
+        credits_value = credits_item.locator(".kpi-detail-secondary")
+        expect(credits_value).to_contain_text("$40")
+
+    def test_income_headline_includes_credits(self, page: Page, report_with_credits):
+        """Income headline includes credits so the primary value is total inflow."""
+        page.goto(f"file://{report_with_credits}")
+
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator(".kpi-value-primary")).to_contain_text("$40")
 
 
 # =============================================================================
@@ -2799,7 +2802,41 @@ class TestDateFilter:
         assert "2025" in chips
         assert any("2026" in c and "–" in c for c in chips), chips
         # Union is non-empty (2025 Netflix + 2026 transactions both counted).
-        expect(page.get_by_test_id("filtered-amount")).not_to_contain_text("$0")
+        expect(page.get_by_test_id("filtered-amount").locator(".kpi-value-primary")).not_to_contain_text("$0")
+
+    def test_kpi_trend_label_updates_with_filter_anchor_month(self, page: Page, multiyear_report_path):
+        """KPI title anchors to the last visible month while trend text keeps only
+        the prior-window comparison count."""
+        page.goto(f"file://{multiyear_report_path}")
+
+        spending_trend = page.locator(".kpi-card.spending .kpi-trend")
+        spending_title = page.locator(".kpi-card.spending h4")
+        expect(spending_trend).to_be_visible()
+        expect(spending_title).to_contain_text("Jul, '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 12 months")
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in range(1, 13):
+            page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
+        page.get_by_test_id("date-apply").click()
+
+        expect(spending_title).to_contain_text("Dec, '25 Spending")
+        expect(spending_trend).to_contain_text("vs prior 11 months")
+        expect(spending_trend).not_to_contain_text("prior 6")
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-clear-all").click()
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-start-text").fill("1/1/2026")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("6/30/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+
+        expect(spending_title).to_contain_text("Jun, '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 4 months")
 
     def test_drill_calendar_commits_day_and_filters(self, page: Page, multiyear_report_path):
         """The Start drill calendar commits a day-precision date into its input,
@@ -2973,6 +3010,62 @@ def current_quarter_report_path(tmp_path_factory):
     return str(report_file), today.year, months
 
 
+@pytest.fixture(scope="module")
+def kpi_trailing_transfer_report_path(tmp_path_factory):
+    """Report where the final month has only transfer activity.
+
+    Trend labels should anchor to the last month with spending/income activity,
+    not the trailing transfer-only month.
+    """
+    tmp_dir = tmp_path_factory.mktemp("kpi_trailing_transfer_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    csv_content = """Date,Description,Amount
+01/10/2026,WHOLE FOODS MARKET,100.00
+02/10/2026,WHOLE FOODS MARKET,120.00
+03/10/2026,WHOLE FOODS MARKET,110.00
+04/10/2026,ACCOUNT TRANSFER,350.00
+"""
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n\n'
+        "data_sources:\n"
+        "  - name: Test\n"
+        "    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n\n'
+        "merchants_file: config/merchants.rules\n"
+    )
+
+    (config_dir / "merchants.rules").write_text(
+        "[Whole Foods]\n"
+        "match: normalized(\"WHOLE FOODS\")\n"
+        "category: Food\n"
+        "subcategory: Grocery\n\n"
+        "[Transfer]\n"
+        "match: contains(\"ACCOUNT TRANSFER\")\n"
+        "category: Finance\n"
+        "subcategory: Transfer\n"
+        "tags: transfer\n"
+    )
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+    return str(report_file)
+
+
 class TestDateFilterCoverageHighlight:
     """Coverage-based preset highlighting (no stored quarter/year flag)."""
 
@@ -2988,3 +3081,341 @@ class TestDateFilterCoverageHighlight:
             page.get_by_test_id(f"date-month-cell-{year}-{mm:02d}").click()
         # All three of the quarter's months selected -> pill lights up.
         expect(this_q).to_have_class(re.compile(r"\bactive\b"))
+
+
+class TestKpiTrendAnchoring:
+    """KPI trend labeling should ignore trailing months with only transfer-like activity."""
+
+    def test_spending_trend_ignores_trailing_transfer_only_month(self, page: Page, kpi_trailing_transfer_report_path):
+        page.goto(f"file://{kpi_trailing_transfer_report_path}")
+
+        spending_title = page.locator(".kpi-card.spending h4")
+        spending_trend = page.locator(".kpi-card.spending .kpi-trend")
+        expect(spending_trend).to_be_visible()
+        expect(spending_title).to_contain_text("Mar, '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 2 months")
+
+
+@pytest.fixture(scope="module")
+def peek_mode_report_path(tmp_path_factory):
+    """Report whose category chart renders a full top-10 chip row plus "Other".
+
+    - 6 months (2025-01 .. 2025-06) across 12 categories.
+    - Per-transaction amounts descend strictly with the merchant index, so the
+      top-10 split is deterministic: Cat01..Cat10 get chips, and Cat11/Cat12 fall
+      into the "Other" bucket.
+    """
+    tmp_dir = tmp_path_factory.mktemp("peek_mode_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = []
+    for month in range(1, 7):
+        for idx in range(1, 13):
+            rows.append(f"{month:02d}/05/2025,MERCH{idx:02d} STORE,{200 - idx * 10:.2f}")
+    (data_dir / "transactions.csv").write_text(
+        "Date,Description,Amount\n" + "\n".join(rows) + "\n"
+    )
+
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n'
+        "\n"
+        "data_sources:\n"
+        "  - name: Test\n"
+        "    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n'
+        "\n"
+        "merchants_file: config/merchants.rules\n"
+    )
+
+    rules = [
+        f'[Merchant{idx:02d}]\nmatch: contains("MERCH{idx:02d}")\n'
+        f"category: Cat{idx:02d}\nsubcategory: Sub{idx:02d}\n"
+        for idx in range(1, 13)
+    ]
+    (config_dir / "merchants.rules").write_text("\n".join(rules))
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+
+    return str(report_file)
+
+
+_PEEK_STATE_JS = """() => {
+    const badge = document.getElementById('cat-peek-badge');
+    const clearBtn = document.getElementById('cat-clear-filters-btn');
+    const chipState = el =>
+        el.classList.contains('active') ? 'selected'
+        : el.classList.contains('not-selected') ? 'not-selected'
+        : 'regular';
+    const canvas = document.querySelector('#chart-panel-category canvas');
+    const chart = canvas && Chart.getChart(canvas);
+    return {
+        badgeVisible: !!badge && !badge.hidden,
+        clearBtnVisible: !!clearBtn && !clearBtn.hidden,
+        chips: Array.from(document.querySelectorAll('#cat-legend-chips .legend-chip')).map(el => ({
+            label: el.textContent.trim(),
+            state: chipState(el),
+            disabled: el.classList.contains('disabled'),
+        })),
+        filterChips: Array.from(document.querySelectorAll('.filter-chips .filter-chip'))
+            .map(el => el.textContent.replace(/\\s+/g, ' ').trim()),
+        datasets: chart
+            ? chart.data.datasets.map((ds, i) => ({ label: ds.label, visible: chart.isDatasetVisible(i) }))
+            : [],
+        hash: location.hash,
+    };
+}"""
+
+
+def _goto_peek_report(page: Page, report_path: str, hash_: str = ""):
+    """Load the peek fixture with persisted chart UI state cleared.
+
+    `hash_` seeds hand-typed (hash-restored, untagged) filters, which is the only
+    filter kind that survives a reload - chart-added filters never reach the hash.
+    """
+    page.goto(f"file://{report_path}")
+    page.evaluate("() => localStorage.removeItem('spending-report-ui-state-v1')")
+    page.goto(f"file://{report_path}{hash_}")
+    page.reload()
+    page.wait_for_timeout(400)
+
+
+def _peek_state(page: Page):
+    return page.evaluate(_PEEK_STATE_JS)
+
+
+def _chip(page: Page, label: str):
+    return page.locator("#cat-legend-chips .legend-chip", has_text=label)
+
+
+def _chip_states(state):
+    return {chip["label"]: chip["state"] for chip in state["chips"]}
+
+
+class TestChartPeekMode:
+    """Category-chart drill-down ("peek mode").
+
+    Chip toggles and canvas clicks add filters tagged `source: 'chart'`. Those are
+    session-only: they never reach the URL hash, they surface a "Peek" badge and a
+    Clear Filters button, and any filter the user adds by hand clears them.
+    """
+
+    def test_chip_click_enters_peek_mode(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        before = _peek_state(page)
+        assert before["badgeVisible"] is False
+        assert before["clearBtnVisible"] is False
+        assert [c["label"] for c in before["chips"]] == [f"Cat{i:02d}" for i in range(1, 11)] + ["Other"]
+        assert all(c["state"] == "regular" for c in before["chips"]), before["chips"]
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is True
+        assert after["clearBtnVisible"] is True
+        states = _chip_states(after)
+        assert states["Cat01"] == "selected"
+        assert states["Cat02"] == "not-selected"
+        assert states["Other"] == "not-selected"
+        assert any("Cat01" in chip for chip in after["filterChips"])
+
+        visible = {d["label"] for d in after["datasets"] if d["visible"]}
+        assert visible == {"Cat01"}, f"only the selected category stays visible: {after['datasets']}"
+
+    def test_chip_selection_is_additive_and_subtractive(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(200)
+        _chip(page, "Cat02").click()
+        page.wait_for_timeout(300)
+
+        states = _chip_states(_peek_state(page))
+        assert states["Cat01"] == "selected"
+        assert states["Cat02"] == "selected"
+        assert states["Cat03"] == "not-selected"
+
+        _chip(page, "Cat02").click()
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        states = _chip_states(state)
+        assert states["Cat01"] == "selected"
+        assert states["Cat02"] == "not-selected"
+        assert not any("Cat02" in chip for chip in state["filterChips"])
+
+    def test_selecting_every_chip_resets_to_regular(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        for idx in range(1, 11):
+            _chip(page, f"Cat{idx:02d}").click()
+            page.wait_for_timeout(150)
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        assert all(c["state"] == "regular" for c in state["chips"]), state["chips"]
+        assert state["filterChips"] == [], "all-on collapses back to no category filter"
+        assert state["badgeVisible"] is False
+
+    def test_chart_filters_are_not_saved_to_the_url(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        assert any("Cat01" in chip for chip in state["filterChips"])
+        assert state["hash"] in ("", "#"), f"chart filters must not reach the hash: {state['hash']!r}"
+
+        page.reload()
+        page.wait_for_timeout(500)
+
+        after = _peek_state(page)
+        assert after["filterChips"] == [], "peek filters are session-only and drop on reload"
+        assert after["badgeVisible"] is False
+
+    def test_clear_filters_button_spares_hand_typed_filters(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path, "#+c:Cat05")
+
+        before = _peek_state(page)
+        assert any("Cat05" in chip for chip in before["filterChips"])
+        assert before["badgeVisible"] is False, "a hand-typed filter is not peek mode"
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+        mid = _peek_state(page)
+        assert mid["badgeVisible"] is True
+        assert len(mid["filterChips"]) == 2
+
+        page.click("#cat-clear-filters-btn")
+        page.wait_for_timeout(400)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is False
+        assert any("Cat05" in chip for chip in after["filterChips"]), "hand-typed filter survives"
+        assert not any("Cat01" in chip for chip in after["filterChips"]), "chart filter is removed"
+
+    def test_hand_typed_filter_exits_peek_mode(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+        assert _peek_state(page)["badgeVisible"] is True
+
+        search = page.locator("input[placeholder*='Search merchants']")
+        search.click()
+        search.fill("Merchant07")
+        page.wait_for_timeout(400)
+        page.locator(".autocomplete-item", has_text="Merchant07").first.click()
+        page.wait_for_timeout(500)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is False, "adding a filter by hand ends peek mode"
+        assert not any("Cat01" in chip for chip in after["filterChips"])
+        assert any("Merchant07" in chip for chip in after["filterChips"])
+        assert "Merchant07" in after["hash"], "hand-typed filters stay hash-persisted"
+
+    def test_clicking_the_peek_badge_exits_without_collapsing_the_panel(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+        assert _peek_state(page)["badgeVisible"] is True
+
+        page.click("#cat-peek-badge")
+        page.wait_for_timeout(400)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is False
+        assert after["filterChips"] == []
+        collapsed = page.evaluate(
+            "() => document.getElementById('chart-panel-category').classList.contains('collapsed')"
+        )
+        assert collapsed is False, "the badge sits inside the title; its click must not fold the panel"
+
+    def test_canvas_click_filters_to_category_and_bucket(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        # getBoundingClientRect is viewport-relative, so the canvas has to be on
+        # screen before its bar coordinates mean anything to page.mouse.
+        page.locator("#chart-panel-category canvas").scroll_into_view_if_needed()
+        page.wait_for_timeout(250)
+
+        point = page.evaluate("""() => {
+            const canvas = document.querySelector('#chart-panel-category canvas');
+            const chart = canvas && Chart.getChart(canvas);
+            if (!chart) return null;
+            const dsIndex = chart.data.datasets.findIndex(ds => ds.label === 'Cat01');
+            if (dsIndex < 0) return null;
+            const bar = chart.getDatasetMeta(dsIndex).data[0];
+            const p = bar.getCenterPoint();
+            const box = canvas.getBoundingClientRect();
+            return { x: box.left + p.x, y: box.top + p.y };
+        }""")
+        assert point, "could not locate a Cat01 bar to click"
+
+        page.mouse.click(point["x"], point["y"])
+        page.wait_for_timeout(500)
+
+        state = _peek_state(page)
+        assert state["badgeVisible"] is True
+        assert any("Cat01" in chip for chip in state["filterChips"])
+        assert len(state["filterChips"]) == 2, (
+            f"a bar click adds its category and its bucket's date: {state['filterChips']}"
+        )
+        assert state["hash"] in ("", "#"), "canvas-added filters are session-only too"
+
+    def test_other_chip_is_inert(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        other = _chip(page, "Other")
+        expect(other).to_be_visible()
+        assert "disabled" in (other.get_attribute("class") or "")
+
+        other.click()
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        assert state["filterChips"] == [], "the Other bucket is not a filterable category"
+        assert state["badgeVisible"] is False
+
+    def test_filtering_a_category_inside_other_leaves_every_chip_unselected(
+        self, page: Page, peek_mode_report_path
+    ):
+        """Categories outside the top 10 are deliberately not pinned into the chip
+        row - the legend just shows nothing selected."""
+        _goto_peek_report(page, peek_mode_report_path, "#+c:Cat11")
+
+        state = _peek_state(page)
+        labels = [c["label"] for c in state["chips"]]
+        assert "Cat11" not in labels, "a category in the Other tail gets no chip of its own"
+        assert all(c["state"] == "not-selected" for c in state["chips"]), state["chips"]
+
+    def test_excluded_category_is_dropped_from_the_chart(self, page: Page, peek_mode_report_path):
+        """Only include-mode category filters are exempted from the chart's data;
+        an exclude chip must hide the category from the chart as well as the tables."""
+        _goto_peek_report(page, peek_mode_report_path, "#-c:Cat01")
+
+        state = _peek_state(page)
+        labels = [d["label"] for d in state["datasets"]]
+        assert "Cat01" not in labels, f"excluded category still charted: {labels}"
+        assert all(c["state"] == "regular" for c in state["chips"]), (
+            "an exclude filter is not a chip selection"
+        )
+        assert state["badgeVisible"] is False

@@ -2036,11 +2036,30 @@ footer {
     margin-bottom: 0.45rem;
     font-weight: 600;
 }
+.kpi-top {
+    min-height: 105px;
+    display: flex;
+    flex-direction: column;
+}
+.kpi-card.details .kpi-top {
+    min-height: 110px;
+}
 .kpi-value {
-    font-size: 1.9rem;
-    font-weight: 600;
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
     line-height: 1.1;
     font-variant-numeric: tabular-nums;
+}
+.kpi-value-primary {
+    font-size: 1.9rem;
+    font-weight: 600;
+}
+.kpi-value-secondary {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
 }
 .kpi-sub {
     font-size: 0.75rem;
@@ -2067,13 +2086,37 @@ footer {
 .kpi-detail {
     display: flex;
     justify-content: space-between;
+    align-items: baseline;
     font-size: 0.78rem;
+    min-height: 1.1rem;
+}
+.kpi-detail-divider {
+    height: 1px;
+    background: var(--border-light);
+    margin: 0.22rem 0 0.1rem;
 }
 .kpi-detail .name { color: var(--text-secondary); }
 .kpi-detail .value {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.2rem;
     color: var(--text-lighter);
     font-weight: 500;
     font-variant-numeric: tabular-nums;
+}
+.kpi-card.cashflow .kpi-detail .value.pos {
+    color: var(--accent-green);
+}
+.kpi-card.cashflow .kpi-detail .value.neg {
+    color: var(--accent-red);
+}
+.kpi-detail-secondary {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 400;
+}
+.kpi-details.cashflow-details {
+    gap: 0.3rem;
 }
 .kpi-detail .permo {
     color: var(--text-muted);
@@ -2125,6 +2168,43 @@ footer {
     gap: 0.85rem;
     flex-wrap: wrap;
 }
+/* "Peek" badge: shown beside a chart title while that chart has drill-down
+   filters of its own applied. Stays visible when the panel is collapsed so a
+   folded chart can't hide the fact that it is filtering the report. Sized off
+   .legend-chip so it reads as the same family of control as the chart legend. */
+.chart-peek-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+	margin-top: 0.4rem;
+    margin-left: 0.5rem;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--accent-blue);
+    background: rgba(79, 172, 254, 0.15);
+    color: var(--accent-blue);
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-family: inherit;
+    line-height: 1;
+    white-space: nowrap;
+    /* The whole badge is the click target for leaving peek mode, so it owns the
+       pointer outright rather than inheriting it from .chart-title-toggle. */
+    cursor: pointer;
+}
+.chart-peek-badge .chip-remove {
+    font-size: 0.95rem;
+    line-height: 1;
+    opacity: 0.7;
+    cursor: pointer;
+}
+.chart-peek-badge .chip-remove:hover {
+    opacity: 1;
+}
+/* Must re-assert: the display above would otherwise beat the UA [hidden] rule. */
+.chart-peek-badge[hidden] {
+    display: none;
+}
 .proto-pill-row {
     display: flex;
     gap: 0.4rem;
@@ -2167,6 +2247,23 @@ footer {
 }
 .compare-toggle.hidden {
     display: none;
+}
+.chart-clear-filters-btn {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+.chart-clear-filters-btn:hover {
+    background: rgba(255, 107, 107, 0.2);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
 }
 
 .chart-container.collapsed {
@@ -2228,6 +2325,15 @@ footer {
 .legend-chip.active {
     color: var(--text-primary);
     font-weight: 600;
+}
+.legend-chip.not-selected {
+    opacity: 0.55;
+}
+.legend-chip.disabled {
+    cursor: default;
+}
+.legend-chip.disabled:hover {
+    border-color: var(--border-medium);
 }
 .legend-chip .chip-dot {
     width: 8px;
@@ -2404,30 +2510,6 @@ footer {
 @media (max-width: 800px) {
     .share-row {
         grid-template-columns: 12px 110px 1fr 80px 48px;
-    }
-}
-
-.split-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.7rem;
-    margin-top: 0;
-}
-.split-row .chart-container {
-    margin-top: 0;
-}
-.split-row.single-expanded {
-    grid-template-columns: 1fr;
-}
-.split-row.single-expanded .chart-container.collapsed {
-    order: 1;
-}
-.split-row.single-expanded .chart-container:not(.collapsed) {
-    order: 2;
-}
-@media (max-width: 1000px) {
-    .split-row {
-        grid-template-columns: 1fr;
     }
 }
 

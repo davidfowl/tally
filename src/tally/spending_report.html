@@ -152,6 +152,14 @@
                             <h3 class="chart-title-toggle" @click="toggleChartPanel('category')">
                                 <span class="toggle">{{ chartPanels.category ? '▶' : '▼' }}</span>
                                 Spending by Category
+                                <span class="chart-peek-badge" id="cat-peek-badge" role="button" aria-label="Exit peek mode" hidden>
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+                                         stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
+                                        <circle cx="12" cy="12" r="3"/>
+                                    </svg>Peek Mode
+                                    <span class="chip-remove" aria-hidden="true">&times;</span>
+                                </span>
                             </h3>
                             <div class="chart-controls">
                                 <div class="proto-pill-row" id="cat-group-pills"></div>
@@ -161,6 +169,8 @@
                                 <label class="compare-toggle" id="cat-compare-wrap">
                                     <input type="checkbox" id="cat-compare-checkbox"> Compare years
                                 </label>
+                                <button type="button" class="chart-clear-filters-btn" id="cat-clear-filters-btn" hidden
+                                        title="Clear filters added from the Spending by Category chart.">Clear Filters</button>
                             </div>
                         </div>
                         <div class="chart-wrapper tall"><canvas ref="categoryTrendChart"></canvas></div>
@@ -183,33 +193,6 @@
                         <div class="chart-caption" id="seasonality-heatmap-caption"></div>
                     </div>
 
-                    <div :class="['split-row', { 'single-expanded': chartPanels.volatility !== chartPanels.audit }]">
-                        <div class="chart-container" :class="{ collapsed: chartPanels.volatility }" id="chart-panel-volatility">
-                            <div class="chart-head">
-                                <h3 class="chart-title-toggle" @click="toggleChartPanel('volatility')">
-                                    <span class="toggle">{{ chartPanels.volatility ? '▶' : '▼' }}</span>
-                                    Expense Volatility
-                                </h3>
-                                <span class="head-chip">Top 10 · by monthly swing</span>
-                            </div>
-                            <div class="chart-wrapper volatility"><canvas ref="volatilityChart"></canvas></div>
-                            <div class="chart-caption">
-                                <span>Bar = min-max monthly spend · tick = monthly average.</span>
-                                <div class="chart-caption-break">Wide bars are the budget-breakers that need a sinking fund.</div>
-                            </div>
-                        </div>
-                        <div class="chart-container" :class="{ collapsed: chartPanels.audit }" id="chart-panel-audit">
-                            <div class="chart-head">
-                                <h3 class="chart-title-toggle" @click="toggleChartPanel('audit')">
-                                    <span class="toggle">{{ chartPanels.audit ? '▶' : '▼' }}</span>
-                                    Subscription &amp; Recurring Audit
-                                </h3>
-                                <span class="head-chip">Top 10 · by annualized</span>
-                            </div>
-                            <div id="recurring-audit"></div>
-                        </div>
-                    </div>
-
                     <div class="chart-container" :class="{ collapsed: chartPanels.cash }" id="chart-panel-cash">
                         <div class="chart-head">
                             <h3 class="chart-title-toggle" @click="toggleChartPanel('cash')">
@@ -229,6 +212,21 @@
                         <div class="chart-caption" id="cash-chart-caption"></div>
                     </div>
 
+                    <div class="chart-container" :class="{ collapsed: chartPanels.volatility }" id="chart-panel-volatility">
+                        <div class="chart-head">
+                            <h3 class="chart-title-toggle" @click="toggleChartPanel('volatility')">
+                                <span class="toggle">{{ chartPanels.volatility ? '▶' : '▼' }}</span>
+                                Expense Volatility
+                            </h3>
+                            <span class="head-chip">Top 10 · by monthly swing</span>
+                        </div>
+                        <div class="chart-wrapper volatility"><canvas ref="volatilityChart"></canvas></div>
+                        <div class="chart-caption">
+                            <span>Bar = min-max monthly spend · tick = monthly average.</span>
+                            <div class="chart-caption-break">Wide bars are the budget-breakers that need a sinking fund.</div>
+                        </div>
+                    </div>
+
                     <div class="chart-container" :class="{ collapsed: chartPanels.fixed }" id="chart-panel-fixed">
                         <div class="chart-head">
                             <h3 class="chart-title-toggle" @click="toggleChartPanel('fixed')">
@@ -246,6 +244,17 @@
                         <div class="legend-chips" id="fixed-legend-chips"></div>
                         <div class="chart-pager" id="fixed-chart-pager"></div>
                         <div class="chart-caption" id="fixed-chart-caption"></div>
+                    </div>
+
+                    <div class="chart-container" :class="{ collapsed: chartPanels.audit }" id="chart-panel-audit">
+                        <div class="chart-head">
+                            <h3 class="chart-title-toggle" @click="toggleChartPanel('audit')">
+                                <span class="toggle">{{ chartPanels.audit ? '▶' : '▼' }}</span>
+                                Fixed Spending Audit
+                            </h3>
+                            <span class="head-chip">Top 10 · by annualized</span>
+                        </div>
+                        <div id="recurring-audit"></div>
                     </div>
                 </div>
             </div>

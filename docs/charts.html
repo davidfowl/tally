@@ -178,7 +178,7 @@
                 <a href="#focused-mode">Focused Mode</a>
                 <a href="#seasonality">Spending Seasonality</a>
                 <a href="#volatility">Expense Volatility</a>
-                <a href="#recurring-audit">Subscription &amp; Recurring Audit</a>
+                <a href="#recurring-audit">Fixed Spending Audit</a>
                 <a href="#cash-flow">Cash Flow</a>
                 <a href="#fixed-variable">Fixed vs Variable</a>
             </div>
@@ -186,9 +186,10 @@
 
         <h2 id="dashboard-at-a-glance"><a href="#dashboard-at-a-glance" class="anchor-link">#</a>Dashboard At A Glance</h2>
         <ul>
-            <li>Data used: four headline KPIs from the same report context, typically income, spending, cash flow, and savings rate.</li>
-            <li>Why it matters: this is your five-second health check before you dive into trend charts and category breakdowns.</li>
-            <li>What it tells you: whether your current period is net-positive, spending-heavy, or tracking toward a healthier savings posture.</li>
+            <li>Data used: three KPI cards (Income, Spending, Cash Flow) plus a Details card from the same filtered report context.</li>
+            <li>Card structure: headline is the latest active month; detail rows show Quarter, Year-to-Date, 12 Month Avg (prior-window baseline), and All Time.</li>
+            <li>Secondary values: gray text is informational context, not additional math (for example, "in credits" on Income and "are fixed" on Spending).</li>
+            <li>Trend math: percent change compares current month vs prior up-to-12-month average, so the trend baseline matches the 12 Month Avg row for reconciliation.</li>
         </ul>
         <div class="chart-card">
             <img src="images/charts/dashboard-kpi-cards.png" alt="Dashboard KPI cards screenshot placeholder">
@@ -239,7 +240,7 @@
             <img src="images/charts/expense-volatility.png" alt="Expense volatility chart placeholder">
         </div>
 
-        <h2 id="recurring-audit"><a href="#recurring-audit" class="anchor-link">#</a>Subscription &amp; Recurring Audit</h2>
+        <h2 id="recurring-audit"><a href="#recurring-audit" class="anchor-link">#</a>Fixed Spending Audit</h2>
         <ul>
             <li>Data used: recurring merchants detected by cadence and consistency, annualized from monthly equivalents.</li>
             <li>Why it matters: recurring spend can hide in plain sight; this view exposes total yearly drag and fast cancellation targets.</li>
@@ -250,7 +251,8 @@
 
         <h2 id="cash-flow"><a href="#cash-flow" class="anchor-link">#</a>Cash Flow</h2>
         <ul>
-            <li>Data used: income and spending month-by-month, transformed into net movement over time.</li>
+            <li>Data used: month-by-month net cash flow using <code>income + credits - spending</code>.</li>
+            <li>Scope: transfers and investments are tracked separately in the Details card and are not included in cash-flow KPI math.</li>
             <li>Why it matters: this is your runway signal; it shows whether your month pattern compounds toward stability or burn.</li>
         </ul>
         <div class="chart-card">
