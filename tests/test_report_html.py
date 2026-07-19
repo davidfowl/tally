@@ -2801,6 +2801,36 @@ class TestDateFilter:
         # Union is non-empty (2025 Netflix + 2026 transactions both counted).
         expect(page.get_by_test_id("filtered-amount")).not_to_contain_text("$0")
 
+    def test_kpi_trend_label_updates_with_filter_anchor_month(self, page: Page, multiyear_report_path):
+        """KPI trend copy anchors to the last visible month and adjusts its prior
+        window count when date filters change."""
+        page.goto(f"file://{multiyear_report_path}")
+
+        spending_trend = page.locator(".kpi-card.spending .kpi-trend")
+        expect(spending_trend).to_be_visible()
+        expect(spending_trend).to_contain_text("Jul '26 vs prior 12 months")
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in range(1, 13):
+            page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
+        page.get_by_test_id("date-apply").click()
+
+        expect(spending_trend).to_contain_text("Dec '25 vs prior 11 months")
+        expect(spending_trend).not_to_contain_text("prior 6")
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-clear-all").click()
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-start-text").fill("1/1/2026")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("6/30/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+
+        expect(spending_trend).to_contain_text("Jun '26 vs prior 4 months")
+
     def test_drill_calendar_commits_day_and_filters(self, page: Page, multiyear_report_path):
         """The Start drill calendar commits a day-precision date into its input,
         and a start+end range produces a filtering daterange chip."""

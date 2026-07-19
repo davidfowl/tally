@@ -3343,19 +3343,23 @@ createApp({
             return svg;
         }
 
-        function trendStatement(series, upIsGood) {
+        function trendStatement(series, monthKeys, upIsGood) {
             const len = series.length;
-            const n = len > 12 ? 12 : len > 6 ? 6 : len > 3 ? 3 : len > 1 ? 1 : 0;
-            if (!n) return null;
+            const n = Math.min(12, len - 1);
+            // Avoid noisy trend percentages when there is too little history.
+            if (n < 3) return null;
 
             const last = series[len - 1] || 0;
             const baseline = series.slice(len - 1 - n, len - 1).reduce((sum, v) => sum + v, 0) / n;
+            if (!baseline) return null;
+
             const delta = last - baseline;
-            const pct = baseline ? Math.abs(delta / baseline * 100) : 0;
+            const pct = Math.abs(delta / baseline * 100);
+            const anchorMonth = monthLabel(monthKeys[len - 1]);
             return {
                 arrow: delta >= 0 ? '↑' : '↓',
                 value: `${delta >= 0 ? '+' : '-'}${pct.toFixed(1)}%`,
-                sentence: n === 1 ? ' this month vs last month' : ` this month vs prior ${n} mo`,
+                sentence: ` ${anchorMonth} vs prior ${n} month${n === 1 ? '' : 's'}`,
                 cls: (delta >= 0) === upIsGood ? 'pos' : 'neg',
             };
         }
@@ -3368,19 +3372,21 @@ createApp({
                 return;
             }
 
-            const sum = byMonth => monthKeys.reduce((total, mk) => total + (byMonth?.[mk] || 0), 0);
+            const orderedMonthKeys = [...monthKeys].sort();
+
+            const sum = byMonth => orderedMonthKeys.reduce((total, mk) => total + (byMonth?.[mk] || 0), 0);
             const income = sum(agg.incomeByMonth);
             const credits = sum(agg.creditsByMonth);
             const spending = sum(agg.spendingByMonth);
             const investment = sum(agg.investmentByMonth);
             const transfers = sum(agg.transfersByMonth);
-            const txCount = monthKeys.reduce((total, mk) => total + (agg.txnCountByMonth?.[mk] || 0), 0);
-            const months = Math.max(monthKeys.length, 1);
+            const txCount = orderedMonthKeys.reduce((total, mk) => total + (agg.txnCountByMonth?.[mk] || 0), 0);
+            const months = Math.max(orderedMonthKeys.length, 1);
             const cashFlowTotal = income + credits - spending - investment;
 
-            const incomeSeries = monthKeys.map(mk => (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0));
-            const spendingSeries = monthKeys.map(mk => agg.spendingByMonth[mk] || 0);
-            const cashFlowSeries = monthKeys.map(mk =>
+            const incomeSeries = orderedMonthKeys.map(mk => (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0));
+            const spendingSeries = orderedMonthKeys.map(mk => agg.spendingByMonth[mk] || 0);
+            const cashFlowSeries = orderedMonthKeys.map(mk =>
                 (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0) - (agg.spendingByMonth[mk] || 0) - (agg.investmentByMonth[mk] || 0)
             );
 
@@ -3453,7 +3459,7 @@ createApp({
             }
 
             function spark(series, upIsGood) {
-                const trend = trendStatement(series, upIsGood);
+                const trend = trendStatement(series, orderedMonthKeys, upIsGood);
                 const good = trend && trend.cls === 'pos';
                 return {
                     values: series,
