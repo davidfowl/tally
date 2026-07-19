@@ -2936,6 +2936,62 @@ def current_quarter_report_path(tmp_path_factory):
     return str(report_file), today.year, months
 
 
+@pytest.fixture(scope="module")
+def kpi_trailing_transfer_report_path(tmp_path_factory):
+    """Report where the final month has only transfer activity.
+
+    Trend labels should anchor to the last month with spending/income activity,
+    not the trailing transfer-only month.
+    """
+    tmp_dir = tmp_path_factory.mktemp("kpi_trailing_transfer_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    csv_content = """Date,Description,Amount
+01/10/2026,WHOLE FOODS MARKET,100.00
+02/10/2026,WHOLE FOODS MARKET,120.00
+03/10/2026,WHOLE FOODS MARKET,110.00
+04/10/2026,ACCOUNT TRANSFER,350.00
+"""
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n\n'
+        "data_sources:\n"
+        "  - name: Test\n"
+        "    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n\n'
+        "merchants_file: config/merchants.rules\n"
+    )
+
+    (config_dir / "merchants.rules").write_text(
+        "[Whole Foods]\n"
+        "match: normalized(\"WHOLE FOODS\")\n"
+        "category: Food\n"
+        "subcategory: Grocery\n\n"
+        "[Transfer]\n"
+        "match: contains(\"ACCOUNT TRANSFER\")\n"
+        "category: Finance\n"
+        "subcategory: Transfer\n"
+        "tags: transfer\n"
+    )
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+    return str(report_file)
+
+
 class TestDateFilterCoverageHighlight:
     """Coverage-based preset highlighting (no stored quarter/year flag)."""
 
@@ -2951,3 +3007,15 @@ class TestDateFilterCoverageHighlight:
             page.get_by_test_id(f"date-month-cell-{year}-{mm:02d}").click()
         # All three of the quarter's months selected -> pill lights up.
         expect(this_q).to_have_class(re.compile(r"\bactive\b"))
+
+
+class TestKpiTrendAnchoring:
+    """KPI trend labeling should ignore trailing months with only transfer-like activity."""
+
+    def test_spending_trend_ignores_trailing_transfer_only_month(self, page: Page, kpi_trailing_transfer_report_path):
+        page.goto(f"file://{kpi_trailing_transfer_report_path}")
+
+        spending_trend = page.locator(".kpi-card.spending .kpi-trend")
+        expect(spending_trend).to_be_visible()
+        expect(spending_trend).to_contain_text("Mar '26 vs prior 2 months")
+        expect(spending_trend).not_to_contain_text("Apr '26")

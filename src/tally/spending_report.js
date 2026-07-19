@@ -3343,11 +3343,29 @@ createApp({
             return svg;
         }
 
+        function trimTrailingZeroMonths(series, monthKeys) {
+            let lastNonZero = -1;
+            for (let i = series.length - 1; i >= 0; i--) {
+                if (Math.abs(series[i] || 0) > 0.0001) {
+                    lastNonZero = i;
+                    break;
+                }
+            }
+
+            if (lastNonZero < 0) {
+                return { series, monthKeys };
+            }
+
+            return {
+                series: series.slice(0, lastNonZero + 1),
+                monthKeys: monthKeys.slice(0, lastNonZero + 1),
+            };
+        }
+
         function trendStatement(series, monthKeys, upIsGood) {
             const len = series.length;
             const n = Math.min(12, len - 1);
-            // Avoid noisy trend percentages when there is too little history.
-            if (n < 3) return null;
+            if (n < 1) return null;
 
             const last = series[len - 1] || 0;
             const baseline = series.slice(len - 1 - n, len - 1).reduce((sum, v) => sum + v, 0) / n;
@@ -3459,10 +3477,11 @@ createApp({
             }
 
             function spark(series, upIsGood) {
-                const trend = trendStatement(series, orderedMonthKeys, upIsGood);
+                const trimmed = trimTrailingZeroMonths(series, orderedMonthKeys);
+                const trend = trendStatement(trimmed.series, trimmed.monthKeys, upIsGood);
                 const good = trend && trend.cls === 'pos';
                 return {
-                    values: series,
+                    values: trimmed.series,
                     trend,
                     dotColor: good ? (cssVar('--accent-green') || '#4ade80') : (cssVar('--accent-red') || '#ff6b6b'),
                 };
