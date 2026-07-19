@@ -2214,6 +2214,50 @@ footer {
     flex-shrink: 0;
 }
 
+@media (max-width: 640px) {
+    .chart-controls {
+        gap: 0.55rem;
+    }
+    .proto-pill-row {
+        gap: 0.32rem;
+    }
+    .proto-pill {
+        padding: 0.35rem 0.58rem;
+        font-size: 0.72rem;
+    }
+    .compare-toggle {
+        gap: 0.3rem;
+        font-size: 0.72rem;
+    }
+    .legend-chips {
+        gap: 0.35rem;
+        margin-top: 0.7rem;
+    }
+    .legend-chip {
+        gap: 0.32rem;
+        padding: 0.25rem 0.58rem;
+        font-size: 0.72rem;
+    }
+    .legend-chip .chip-dot {
+        width: 7px;
+        height: 7px;
+    }
+}
+
+@media (max-width: 480px) {
+    .proto-pill {
+        padding: 0.3rem 0.5rem;
+        font-size: 0.69rem;
+    }
+    .compare-toggle {
+        font-size: 0.69rem;
+    }
+    .legend-chip {
+        padding: 0.22rem 0.48rem;
+        font-size: 0.69rem;
+    }
+}
+
 .chart-pager {
     display: flex;
     align-items: center;

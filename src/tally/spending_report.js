@@ -1,7 +1,7 @@
 // spending_report.js - Vue 3 app for spending report
 // This file is embedded into the HTML at build time by analyzer.py
 
-const { createApp, ref, reactive, computed, watch, onMounted, nextTick, defineComponent } = Vue;
+const { createApp, ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, defineComponent } = Vue;
 
 function setAppInitializingState() {
     document.body.classList.add('app-initializing');
@@ -838,6 +838,9 @@ createApp({
         let txMeasureAmountEl = null;
         let txMeasureAccountEl = null;
         let txResizeDebounceHandle = null;
+        let chartResizeDebounceHandle = null;
+        let chartLayoutObserver = null;
+        let suppressChartAnimationForResize = false;
 
         // Chart refs
         const kpiGrid = ref(null);
@@ -2369,6 +2372,42 @@ createApp({
             }, 200);
         }
 
+        function rerenderChartsDebounced() {
+            if (chartResizeDebounceHandle) clearTimeout(chartResizeDebounceHandle);
+            chartResizeDebounceHandle = setTimeout(() => {
+                if (!chartsInitialized) return;
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        suppressChartAnimationForResize = true;
+                        renderAllCharts();
+                        suppressChartAnimationForResize = false;
+                    });
+                });
+            }, 180);
+        }
+
+        function initChartLayoutObserver() {
+            if (typeof ResizeObserver === 'undefined') return;
+            if (chartLayoutObserver) chartLayoutObserver.disconnect();
+
+            chartLayoutObserver = new ResizeObserver(() => {
+                rerenderChartsDebounced();
+            });
+
+            const targets = [
+                document.getElementById('app'),
+                document.querySelector('.chart-section'),
+                categoryTrendChart.value?.closest('.chart-wrapper'),
+                cashFlowTrendChart.value?.closest('.chart-wrapper'),
+                fixedVariableChart.value?.closest('.chart-wrapper'),
+                volatilityChart.value?.closest('.chart-wrapper'),
+            ].filter(Boolean);
+
+            for (const target of targets) {
+                chartLayoutObserver.observe(target);
+            }
+        }
+
         function formatMonthLabel(key) {
             if (!key) return '';
             const [year, month] = key.split('-');
@@ -2493,16 +2532,19 @@ createApp({
         function resetChartUiStateDefaults() {
             categoryState.grouping = 'month';
             categoryState.compare = false;
+            categoryState.comparePage = 0;
             categoryState.unstack = false;
             categoryState.focused = null;
             categoryState.page = 0;
 
             cashState.grouping = 'month';
             cashState.compare = false;
+            cashState.comparePage = 0;
             cashState.page = 0;
 
             fixedState.grouping = 'month';
             fixedState.compare = false;
+            fixedState.comparePage = 0;
             fixedState.page = 0;
 
             heatmapState.page = 0;
@@ -2540,16 +2582,19 @@ createApp({
                         category: {
                             grouping: categoryState.grouping,
                             compare: !!categoryState.compare,
+                            comparePage: categoryState.comparePage,
                             unstack: !!categoryState.unstack,
                             focused: categoryState.focused || null,
                         },
                         cash: {
                             grouping: cashState.grouping,
                             compare: !!cashState.compare,
+                            comparePage: cashState.comparePage,
                         },
                         fixed: {
                             grouping: fixedState.grouping,
                             compare: !!fixedState.compare,
+                            comparePage: fixedState.comparePage,
                         },
                     },
                     knownSectionKeys: toSortedArray(allPersistableSectionKeys.value),
@@ -2650,6 +2695,9 @@ createApp({
             const catPrefs = chartPrefs.category || {};
             if (validGroupings.has(catPrefs.grouping)) categoryState.grouping = catPrefs.grouping;
             categoryState.compare = !!catPrefs.compare;
+            categoryState.comparePage = Number.isInteger(catPrefs.comparePage) && catPrefs.comparePage >= 0
+                ? catPrefs.comparePage
+                : 0;
             categoryState.unstack = !!catPrefs.unstack;
             categoryState.focused = typeof catPrefs.focused === 'string' && catPrefs.focused.trim()
                 ? catPrefs.focused.trim()
@@ -2658,10 +2706,16 @@ createApp({
             const cashPrefs = chartPrefs.cash || {};
             if (validGroupings.has(cashPrefs.grouping)) cashState.grouping = cashPrefs.grouping;
             cashState.compare = !!cashPrefs.compare;
+            cashState.comparePage = Number.isInteger(cashPrefs.comparePage) && cashPrefs.comparePage >= 0
+                ? cashPrefs.comparePage
+                : 0;
 
             const fixedPrefs = chartPrefs.fixed || {};
             if (validGroupings.has(fixedPrefs.grouping)) fixedState.grouping = fixedPrefs.grouping;
             fixedState.compare = !!fixedPrefs.compare;
+            fixedState.comparePage = Number.isInteger(fixedPrefs.comparePage) && fixedPrefs.comparePage >= 0
+                ? fixedPrefs.comparePage
+                : 0;
 
             const savedPanels = state.chartPanels && typeof state.chartPanels === 'object'
                 ? state.chartPanels
@@ -2723,6 +2777,7 @@ createApp({
         // ========== CHARTS ==========
 
         const CHART_PAGE_SIZE = 24;
+        const COMPARE_YEARS_MAX = 3;
         const HEATMAP_PAGE_SIZE = 24;
         const HEATMAP_ALPHAS = [0.06, 0.22, 0.4, 0.58, 0.76, 0.95];
         const CASH_FLOW_SERIES = [
@@ -2732,9 +2787,9 @@ createApp({
             { label: 'Investment', byMonthKey: 'investmentByMonth', color: '#7c3aed' },
         ];
 
-        const categoryState = reactive({ grouping: 'month', compare: false, unstack: false, focused: null, page: 0 });
-        const cashState = reactive({ grouping: 'month', compare: false, page: 0 });
-        const fixedState = reactive({ grouping: 'month', compare: false, page: 0 });
+        const categoryState = reactive({ grouping: 'month', compare: false, comparePage: 0, unstack: false, focused: null, page: 0 });
+        const cashState = reactive({ grouping: 'month', compare: false, comparePage: 0, page: 0 });
+        const fixedState = reactive({ grouping: 'month', compare: false, comparePage: 0, page: 0 });
         const heatmapState = reactive({ page: 0 });
         const chartPanels = reactive({
             category: false,
@@ -2807,8 +2862,37 @@ createApp({
             return [...new Set(monthKeys.map(mk => mk.split('-')[0]))].sort();
         }
 
-        function getCompareYears(monthKeys) {
-            return getSpanYears(monthKeys).slice(-4);
+        function getCompareYears(monthKeys, state) {
+            const spanYears = getSpanYears(monthKeys);
+            return pagedCompareYears(spanYears, state).years;
+        }
+
+        function pagedCompareYears(spanYears, state, pageSize = COMPARE_YEARS_MAX) {
+            const pagerState = state || { comparePage: 0 };
+            const total = spanYears.length;
+            if (total <= pageSize) {
+                if (state && pagerState.comparePage !== 0) pagerState.comparePage = 0;
+                return {
+                    years: spanYears,
+                    total,
+                    page: 0,
+                    maxPage: 0,
+                };
+            }
+
+            const maxPage = Math.max(0, total - pageSize);
+            if (pagerState.comparePage > maxPage) pagerState.comparePage = maxPage;
+            if (pagerState.comparePage < 0) pagerState.comparePage = 0;
+
+            const startIdx = Math.max(0, total - pageSize - pagerState.comparePage);
+            const endIdx = Math.min(total, startIdx + pageSize);
+
+            return {
+                years: spanYears.slice(startIdx, endIdx),
+                total,
+                page: pagerState.comparePage,
+                maxPage,
+            };
         }
 
         function yearAlpha(compareYears, year) {
@@ -2855,6 +2939,29 @@ createApp({
             return MONTH_NAMES_SHORT.map((name, idx) => ({ label: name, months: [idx + 1] }));
         }
 
+        function xTickOptions(labels, canvasRef, compareActive = false) {
+            const width = Math.max(
+                canvasRef?.value?.clientWidth || canvasRef?.value?.parentElement?.clientWidth || 0,
+                320
+            );
+            const count = Math.max(labels?.length || 0, 1);
+            const pixelsPerTick = width / count;
+
+            let rotation = 0;
+            if (pixelsPerTick < 22) rotation = 90;
+            else if (pixelsPerTick < 40) rotation = 45;
+
+            const shouldAutoSkip = pixelsPerTick < (compareActive ? 34 : 26);
+            const maxTicksLimit = Math.max(3, Math.floor(width / (compareActive ? 56 : 64)));
+
+            return {
+                minRotation: rotation,
+                maxRotation: rotation,
+                autoSkip: shouldAutoSkip,
+                maxTicksLimit,
+            };
+        }
+
         function sumForPeriod(byMonth, year, period, monthSet) {
             let total = 0;
             for (const monthNum of period.months) {
@@ -2883,8 +2990,11 @@ createApp({
 
         function resetChartPages() {
             categoryState.page = 0;
+            categoryState.comparePage = 0;
             cashState.page = 0;
+            cashState.comparePage = 0;
             fixedState.page = 0;
+            fixedState.comparePage = 0;
             heatmapState.page = 0;
         }
 
@@ -3030,9 +3140,27 @@ createApp({
 
                     const ctx = chart.ctx;
                     ctx.save();
-                    ctx.font = `10px ${Chart.defaults.font.family}`;
+                    const tickFont = Chart.helpers.toFont(
+                        xScale.options?.ticks?.font,
+                        Chart.defaults.font
+                    );
+                    ctx.font = tickFont.string;
                     ctx.fillStyle = cssVar('--text-muted') || '#666';
                     ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    const tickCount = chart.data?.labels?.length || 0;
+                    const pixelsPerTick = tickCount ? (xScale.width / tickCount) : xScale.width;
+                    let angle = 0;
+                    if (pixelsPerTick < 22) angle = -Math.PI / 2;
+                    else if (pixelsPerTick < 40) angle = -Math.PI / 4;
+
+                    let drawEvery = 1;
+                    if (pixelsPerTick < 14) drawEvery = 4;
+                    else if (pixelsPerTick < 20) drawEvery = 3;
+                    else if (pixelsPerTick < 28) drawEvery = 2;
+
+                    const y = xScale.bottom - 4;
 
                     const byYear = new Map();
                     chart.data.datasets.forEach((ds, i) => {
@@ -3042,7 +3170,7 @@ createApp({
                     });
 
                     for (const [year, indexes] of byYear.entries()) {
-                        for (let di = 0; di < chart.data.labels.length; di++) {
+                        for (let di = 0; di < chart.data.labels.length; di += drawEvery) {
                             let sumX = 0;
                             let count = 0;
                             let hasValue = false;
@@ -3054,7 +3182,17 @@ createApp({
                                 if ((chart.data.datasets[datasetIndex].data[di] || 0) > 0) hasValue = true;
                             }
                             if (count && hasValue) {
-                                ctx.fillText(year, sumX / count, xScale.bottom - 4);
+                                const shortYear = String(year).slice(-2);
+                                const x = sumX / count;
+                                if (angle === 0) {
+                                    ctx.fillText(`'${shortYear}`, x, y);
+                                } else {
+                                    ctx.save();
+                                    ctx.translate(x, y);
+                                    ctx.rotate(angle);
+                                    ctx.fillText(`'${shortYear}`, 0, 0);
+                                    ctx.restore();
+                                }
                             }
                         }
                     }
@@ -3106,7 +3244,17 @@ createApp({
         function renderChart(key, canvasRef, config) {
             if (!canvasRef?.value) return null;
             destroyChart(key);
-            chartInstances[key] = new Chart(canvasRef.value, config);
+            let finalConfig = config;
+            if (suppressChartAnimationForResize) {
+                finalConfig = {
+                    ...config,
+                    options: {
+                        ...(config.options || {}),
+                        animation: false,
+                    },
+                };
+            }
+            chartInstances[key] = new Chart(canvasRef.value, finalConfig);
             return chartInstances[key];
         }
 
@@ -3351,6 +3499,32 @@ createApp({
             el.append(prev, range, next);
         }
 
+        function renderCompareYearPager(elId, comparePageInfo, onChange) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.textContent = '';
+
+            if (!comparePageInfo || comparePageInfo.total <= COMPARE_YEARS_MAX) return;
+
+            const prev = document.createElement('button');
+            prev.textContent = `‹ Prev ${COMPARE_YEARS_MAX} years`;
+            prev.disabled = comparePageInfo.page >= comparePageInfo.maxPage;
+            prev.addEventListener('click', () => onChange('older'));
+
+            const range = document.createElement('span');
+            range.className = 'pager-range';
+            const firstYear = comparePageInfo.years[0] || '';
+            const lastYear = comparePageInfo.years[comparePageInfo.years.length - 1] || '';
+            range.textContent = `${firstYear} - ${lastYear} · showing ${comparePageInfo.years.length} of ${comparePageInfo.total} years`;
+
+            const next = document.createElement('button');
+            next.textContent = `Next ${COMPARE_YEARS_MAX} years ›`;
+            next.disabled = comparePageInfo.page === 0;
+            next.addEventListener('click', () => onChange('newer'));
+
+            el.append(prev, range, next);
+        }
+
         function renderHeatmap(matrix, keys, categories) {
             const el = document.getElementById('seasonality-heatmap');
             if (!el) return;
@@ -3541,6 +3715,7 @@ createApp({
             pillGroup(groupEl, groupingOptions, categoryState.grouping, value => {
                 categoryState.grouping = value;
                 categoryState.page = 0;
+                categoryState.comparePage = 0;
                 saveUiState();
                 renderAllCharts();
             });
@@ -3556,7 +3731,8 @@ createApp({
 
             const grouped = categoryState.grouping !== 'none';
             const spanYears = getSpanYears(monthKeys);
-            const compareYears = getCompareYears(monthKeys);
+            const comparePageInfo = pagedCompareYears(spanYears, categoryState);
+            const compareYears = comparePageInfo.years;
             const compareAllowed = spanYears.length > 1 && (categoryState.grouping === 'month' || categoryState.grouping === 'quarter');
             const compareActive = compareAllowed && categoryState.compare;
 
@@ -3585,7 +3761,14 @@ createApp({
 
             const allBuckets = buildBuckets(categoryState.grouping, monthKeys);
             const pageInfo = pagedBuckets(allBuckets, categoryState, CHART_PAGE_SIZE);
-            renderBucketPager('cat-chart-pager', allBuckets, categoryState, categoryState.grouping, renderAllCharts);
+            if (compareActive) {
+                renderCompareYearPager('cat-chart-pager', comparePageInfo, direction => {
+                    categoryState.comparePage += direction === 'older' ? 1 : -1;
+                    renderAllCharts();
+                });
+            } else {
+                renderBucketPager('cat-chart-pager', allBuckets, categoryState, categoryState.grouping, renderAllCharts);
+            }
 
             if (categoryState.unstack) {
                 const labels = pageInfo.page.map(b => b.label);
@@ -3726,8 +3909,17 @@ createApp({
                     },
                     scales: {
                         x: compareActive
-                            ? { stacked: true, grid: { offset: true }, afterFit: scale => { scale.height += 14; } }
-                            : { stacked: true, grid: { display: false } },
+                            ? {
+                                stacked: true,
+                                grid: { offset: true },
+                                ticks: xTickOptions(labels, categoryTrendChart, true),
+                                afterFit: scale => { scale.height += 8; },
+                            }
+                            : {
+                                stacked: true,
+                                grid: { display: false },
+                                ticks: xTickOptions(labels, categoryTrendChart, false),
+                            },
                         y: { stacked: true, ticks: { callback: v => formatCurrencyShort(v) } },
                     },
                 },
@@ -3746,7 +3938,7 @@ createApp({
             })));
 
             if (caption) {
-                caption.textContent = spanYears.length > compareYears.length && compareActive ? 'showing last 4 years' : '';
+                caption.textContent = spanYears.length > compareYears.length && compareActive ? `showing last ${COMPARE_YEARS_MAX} years` : '';
             }
         }
 
@@ -3757,6 +3949,7 @@ createApp({
             pillGroup(groupEl, groupingOptions, cashState.grouping, value => {
                 cashState.grouping = value;
                 cashState.page = 0;
+                cashState.comparePage = 0;
                 saveUiState();
                 renderAllCharts();
             });
@@ -3766,7 +3959,8 @@ createApp({
             const caption = document.getElementById('cash-chart-caption');
             const legend = document.getElementById('cash-legend-chips');
             const spanYears = getSpanYears(monthKeys);
-            const compareYears = getCompareYears(monthKeys);
+            const comparePageInfo = pagedCompareYears(spanYears, cashState);
+            const compareYears = comparePageInfo.years;
             const compareAllowed = spanYears.length > 1 && (cashState.grouping === 'month' || cashState.grouping === 'quarter');
             const compareActive = compareAllowed && cashState.compare;
             if (compareWrap) compareWrap.classList.toggle('hidden', !compareAllowed);
@@ -3800,7 +3994,14 @@ createApp({
 
             const allBuckets = buildBuckets(cashState.grouping, monthKeys);
             const pageInfo = pagedBuckets(allBuckets, cashState, CHART_PAGE_SIZE);
-            renderBucketPager('cash-chart-pager', allBuckets, cashState, cashState.grouping, renderAllCharts);
+            if (compareActive) {
+                renderCompareYearPager('cash-chart-pager', comparePageInfo, direction => {
+                    cashState.comparePage += direction === 'older' ? 1 : -1;
+                    renderAllCharts();
+                });
+            } else {
+                renderBucketPager('cash-chart-pager', allBuckets, cashState, cashState.grouping, renderAllCharts);
+            }
 
             let labels = [];
             let datasets = [];
@@ -3849,8 +4050,15 @@ createApp({
                     },
                     scales: {
                         x: compareActive
-                            ? { grid: { offset: true }, afterFit: scale => { scale.height += 14; } }
-                            : { grid: { display: false } },
+                            ? {
+                                grid: { offset: true },
+                                ticks: xTickOptions(labels, cashFlowTrendChart, true),
+                                afterFit: scale => { scale.height += 8; },
+                            }
+                            : {
+                                grid: { display: false },
+                                ticks: xTickOptions(labels, cashFlowTrendChart, false),
+                            },
                         y: { ticks: { callback: v => formatCurrencyShort(v) } },
                     },
                 },
@@ -3868,7 +4076,7 @@ createApp({
             })));
 
             if (caption) {
-                caption.textContent = spanYears.length > compareYears.length && compareActive ? 'showing last 4 years' : '';
+                caption.textContent = spanYears.length > compareYears.length && compareActive ? `showing last ${COMPARE_YEARS_MAX} years` : '';
             }
         }
 
@@ -3903,6 +4111,7 @@ createApp({
             pillGroup(groupEl, groupingOptions, fixedState.grouping, value => {
                 fixedState.grouping = value;
                 fixedState.page = 0;
+                fixedState.comparePage = 0;
                 saveUiState();
                 renderAllCharts();
             });
@@ -3912,7 +4121,8 @@ createApp({
             const caption = document.getElementById('fixed-chart-caption');
             const legend = document.getElementById('fixed-legend-chips');
             const spanYears = getSpanYears(monthKeys);
-            const compareYears = getCompareYears(monthKeys);
+            const comparePageInfo = pagedCompareYears(spanYears, fixedState);
+            const compareYears = comparePageInfo.years;
             const compareAllowed = spanYears.length > 1 && (fixedState.grouping === 'month' || fixedState.grouping === 'quarter');
             const compareActive = compareAllowed && fixedState.compare;
             if (compareWrap) compareWrap.classList.toggle('hidden', !compareAllowed);
@@ -3947,7 +4157,14 @@ createApp({
             } else {
                 const allBuckets = buildBuckets(fixedState.grouping, monthKeys);
                 const pageInfo = pagedBuckets(allBuckets, fixedState, CHART_PAGE_SIZE);
-                renderBucketPager('fixed-chart-pager', allBuckets, fixedState, fixedState.grouping, renderAllCharts);
+                if (compareActive) {
+                    renderCompareYearPager('fixed-chart-pager', comparePageInfo, direction => {
+                        fixedState.comparePage += direction === 'older' ? 1 : -1;
+                        renderAllCharts();
+                    });
+                } else {
+                    renderBucketPager('fixed-chart-pager', allBuckets, fixedState, fixedState.grouping, renderAllCharts);
+                }
 
                 const gap = surfaceColor();
                 let labels = [];
@@ -3996,8 +4213,17 @@ createApp({
                         },
                         scales: {
                             x: compareActive
-                                ? { stacked: true, grid: { offset: true }, afterFit: scale => { scale.height += 14; } }
-                                : { stacked: true, grid: { display: false } },
+                                ? {
+                                    stacked: true,
+                                    grid: { offset: true },
+                                    ticks: xTickOptions(labels, fixedVariableChart, true),
+                                    afterFit: scale => { scale.height += 8; },
+                                }
+                                : {
+                                    stacked: true,
+                                    grid: { display: false },
+                                    ticks: xTickOptions(labels, fixedVariableChart, false),
+                                },
                             y: { stacked: true, ticks: { callback: v => formatCurrencyShort(v) } },
                         },
                     },
@@ -4017,7 +4243,7 @@ createApp({
 
             if (caption) {
                 const names = fixedNames.length ? fixedNames.join(', ') : 'none in current filter';
-                const truncation = compareActive && spanYears.length > compareYears.length ? ' · showing last 4 years' : '';
+                const truncation = compareActive && spanYears.length > compareYears.length ? ` · showing last ${COMPARE_YEARS_MAX} years` : '';
                 caption.textContent = `Fixed (${fixedNames.length}): ${names}${truncation}`;
             }
         }
@@ -4223,6 +4449,7 @@ createApp({
                 catCompare.addEventListener('change', () => {
                     categoryState.compare = catCompare.checked;
                     categoryState.page = 0;
+                    categoryState.comparePage = 0;
                     saveUiState();
                     renderAllCharts();
                 });
@@ -4234,6 +4461,7 @@ createApp({
                     categoryState.unstack = catUnstack.checked;
                     if (categoryState.unstack) categoryState.compare = false;
                     categoryState.page = 0;
+                    categoryState.comparePage = 0;
                     saveUiState();
                     renderAllCharts();
                 });
@@ -4244,6 +4472,7 @@ createApp({
                 cashCompare.addEventListener('change', () => {
                     cashState.compare = cashCompare.checked;
                     cashState.page = 0;
+                    cashState.comparePage = 0;
                     saveUiState();
                     renderAllCharts();
                 });
@@ -4254,6 +4483,7 @@ createApp({
                 fixedCompare.addEventListener('change', () => {
                     fixedState.compare = fixedCompare.checked;
                     fixedState.page = 0;
+                    fixedState.comparePage = 0;
                     saveUiState();
                     renderAllCharts();
                 });
@@ -4356,6 +4586,7 @@ createApp({
                 hashToFilters();
                 recomputeTxnColumnProfiles();
                 initCharts();
+                initChartLayoutObserver();
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
                         setAppReadyState();
@@ -4366,6 +4597,7 @@ createApp({
             // Scroll handling
             window.addEventListener('scroll', handleScroll);
             window.addEventListener('resize', recomputeTxnColumnsDebounced);
+            window.addEventListener('resize', rerenderChartsDebounced);
 
             // Close autocomplete on outside click
             document.addEventListener('click', e => {
@@ -4390,6 +4622,21 @@ createApp({
                 activeFilters.value = [];
                 hashToFilters();
             });
+        });
+
+        onUnmounted(() => {
+            if (chartLayoutObserver) {
+                chartLayoutObserver.disconnect();
+                chartLayoutObserver = null;
+            }
+            if (txResizeDebounceHandle) {
+                clearTimeout(txResizeDebounceHandle);
+                txResizeDebounceHandle = null;
+            }
+            if (chartResizeDebounceHandle) {
+                clearTimeout(chartResizeDebounceHandle);
+                chartResizeDebounceHandle = null;
+            }
         });
 
         // ========== RETURN ==========

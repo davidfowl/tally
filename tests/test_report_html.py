@@ -1250,6 +1250,64 @@ class TestChartControlsMinimum:
             f"Tooltip should hide zero rows but included one: {result}"
         )
 
+    def test_category_compare_years_caps_window_and_pages(self, page: Page, multiyear_report_path):
+        _goto_chart_report_fresh(page, multiyear_report_path)
+
+        compare_box = page.locator("#cat-compare-checkbox")
+        expect(compare_box).to_be_visible()
+        compare_box.check()
+        page.wait_for_timeout(150)
+
+        pager_range = page.locator("#cat-chart-pager .pager-range")
+        expect(pager_range).to_be_visible()
+        expect(pager_range).to_contain_text("showing 3 of 4 years")
+
+        result_latest = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const years = [...new Set((chart.data?.datasets || []).map(ds => ds.ttYear).filter(Boolean))];
+            return { years };
+        }""")
+
+        if 'error' in result_latest:
+            pytest.fail(f"Could not inspect latest compare-year window: {result_latest['error']}")
+
+        assert len(result_latest['years']) == 3, (
+            f"Expected compare mode to cap at 3 years, got {result_latest}"
+        )
+
+        prev_btn = page.locator("#cat-chart-pager button").first
+        expect(prev_btn).to_be_enabled()
+        prev_btn.click()
+        page.wait_for_timeout(150)
+
+        result_older = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const years = [...new Set((chart.data?.datasets || []).map(ds => ds.ttYear).filter(Boolean))];
+            return { years };
+        }""")
+
+        if 'error' in result_older:
+            pytest.fail(f"Could not inspect older compare-year window: {result_older['error']}")
+
+        assert len(result_older['years']) == 3, (
+            f"Expected paged compare mode to keep a 3-year window, got {result_older}"
+        )
+        assert result_latest['years'] != result_older['years'], (
+            f"Expected year window to change when paging, but it did not. latest={result_latest}, older={result_older}"
+        )
+
 
 # =============================================================================
 # Autocomplete Category/Subcategory Tests
