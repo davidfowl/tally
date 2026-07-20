@@ -2014,11 +2014,30 @@ footer {
     margin-bottom: 0.45rem;
     font-weight: 600;
 }
+.kpi-top {
+    min-height: 105px;
+    display: flex;
+    flex-direction: column;
+}
+.kpi-card.details .kpi-top {
+    min-height: 110px;
+}
 .kpi-value {
-    font-size: 1.9rem;
-    font-weight: 600;
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
     line-height: 1.1;
     font-variant-numeric: tabular-nums;
+}
+.kpi-value-primary {
+    font-size: 1.9rem;
+    font-weight: 600;
+}
+.kpi-value-secondary {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
 }
 .kpi-sub {
     font-size: 0.75rem;
@@ -2056,9 +2075,23 @@ footer {
 }
 .kpi-detail .name { color: var(--text-secondary); }
 .kpi-detail .value {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.2rem;
     color: var(--text-lighter);
     font-weight: 500;
     font-variant-numeric: tabular-nums;
+}
+.kpi-card.cashflow .kpi-detail .value.pos {
+    color: var(--accent-green);
+}
+.kpi-card.cashflow .kpi-detail .value.neg {
+    color: var(--accent-red);
+}
+.kpi-detail-secondary {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 400;
 }
 .kpi-details.cashflow-details {
     gap: 0.3rem;

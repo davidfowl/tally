@@ -3398,8 +3398,7 @@ createApp({
             const investment = sum(agg.investmentByMonth);
             const transfers = sum(agg.transfersByMonth);
             const txCount = orderedMonthKeys.reduce((total, mk) => total + (agg.txnCountByMonth?.[mk] || 0), 0);
-            const months = Math.max(orderedMonthKeys.length, 1);
-            const cashFlowTotal = income + credits - spending - investment;
+            const cashFlowTotal = calculateCashFlow(income, spending, credits);
 
             const incomeOnlySeries = orderedMonthKeys.map(mk => agg.incomeByMonth[mk] || 0);
             const creditsSeries = orderedMonthKeys.map(mk => agg.creditsByMonth[mk] || 0);
@@ -3407,7 +3406,11 @@ createApp({
             const spendingSeries = orderedMonthKeys.map(mk => agg.spendingByMonth[mk] || 0);
             const recurringSeries = orderedMonthKeys.map(mk => agg.recurringSpendingByMonth?.[mk] || 0);
             const cashFlowSeries = orderedMonthKeys.map(mk =>
-                (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0) - (agg.spendingByMonth[mk] || 0) - (agg.investmentByMonth[mk] || 0)
+                calculateCashFlow(
+                    agg.incomeByMonth[mk] || 0,
+                    agg.spendingByMonth[mk] || 0,
+                    agg.creditsByMonth[mk] || 0,
+                )
             );
 
             grid.textContent = '';
@@ -3416,26 +3419,43 @@ createApp({
                 const card = document.createElement('div');
                 card.className = `kpi-card ${className}`;
                 if (options.cardTestId) card.setAttribute('data-testid', options.cardTestId);
+
+                const topWrap = document.createElement('div');
+                topWrap.className = 'kpi-top';
+
                 const h = document.createElement('h4');
                 h.textContent = title;
+
                 const value = document.createElement('div');
                 value.className = 'kpi-value';
-                value.textContent = headline;
                 if (options.amountTestId) value.setAttribute('data-testid', options.amountTestId);
-                card.append(h, value);
+
+                const primary = document.createElement('span');
+                primary.className = 'kpi-value-primary';
+                primary.textContent = headline;
+                value.appendChild(primary);
+
+                if (options.headlineSecondary) {
+                    const secondary = document.createElement('span');
+                    secondary.className = 'kpi-value-secondary';
+                    secondary.textContent = options.headlineSecondary;
+                    value.appendChild(secondary);
+                }
+
+                topWrap.append(h, value);
 
                 if (subtitle) {
                     const sub = document.createElement('div');
                     sub.className = 'kpi-sub';
                     sub.textContent = subtitle;
-                    card.appendChild(sub);
+                    topWrap.appendChild(sub);
                 }
 
                 if (spark) {
                     const sparkWrap = document.createElement('div');
                     sparkWrap.className = 'kpi-spark';
                     sparkWrap.appendChild(sparklineSVG(spark.values, spark.dotColor));
-                    card.appendChild(sparkWrap);
+                    topWrap.appendChild(sparkWrap);
 
                     if (spark.trend) {
                         const trend = document.createElement('div');
@@ -3444,9 +3464,11 @@ createApp({
                         val.className = `val ${spark.trend.cls}`;
                         val.textContent = `${spark.trend.arrow} ${spark.trend.value}`;
                         trend.append(val, document.createTextNode(spark.trend.sentence));
-                        card.appendChild(trend);
+                        topWrap.appendChild(trend);
                     }
                 }
+
+                card.appendChild(topWrap);
 
                 const detailWrap = document.createElement('div');
                 detailWrap.className = 'kpi-details';
@@ -3470,7 +3492,14 @@ createApp({
                     }
                     const val = document.createElement('span');
                     val.className = 'value';
+                    if (detail.valueTone) val.classList.add(detail.valueTone);
                     val.textContent = detail.value;
+                    if (detail.secondaryValue) {
+                        const detailSecondary = document.createElement('span');
+                        detailSecondary.className = 'kpi-detail-secondary';
+                        detailSecondary.textContent = ` / ${detail.secondaryValue}`;
+                        val.appendChild(detailSecondary);
+                    }
                     if (detail.perMonth) {
                         const perMo = document.createElement('span');
                         perMo.className = 'permo';
@@ -3504,6 +3533,94 @@ createApp({
                 return rangeSum(series, endIdx - count + 1, endIdx);
             }
 
+            function parseMonthKey(mk) {
+                const [yearStr, monthStr] = mk.split('-');
+                const year = parseInt(yearStr, 10);
+                const month = parseInt(monthStr, 10);
+                return {
+                    year,
+                    month,
+                    serial: year * 12 + month,
+                };
+            }
+
+            function sumWithPredicate(series, predicate) {
+                let total = 0;
+                for (let i = 0; i < orderedMonthKeys.length; i++) {
+                    const info = parseMonthKey(orderedMonthKeys[i]);
+                    if (predicate(info)) total += series[i] || 0;
+                }
+                return total;
+            }
+
+            function countWithPredicate(predicate) {
+                let count = 0;
+                for (let i = 0; i < orderedMonthKeys.length; i++) {
+                    const info = parseMonthKey(orderedMonthKeys[i]);
+                    if (predicate(info)) count += 1;
+                }
+                return count;
+            }
+
+            function monthLabelComma(mk) {
+                return monthLabel(mk).replace(" '", ", '");
+            }
+
+            function periodMetrics(primarySeries, secondarySeries, anchorIdx) {
+                const anchorKey = orderedMonthKeys[anchorIdx];
+                const anchorInfo = parseMonthKey(anchorKey);
+                const quarter = Math.floor((anchorInfo.month - 1) / 3) + 1;
+                const quarterStart = (quarter - 1) * 3 + 1;
+
+                const inQuarter = info =>
+                    info.year === anchorInfo.year && info.month >= quarterStart && info.month <= anchorInfo.month;
+                const inYtd = info =>
+                    info.year === anchorInfo.year && info.month <= anchorInfo.month;
+                const inLast12 = info =>
+                    info.serial >= (anchorInfo.serial - 11) && info.serial <= anchorInfo.serial;
+
+                // Use the same baseline as trend: average of prior up-to-12 months,
+                // excluding the anchor/current month.
+                const priorCount = Math.min(12, anchorIdx);
+                const quarterPrimary = sumWithPredicate(primarySeries, inQuarter);
+                const ytdPrimary = sumWithPredicate(primarySeries, inYtd);
+                const last12Primary = priorCount > 0
+                    ? rangeSum(primarySeries, anchorIdx - priorCount, anchorIdx - 1)
+                    : (primarySeries[anchorIdx] || 0);
+                const allTimePrimary = primarySeries.reduce((sum, value) => sum + (value || 0), 0);
+
+                const quarterSecondary = secondarySeries ? sumWithPredicate(secondarySeries, inQuarter) : null;
+                const ytdSecondary = secondarySeries ? sumWithPredicate(secondarySeries, inYtd) : null;
+                const last12Secondary = secondarySeries
+                    ? (priorCount > 0
+                        ? rangeSum(secondarySeries, anchorIdx - priorCount, anchorIdx - 1)
+                        : (secondarySeries[anchorIdx] || 0))
+                    : null;
+                const allTimeSecondary = secondarySeries
+                    ? secondarySeries.reduce((sum, value) => sum + (value || 0), 0)
+                    : null;
+
+                return {
+                    anchorLabel: monthLabelComma(anchorKey),
+                    quarterLabel: `Q${quarter} ${anchorInfo.year}`,
+                    ytdLabel: `${anchorInfo.year} To Date`,
+                    anchorPrimary: primarySeries[anchorIdx] || 0,
+                    anchorSecondary: secondarySeries ? (secondarySeries[anchorIdx] || 0) : null,
+                    quarterPrimary,
+                    quarterSecondary,
+                    ytdPrimary,
+                    ytdSecondary,
+                    last12Primary,
+                    last12Secondary,
+                    last12AvgPrimary: priorCount > 0 ? (last12Primary / priorCount) : last12Primary,
+                    last12AvgSecondary: secondarySeries
+                        ? (priorCount > 0 ? (last12Secondary / priorCount) : last12Secondary)
+                        : null,
+                    allTimePrimary,
+                    allTimeSecondary,
+                };
+            }
+
             const incomeIdx = lastActiveIndex(incomeSeries);
             const spendingIdx = lastActiveIndex(spendingSeries);
             const cashFlowIdx = lastActiveIndex(cashFlowSeries);
@@ -3512,19 +3629,19 @@ createApp({
             const spendingMonthKey = orderedMonthKeys[spendingIdx];
             const cashFlowMonthKey = orderedMonthKeys[cashFlowIdx];
 
-            const incomeMonth = incomeOnlySeries[incomeIdx] || 0;
+            const incomeMonth = incomeSeries[incomeIdx] || 0;
             const creditsMonth = creditsSeries[incomeIdx] || 0;
             const incomeLast3 = lastNSeriesTotal(incomeOnlySeries, incomeIdx, 3);
             const creditsLast3 = lastNSeriesTotal(creditsSeries, incomeIdx, 3);
 
             const spendingMonth = spendingSeries[spendingIdx] || 0;
             const recurringMonth = recurringSeries[spendingIdx] || 0;
-            const spendingLast3 = lastNSeriesTotal(spendingSeries, spendingIdx, 3);
-            const recurringLast3 = lastNSeriesTotal(recurringSeries, spendingIdx, 3);
-            const recurringAll = recurringSeries.reduce((sum, value) => sum + (value || 0), 0);
 
             const cashFlowMonth = cashFlowSeries[cashFlowIdx] || 0;
-            const cashFlowLast3 = lastNSeriesTotal(cashFlowSeries, cashFlowIdx, 3);
+
+            const incomePeriods = periodMetrics(incomeSeries, creditsSeries, incomeIdx);
+            const spendingPeriods = periodMetrics(spendingSeries, recurringSeries, spendingIdx);
+            const cashFlowPeriods = periodMetrics(cashFlowSeries, null, cashFlowIdx);
 
             function spark(series, upIsGood) {
                 const trimmed = trimTrailingZeroMonths(series, orderedMonthKeys);
@@ -3537,34 +3654,83 @@ createApp({
                 };
             }
 
-            createCard('income', `${monthLabel(incomeMonthKey)} Income`, formatCurrency(incomeMonth), [
-                { name: `${monthLabel(incomeMonthKey)} Income`, value: formatCurrency(incomeMonth) },
-                { name: `${monthLabel(incomeMonthKey)} Credits`, value: formatCurrency(creditsMonth) },
-                { dividerBefore: true, name: 'Last 3 Months Income', value: formatCurrency(incomeLast3) },
-                { name: 'Last 3 Months Credits', value: formatCurrency(creditsLast3) },
-                { dividerBefore: true, name: 'All Time Income', value: formatCurrency(income) },
-                { name: 'All Time Credits', value: formatCurrency(credits) },
-            ], spark(incomeSeries, true));
+            createCard('income', `${incomePeriods.anchorLabel} Income`, formatCurrency(incomeMonth), [
+                {
+                    name: incomePeriods.quarterLabel,
+                    value: formatCurrency(incomePeriods.quarterPrimary),
+                    secondaryValue: formatCurrency(incomePeriods.quarterSecondary),
+                },
+                {
+                    name: incomePeriods.ytdLabel,
+                    value: formatCurrency(incomePeriods.ytdPrimary),
+                    secondaryValue: formatCurrency(incomePeriods.ytdSecondary),
+                },
+                {
+                    name: '12 Month Avg',
+                    value: formatCurrency(incomePeriods.last12AvgPrimary),
+                    secondaryValue: formatCurrency(incomePeriods.last12AvgSecondary),
+                },
+                {
+                    name: 'All Time',
+                    value: formatCurrency(incomePeriods.allTimePrimary),
+                    secondaryValue: formatCurrency(incomePeriods.allTimeSecondary),
+                },
+            ], spark(incomeSeries, true), null, {
+                headlineSecondary: `${formatCurrency(creditsMonth)} in credits`,
+            });
 
-            createCard('spending', `${monthLabel(spendingMonthKey)} Spending`, formatCurrency(spendingMonth), [
-                { name: `${monthLabel(spendingMonthKey)} Spending`, value: formatCurrency(spendingMonth) },
-                { name: `${monthLabel(spendingMonthKey)} Recurring`, value: formatCurrency(recurringMonth) },
-                { dividerBefore: true, name: 'Last 3 Months Spending', value: formatCurrency(spendingLast3) },
-                { name: 'Last 3 Months Recurring', value: formatCurrency(recurringLast3) },
-                { dividerBefore: true, name: 'All Time Spending', value: formatCurrency(spending) },
-                { name: 'All Time Recurring', value: formatCurrency(recurringAll) },
+            createCard('spending', `${spendingPeriods.anchorLabel} Spending`, formatCurrency(spendingMonth), [
+                {
+                    name: spendingPeriods.quarterLabel,
+                    value: formatCurrency(spendingPeriods.quarterPrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.quarterSecondary),
+                },
+                {
+                    name: spendingPeriods.ytdLabel,
+                    value: formatCurrency(spendingPeriods.ytdPrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.ytdSecondary),
+                },
+                {
+                    name: '12 Month Avg',
+                    value: formatCurrency(spendingPeriods.last12AvgPrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.last12AvgSecondary),
+                },
+                {
+                    name: 'All Time',
+                    value: formatCurrency(spendingPeriods.allTimePrimary),
+                    secondaryValue: formatCurrency(spendingPeriods.allTimeSecondary),
+                },
             ], spark(spendingSeries, false), null, {
+                headlineSecondary: `${formatCurrency(recurringMonth)} are recurring`,
                 cardTestId: 'filtered-spending-card',
                 amountTestId: 'filtered-amount',
             });
 
             createCard(
                 `cashflow ${cashFlowMonth >= 0 ? 'positive' : 'negative'}`,
-                `${monthLabel(cashFlowMonthKey)} Cash Flow`,
+                `${cashFlowPeriods.anchorLabel} Cash Flow`,
                 formatCurrency(cashFlowMonth),
                 [
-                    { name: 'Last 3 Months Cash Flow', value: formatCurrency(cashFlowLast3) },
-                    { name: 'All Time Cash Flow', value: formatCurrency(cashFlowTotal) },
+                    {
+                        name: cashFlowPeriods.quarterLabel,
+                        value: formatCurrency(cashFlowPeriods.quarterPrimary),
+                        valueTone: cashFlowPeriods.quarterPrimary >= 0 ? 'pos' : 'neg',
+                    },
+                    {
+                        name: cashFlowPeriods.ytdLabel,
+                        value: formatCurrency(cashFlowPeriods.ytdPrimary),
+                        valueTone: cashFlowPeriods.ytdPrimary >= 0 ? 'pos' : 'neg',
+                    },
+                    {
+                        name: '12 Month Avg',
+                        value: formatCurrency(cashFlowPeriods.last12AvgPrimary),
+                        valueTone: cashFlowPeriods.last12AvgPrimary >= 0 ? 'pos' : 'neg',
+                    },
+                    {
+                        name: 'All Time',
+                        value: formatCurrency(cashFlowPeriods.allTimePrimary),
+                        valueTone: cashFlowPeriods.allTimePrimary >= 0 ? 'pos' : 'neg',
+                    },
                 ],
                 spark(cashFlowSeries, true),
                 null,
@@ -3578,7 +3744,9 @@ createApp({
             createCard('details', 'Details', txCount.toLocaleString('en-US'), [
                 { name: 'Transfers', value: formatCurrency(transfers) },
                 { name: 'Investments', value: formatCurrency(investment) },
-            ], null, 'transactions');
+            ], null, null, {
+                headlineSecondary: 'transactions',
+            });
         }
 
         function buildCategoryBreakdown(agg) {
