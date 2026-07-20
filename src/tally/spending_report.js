@@ -3373,11 +3373,10 @@ createApp({
 
             const delta = last - baseline;
             const pct = Math.abs(delta / baseline * 100);
-            const anchorMonth = monthLabel(monthKeys[len - 1]);
             return {
                 arrow: delta >= 0 ? '↑' : '↓',
                 value: `${delta >= 0 ? '+' : '-'}${pct.toFixed(1)}%`,
-                sentence: ` ${anchorMonth} vs prior ${n} month${n === 1 ? '' : 's'}`,
+                sentence: ` vs prior ${n} month${n === 1 ? '' : 's'}`,
                 cls: (delta >= 0) === upIsGood ? 'pos' : 'neg',
             };
         }
@@ -3402,8 +3401,11 @@ createApp({
             const months = Math.max(orderedMonthKeys.length, 1);
             const cashFlowTotal = income + credits - spending - investment;
 
+            const incomeOnlySeries = orderedMonthKeys.map(mk => agg.incomeByMonth[mk] || 0);
+            const creditsSeries = orderedMonthKeys.map(mk => agg.creditsByMonth[mk] || 0);
             const incomeSeries = orderedMonthKeys.map(mk => (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0));
             const spendingSeries = orderedMonthKeys.map(mk => agg.spendingByMonth[mk] || 0);
+            const recurringSeries = orderedMonthKeys.map(mk => agg.recurringSpendingByMonth?.[mk] || 0);
             const cashFlowSeries = orderedMonthKeys.map(mk =>
                 (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0) - (agg.spendingByMonth[mk] || 0) - (agg.investmentByMonth[mk] || 0)
             );
@@ -3448,7 +3450,13 @@ createApp({
 
                 const detailWrap = document.createElement('div');
                 detailWrap.className = 'kpi-details';
+                if (options.detailsClass) detailWrap.classList.add(options.detailsClass);
                 for (const detail of details) {
+                    if (detail.dividerBefore) {
+                        const divider = document.createElement('div');
+                        divider.className = 'kpi-detail-divider';
+                        detailWrap.appendChild(divider);
+                    }
                     const row = document.createElement('div');
                     row.className = 'kpi-detail';
                     if (detail.breakdown) row.classList.add('breakdown-item');
@@ -3476,6 +3484,48 @@ createApp({
                 grid.appendChild(card);
             }
 
+            function lastActiveIndex(series) {
+                for (let i = series.length - 1; i >= 0; i--) {
+                    if (Math.abs(series[i] || 0) > 0.0001) return i;
+                }
+                return Math.max(0, series.length - 1);
+            }
+
+            function rangeSum(series, startIdx, endIdx) {
+                if (!series.length) return 0;
+                let total = 0;
+                for (let i = Math.max(0, startIdx); i <= Math.min(endIdx, series.length - 1); i++) {
+                    total += series[i] || 0;
+                }
+                return total;
+            }
+
+            function lastNSeriesTotal(series, endIdx, count) {
+                return rangeSum(series, endIdx - count + 1, endIdx);
+            }
+
+            const incomeIdx = lastActiveIndex(incomeSeries);
+            const spendingIdx = lastActiveIndex(spendingSeries);
+            const cashFlowIdx = lastActiveIndex(cashFlowSeries);
+
+            const incomeMonthKey = orderedMonthKeys[incomeIdx];
+            const spendingMonthKey = orderedMonthKeys[spendingIdx];
+            const cashFlowMonthKey = orderedMonthKeys[cashFlowIdx];
+
+            const incomeMonth = incomeOnlySeries[incomeIdx] || 0;
+            const creditsMonth = creditsSeries[incomeIdx] || 0;
+            const incomeLast3 = lastNSeriesTotal(incomeOnlySeries, incomeIdx, 3);
+            const creditsLast3 = lastNSeriesTotal(creditsSeries, incomeIdx, 3);
+
+            const spendingMonth = spendingSeries[spendingIdx] || 0;
+            const recurringMonth = recurringSeries[spendingIdx] || 0;
+            const spendingLast3 = lastNSeriesTotal(spendingSeries, spendingIdx, 3);
+            const recurringLast3 = lastNSeriesTotal(recurringSeries, spendingIdx, 3);
+            const recurringAll = recurringSeries.reduce((sum, value) => sum + (value || 0), 0);
+
+            const cashFlowMonth = cashFlowSeries[cashFlowIdx] || 0;
+            const cashFlowLast3 = lastNSeriesTotal(cashFlowSeries, cashFlowIdx, 3);
+
             function spark(series, upIsGood) {
                 const trimmed = trimTrailingZeroMonths(series, orderedMonthKeys);
                 const trend = trendStatement(trimmed.series, trimmed.monthKeys, upIsGood);
@@ -3487,42 +3537,43 @@ createApp({
                 };
             }
 
-            createCard('income', 'Income', formatCurrency(income + credits), [
-                { name: 'Income', value: formatCurrency(income), perMonth: `${formatCurrency(income / months)}/mo` },
-                { name: 'Credits', value: formatCurrency(credits), perMonth: `${formatCurrency(credits / months)}/mo` },
+            createCard('income', `${monthLabel(incomeMonthKey)} Income`, formatCurrency(incomeMonth), [
+                { name: `${monthLabel(incomeMonthKey)} Income`, value: formatCurrency(incomeMonth) },
+                { name: `${monthLabel(incomeMonthKey)} Credits`, value: formatCurrency(creditsMonth) },
+                { dividerBefore: true, name: 'Last 3 Months Income', value: formatCurrency(incomeLast3) },
+                { name: 'Last 3 Months Credits', value: formatCurrency(creditsLast3) },
+                { dividerBefore: true, name: 'All Time Income', value: formatCurrency(income) },
+                { name: 'All Time Credits', value: formatCurrency(credits) },
             ], spark(incomeSeries, true));
 
-            createCard('spending', 'Spending', formatCurrency(spending), [
-                { name: 'Avg / month', value: formatCurrency(spending / months) },
-                { name: 'Fixed / month', value: formatCurrency(fixedMonthlyBaseline) },
+            createCard('spending', `${monthLabel(spendingMonthKey)} Spending`, formatCurrency(spendingMonth), [
+                { name: `${monthLabel(spendingMonthKey)} Spending`, value: formatCurrency(spendingMonth) },
+                { name: `${monthLabel(spendingMonthKey)} Recurring`, value: formatCurrency(recurringMonth) },
+                { dividerBefore: true, name: 'Last 3 Months Spending', value: formatCurrency(spendingLast3) },
+                { name: 'Last 3 Months Recurring', value: formatCurrency(recurringLast3) },
+                { dividerBefore: true, name: 'All Time Spending', value: formatCurrency(spending) },
+                { name: 'All Time Recurring', value: formatCurrency(recurringAll) },
             ], spark(spendingSeries, false), null, {
                 cardTestId: 'filtered-spending-card',
                 amountTestId: 'filtered-amount',
             });
 
-            createCard(`cashflow ${cashFlowTotal >= 0 ? 'positive' : 'negative'}`, 'Cash Flow', formatCurrency(cashFlowTotal), [
+            createCard(
+                `cashflow ${cashFlowMonth >= 0 ? 'positive' : 'negative'}`,
+                `${monthLabel(cashFlowMonthKey)} Cash Flow`,
+                formatCurrency(cashFlowMonth),
+                [
+                    { name: 'Last 3 Months Cash Flow', value: formatCurrency(cashFlowLast3) },
+                    { name: 'All Time Cash Flow', value: formatCurrency(cashFlowTotal) },
+                ],
+                spark(cashFlowSeries, true),
+                null,
                 {
-                    name: 'Income',
-                    nameClass: 'income-label',
-                    value: `+${formatCurrency(income)}`,
-                    breakdown: true,
-                    onClick: () => addFilter('income', 'tag'),
-                },
-                {
-                    name: 'Credits',
-                    value: `+${formatCurrency(credits)}`,
-                    breakdown: true,
-                },
-                {
-                    name: 'Spending',
-                    value: `-${formatCurrency(spending)}`,
-                    breakdown: true,
-                },
-                { name: 'Avg / month', value: formatCurrency(cashFlowTotal / months) },
-            ], spark(cashFlowSeries, true), null, {
-                cardTestId: 'cashflow-card',
-                amountTestId: 'cashflow-amount',
-            });
+                    detailsClass: 'cashflow-details',
+                    cardTestId: 'cashflow-card',
+                    amountTestId: 'cashflow-amount',
+                }
+            );
 
             createCard('details', 'Details', txCount.toLocaleString('en-US'), [
                 { name: 'Transfers', value: formatCurrency(transfers) },

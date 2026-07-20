@@ -2045,13 +2045,23 @@ footer {
 .kpi-detail {
     display: flex;
     justify-content: space-between;
+    align-items: baseline;
     font-size: 0.78rem;
+    min-height: 1.1rem;
+}
+.kpi-detail-divider {
+    height: 1px;
+    background: var(--border-light);
+    margin: 0.22rem 0 0.1rem;
 }
 .kpi-detail .name { color: var(--text-secondary); }
 .kpi-detail .value {
     color: var(--text-lighter);
     font-weight: 500;
     font-variant-numeric: tabular-nums;
+}
+.kpi-details.cashflow-details {
+    gap: 0.3rem;
 }
 .kpi-detail .permo {
     color: var(--text-muted);

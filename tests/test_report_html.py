@@ -275,8 +275,8 @@ class TestCalculationAccuracy:
         page.goto(f"file://{report_path}")
         # Total: 45.99 + 29.99 + 125.50 + 89.00 + 199.00 + 8.50 + 12.00
         #        + 156.00 + 55.00 + 9.00 + 234.00 + 67.00 = 1030.98 ≈ $1,031
-        # The filtered view card shows spending for visible transactions
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$1,031")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time Spending").locator(".value")).to_contain_text("$1,031")
 
     def test_shopping_category_total(self, page: Page, report_path):
         """Shopping category total is correct."""
@@ -301,8 +301,8 @@ class TestCalculationAccuracy:
         page.get_by_test_id("tag-badge").filter(has_text="david").first.click()
 
         # David's transactions total: $772 (rounded)
-        # The filtered view card shows spending for visible transactions
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$772")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time Spending").locator(".value")).to_contain_text("$772")
 
     def test_tag_filter_updates_merchant_count(self, page: Page, report_path):
         """Merchant transaction count updates when filtered by tag."""
@@ -335,13 +335,14 @@ class TestCalculationAccuracy:
 
         # Apply filter
         page.get_by_test_id("tag-badge").filter(has_text="david").first.click()
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$772")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time Spending").locator(".value")).to_contain_text("$772")
 
         # Clear filter by clicking the remove button on the filter chip
         page.get_by_test_id("filter-chip-remove").first.click()
 
         # Original total restored
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$1,031")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time Spending").locator(".value")).to_contain_text("$1,031")
 
 
 # =============================================================================
@@ -574,30 +575,27 @@ class TestEdgeCasesAndCalculations:
     def test_credits_shown_in_cashflow_summary(self, page: Page, edge_case_report_path):
         """Credits are shown in the cash flow summary card."""
         page.goto(f"file://{edge_case_report_path}")
-        # Credits should appear in cash flow breakdown
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_item = cashflow_card.locator(".breakdown-item", has_text="Credits")
+        income_card = page.locator(".kpi-card.income")
+        credits_item = income_card.locator(".kpi-detail", has_text="All Time Credits")
         expect(credits_item).to_be_visible()
 
     def test_credits_amount_positive_in_summary(self, page: Page, edge_case_report_path):
-        """Credits are displayed as positive amounts in the summary card."""
+        """All-time credits are shown as a positive amount in Income details."""
         page.goto(f"file://{edge_case_report_path}")
-        # Credits should show with + prefix (refunds reduce spending)
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_value = cashflow_card.locator(".breakdown-item", has_text="Credits").locator(".value")
-        expect(credits_value).to_contain_text("+")
+        income_card = page.locator(".kpi-card.income")
+        credits_value = income_card.locator(".kpi-detail", has_text="All Time Credits").locator(".value")
+        expect(credits_value).to_contain_text("$150")
 
     # -------------------------------------------------------------------------
     # Cash Flow Calculation Tests
     # -------------------------------------------------------------------------
 
     def test_income_total_displayed(self, page: Page, edge_case_report_path):
-        """Income is shown in the cash flow card breakdown."""
+        """Income card is month-anchored and shows the latest month value."""
         page.goto(f"file://{edge_case_report_path}")
-        # Income: $3,000 (payroll) - shown as breakdown item in cashflow card
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        expect(cashflow_card.locator(".income-label")).to_be_visible()
-        expect(cashflow_card.locator("text=$3,000")).to_be_visible()
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator("h4")).to_contain_text("Mar '24 Income")
+        expect(income_card.locator(".kpi-value")).to_contain_text("$3,000")
 
     def test_transfers_in_filtered_view(self, page: Page, edge_case_report_path):
         """Transfers appear in filtered view card breakdown."""
@@ -607,12 +605,10 @@ class TestEdgeCasesAndCalculations:
         expect(filtered_card).to_be_visible()
 
     def test_cash_flow_calculation(self, page: Page, edge_case_report_path):
-        """Net cash flow = income - spending (transfers excluded, they just move money)."""
+        """Cash flow KPI value shows the latest month in the selected range."""
         page.goto(f"file://{edge_case_report_path}")
-        # Cash flow: $3,000 - $2,100 = $900
-        # Note: spending is net of refunds ($2,250 - $150 = $2,100)
-        # Transfers are excluded since they just move money between accounts
-        expect(page.get_by_test_id("cashflow-amount")).to_contain_text("$900")
+        # March cash flow: $3,000 income + $0 credits - $925 spending = $2,075
+        expect(page.get_by_test_id("cashflow-amount")).to_contain_text("$2,075")
 
     # -------------------------------------------------------------------------
     # Excluded Transaction Tests
@@ -620,21 +616,17 @@ class TestEdgeCasesAndCalculations:
     # -------------------------------------------------------------------------
 
     def test_income_shown_in_cashflow_card(self, page: Page, edge_case_report_path):
-        """Cash flow card shows income in breakdown."""
+        """Cash flow card shows the new compact detail rows."""
         page.goto(f"file://{edge_case_report_path}")
-        # Cash flow card should be visible with income breakdown
         expect(page.get_by_test_id("cashflow-card")).to_be_visible()
-        expect(page.get_by_test_id("cashflow-card").locator(".income-label")).to_be_visible()
-        # Filtered view card should also be visible
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail", has_text="Last 3 Months Cash Flow")).to_be_visible()
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail", has_text="All Time Cash Flow")).to_be_visible()
         expect(page.get_by_test_id("filtered-spending-card")).to_be_visible()
 
     def test_income_clickable_adds_filter(self, page: Page, edge_case_report_path):
-        """Clicking income in cash flow card adds an income tag filter."""
+        """Cash flow card keeps a compact two-line detail layout."""
         page.goto(f"file://{edge_case_report_path}")
-        # Click on income breakdown item in the cashflow card (scoped to avoid multiple matches)
-        page.get_by_test_id("cashflow-card").locator(".income-label").click()
-        # Should add an income tag filter
-        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail")).to_have_count(2)
 
     # -------------------------------------------------------------------------
     # Monthly Average Tests (shown in category section headers)
@@ -2242,23 +2234,20 @@ class TestCreditsDisplay:
     """Tests for credits/refunds display in summary cards."""
 
     def test_credits_shown_in_cash_flow(self, page: Page, report_with_credits):
-        """Credits are displayed in the Cash Flow summary card."""
+        """Credits are displayed in the Income summary card details."""
         page.goto(f"file://{report_with_credits}")
 
-        # Cash flow card should show Credits line
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        expect(cashflow_card.locator(".breakdown-item", has_text="Credits")).to_be_visible()
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator(".kpi-detail", has_text="All Time Credits")).to_be_visible()
 
     def test_credits_positive_display(self, page: Page, report_with_credits):
-        """Credits are shown as positive amounts with + prefix."""
+        """All-time credits remain positive in Income details."""
         page.goto(f"file://{report_with_credits}")
 
-        # Find the credits line in cash flow
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_item = cashflow_card.locator(".breakdown-item", has_text="Credits")
+        income_card = page.locator(".kpi-card.income")
+        credits_item = income_card.locator(".kpi-detail", has_text="All Time Credits")
         credits_value = credits_item.locator(".value")
-        # Should show positive amount (the $40 in credits)
-        expect(credits_value).to_contain_text("+")
+        expect(credits_value).to_contain_text("$40")
 
 
 # =============================================================================
@@ -2802,13 +2791,15 @@ class TestDateFilter:
         expect(page.get_by_test_id("filtered-amount")).not_to_contain_text("$0")
 
     def test_kpi_trend_label_updates_with_filter_anchor_month(self, page: Page, multiyear_report_path):
-        """KPI trend copy anchors to the last visible month and adjusts its prior
-        window count when date filters change."""
+        """KPI title anchors to the last visible month while trend text keeps only
+        the prior-window comparison count."""
         page.goto(f"file://{multiyear_report_path}")
 
         spending_trend = page.locator(".kpi-card.spending .kpi-trend")
+        spending_title = page.locator(".kpi-card.spending h4")
         expect(spending_trend).to_be_visible()
-        expect(spending_trend).to_contain_text("Jul '26 vs prior 12 months")
+        expect(spending_title).to_contain_text("Jul '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 12 months")
 
         _open_date_popover(page)
         page.get_by_test_id("date-year-tab-2025").click()
@@ -2816,7 +2807,8 @@ class TestDateFilter:
             page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
         page.get_by_test_id("date-apply").click()
 
-        expect(spending_trend).to_contain_text("Dec '25 vs prior 11 months")
+        expect(spending_title).to_contain_text("Dec '25 Spending")
+        expect(spending_trend).to_contain_text("vs prior 11 months")
         expect(spending_trend).not_to_contain_text("prior 6")
 
         _open_date_popover(page)
@@ -2829,7 +2821,8 @@ class TestDateFilter:
         page.get_by_test_id("date-end-text").blur()
         page.get_by_test_id("date-apply").click()
 
-        expect(spending_trend).to_contain_text("Jun '26 vs prior 4 months")
+        expect(spending_title).to_contain_text("Jun '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 4 months")
 
     def test_drill_calendar_commits_day_and_filters(self, page: Page, multiyear_report_path):
         """The Start drill calendar commits a day-precision date into its input,
@@ -3015,7 +3008,8 @@ class TestKpiTrendAnchoring:
     def test_spending_trend_ignores_trailing_transfer_only_month(self, page: Page, kpi_trailing_transfer_report_path):
         page.goto(f"file://{kpi_trailing_transfer_report_path}")
 
+        spending_title = page.locator(".kpi-card.spending h4")
         spending_trend = page.locator(".kpi-card.spending .kpi-trend")
         expect(spending_trend).to_be_visible()
-        expect(spending_trend).to_contain_text("Mar '26 vs prior 2 months")
-        expect(spending_trend).not_to_contain_text("Apr '26")
+        expect(spending_title).to_contain_text("Mar '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 2 months")
