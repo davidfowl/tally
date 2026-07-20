@@ -2395,22 +2395,22 @@ createApp({
             if (typeof ResizeObserver === 'undefined') return;
             if (chartLayoutObserver) chartLayoutObserver.disconnect();
 
-            chartLayoutObserver = new ResizeObserver(() => {
-                rerenderChartsDebounced();
+            const chartSection = document.querySelector('.chart-section');
+            if (!chartSection) return;
+
+            let lastWidth = Math.round(chartSection.getBoundingClientRect().width);
+
+            chartLayoutObserver = new ResizeObserver(entries => {
+                for (const entry of entries) {
+                    if (entry.target !== chartSection) continue;
+                    const nextWidth = Math.round(entry.contentRect.width);
+                    if (nextWidth === lastWidth) return;
+                    lastWidth = nextWidth;
+                    rerenderChartsDebounced();
+                }
             });
 
-            const targets = [
-                document.getElementById('app'),
-                document.querySelector('.chart-section'),
-                categoryTrendChart.value?.closest('.chart-wrapper'),
-                cashFlowTrendChart.value?.closest('.chart-wrapper'),
-                fixedVariableChart.value?.closest('.chart-wrapper'),
-                volatilityChart.value?.closest('.chart-wrapper'),
-            ].filter(Boolean);
-
-            for (const target of targets) {
-                chartLayoutObserver.observe(target);
-            }
+            chartLayoutObserver.observe(chartSection);
         }
 
         function formatMonthLabel(key) {
@@ -2818,9 +2818,6 @@ createApp({
             if (!(panelKey in chartPanels)) return;
             chartPanels[panelKey] = !chartPanels[panelKey];
             saveUiState();
-            if (chartsInitialized) {
-                nextTick(() => renderAllCharts());
-            }
         }
 
         function cssVar(name) {
@@ -3069,7 +3066,11 @@ createApp({
 
             const totalLabel = chart.options.ttNet ? 'Net' : 'Total';
             const total = chart.options.ttNet
-                ? rows.reduce((sum, row) => sum + ((row.name === 'Income' || row.name === 'Credits') ? row.value : -row.value), 0)
+                ? rows.reduce((sum, row) => {
+                    if (row.name === 'Income' || row.name === 'Credits') return sum + row.value;
+                    if (row.name === 'Spending') return sum - row.value;
+                    return sum;
+                }, 0)
                 : rows.reduce((sum, row) => sum + row.value, 0);
 
             el.textContent = '';
@@ -3299,7 +3300,15 @@ createApp({
         function chipLegend(el, items) {
             if (!el) return;
             el.textContent = '';
+
+            const hasNonZeroValues = values =>
+                Array.isArray(values) && values.some(v => Math.abs(Number(v) || 0) > 0.0001);
+
             for (const item of items) {
+                const isVisible = typeof item.visible === 'boolean'
+                    ? item.visible
+                    : (Array.isArray(item.values) ? hasNonZeroValues(item.values) : true);
+                if (!isVisible) continue;
                 const b = document.createElement('button');
                 b.className = `legend-chip${item.active ? ' active' : ''}`;
                 if (item.active) b.style.borderColor = item.color;
@@ -4253,7 +4262,7 @@ createApp({
                 cashState.page = 0;
                 cashState.comparePage = 0;
                 saveUiState();
-                renderAllCharts();
+                rerenderCashFlow();
             });
 
             const compareWrap = document.getElementById('cash-compare-wrap');
@@ -4290,7 +4299,7 @@ createApp({
                     },
                 });
                 if (legend) legend.textContent = '';
-                renderBucketPager('cash-chart-pager', [], cashState, 'none', renderAllCharts);
+                renderBucketPager('cash-chart-pager', [], cashState, 'none', rerenderCashFlow);
                 return;
             }
 
@@ -4299,10 +4308,10 @@ createApp({
             if (compareActive) {
                 renderCompareYearPager('cash-chart-pager', comparePageInfo, direction => {
                     cashState.comparePage += direction === 'older' ? 1 : -1;
-                    renderAllCharts();
+                    rerenderCashFlow();
                 });
             } else {
-                renderBucketPager('cash-chart-pager', allBuckets, cashState, cashState.grouping, renderAllCharts);
+                renderBucketPager('cash-chart-pager', allBuckets, cashState, cashState.grouping, rerenderCashFlow);
             }
 
             let labels = [];
@@ -4371,11 +4380,12 @@ createApp({
             chipLegend(legend, CASH_FLOW_SERIES.map(series => ({
                 label: series.label,
                 color: series.color,
+                values: monthKeys.map(mk => agg[series.byMonthKey]?.[mk] || 0),
                 active: !cashHidden.has(series.label),
                 onClick: () => {
                     if (cashHidden.has(series.label)) cashHidden.delete(series.label);
                     else cashHidden.add(series.label);
-                    renderAllCharts();
+                    rerenderCashFlow();
                 },
             })));
 
@@ -4417,7 +4427,7 @@ createApp({
                 fixedState.page = 0;
                 fixedState.comparePage = 0;
                 saveUiState();
-                renderAllCharts();
+                rerenderFixedVariable();
             });
 
             const compareWrap = document.getElementById('fixed-compare-wrap');
@@ -4457,17 +4467,17 @@ createApp({
                     },
                 });
                 if (legend) legend.textContent = '';
-                renderBucketPager('fixed-chart-pager', [], fixedState, 'none', renderAllCharts);
+                renderBucketPager('fixed-chart-pager', [], fixedState, 'none', rerenderFixedVariable);
             } else {
                 const allBuckets = buildBuckets(fixedState.grouping, monthKeys);
                 const pageInfo = pagedBuckets(allBuckets, fixedState, CHART_PAGE_SIZE);
                 if (compareActive) {
                     renderCompareYearPager('fixed-chart-pager', comparePageInfo, direction => {
                         fixedState.comparePage += direction === 'older' ? 1 : -1;
-                        renderAllCharts();
+                        rerenderFixedVariable();
                     });
                 } else {
-                    renderBucketPager('fixed-chart-pager', allBuckets, fixedState, fixedState.grouping, renderAllCharts);
+                    renderBucketPager('fixed-chart-pager', allBuckets, fixedState, fixedState.grouping, rerenderFixedVariable);
                 }
 
                 const gap = surfaceColor();
@@ -4538,11 +4548,12 @@ createApp({
                 chipLegend(legend, series.map(s => ({
                     label: s.label,
                     color: s.color,
+                    values: monthKeys.map(mk => s.byMonth?.[mk] || 0),
                     active: !fixedHidden.has(s.label),
                     onClick: () => {
                         if (fixedHidden.has(s.label)) fixedHidden.delete(s.label);
                         else fixedHidden.add(s.label);
-                        renderAllCharts();
+                        rerenderFixedVariable();
                     },
                 })));
             }
@@ -4744,9 +4755,24 @@ createApp({
             renderKpis(monthKeys, agg, fvModel.fixedMonthly);
             renderCategoryTrend(agg, monthKeys, topCategories, otherCategories);
             renderPagedHeatmap(agg, monthKeys, topCategories);
-            renderVolatility(agg, monthKeys);
-            renderAuditTable(agg.recurringMerchants);
             renderCashFlow(agg, monthKeys);
+            renderVolatility(agg, monthKeys);
+            renderFixedVariable(agg, monthKeys, fvModel);
+            renderAuditTable(agg.recurringMerchants);
+        }
+
+        function rerenderCashFlow() {
+            if (!chartsInitialized) return;
+            const monthKeys = getMonthKeys();
+            const agg = chartAggregations.value;
+            renderCashFlow(agg, monthKeys);
+        }
+
+        function rerenderFixedVariable() {
+            if (!chartsInitialized) return;
+            const monthKeys = getMonthKeys();
+            const agg = chartAggregations.value;
+            const fvModel = buildFixedVariableSeries(agg, monthKeys);
             renderFixedVariable(agg, monthKeys, fvModel);
         }
 
@@ -4783,7 +4809,7 @@ createApp({
                     cashState.page = 0;
                     cashState.comparePage = 0;
                     saveUiState();
-                    renderAllCharts();
+                    rerenderCashFlow();
                 });
             }
 
@@ -4794,7 +4820,7 @@ createApp({
                     fixedState.page = 0;
                     fixedState.comparePage = 0;
                     saveUiState();
-                    renderAllCharts();
+                    rerenderFixedVariable();
                 });
             }
 

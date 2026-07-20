@@ -2428,30 +2428,6 @@ footer {
     }
 }
 
-.split-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.7rem;
-    margin-top: 0;
-}
-.split-row .chart-container {
-    margin-top: 0;
-}
-.split-row.single-expanded {
-    grid-template-columns: 1fr;
-}
-.split-row.single-expanded .chart-container.collapsed {
-    order: 1;
-}
-.split-row.single-expanded .chart-container:not(.collapsed) {
-    order: 2;
-}
-@media (max-width: 1000px) {
-    .split-row {
-        grid-template-columns: 1fr;
-    }
-}
-
 .heatmap {
     display: grid;
     gap: 2px;
