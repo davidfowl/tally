@@ -1535,16 +1535,7 @@ createApp({
                         const recurrence = merchant.recurrence || null;
                         const recurringMonthlyCost = Number(merchant.recurringMonthlyCost || 0);
                         const isRecurringMerchant = recurrence && recurringMonthlyCost > 0;
-                        if (isRecurringMerchant && !seenRecurring.has(merchantId)) {
-                            seenRecurring.add(merchantId);
-                            recurringMerchants.push({
-                                id: merchantId,
-                                merchant: merchant.displayName,
-                                category: merchant.category,
-                                cadence: recurrence,
-                                recurringMonthlyCost,
-                            });
-                        }
+                        let recurringSpendingForMerchant = 0;
 
                         for (const txn of merchant.filteredTxns || []) {
                             const c = categorizeAmount(txn.amount, txn.tags || []);
@@ -1557,6 +1548,7 @@ createApp({
                                 byCategoryByMonth[catName][txn.month] =
                                     (byCategoryByMonth[catName][txn.month] || 0) + c.spending;
                                 if (isRecurringMerchant) {
+                                    recurringSpendingForMerchant += c.spending;
                                     recurringSpendingByMonth[txn.month] =
                                         (recurringSpendingByMonth[txn.month] || 0) + c.spending;
                                 }
@@ -1574,6 +1566,19 @@ createApp({
                                 transfersByMonth[txn.month] =
                                     (transfersByMonth[txn.month] || 0) + c.transferIn - c.transferOut;
                             }
+                        }
+
+                        // Keep fixed outputs aligned with spending logic by excluding
+                        // recurring merchants that have only transfer/income/investment txns.
+                        if (isRecurringMerchant && recurringSpendingForMerchant > 0 && !seenRecurring.has(merchantId)) {
+                            seenRecurring.add(merchantId);
+                            recurringMerchants.push({
+                                id: merchantId,
+                                merchant: merchant.displayName,
+                                category: merchant.category,
+                                cadence: recurrence,
+                                recurringMonthlyCost,
+                            });
                         }
                     }
                 }
@@ -3701,7 +3706,7 @@ createApp({
                     secondaryValue: formatCurrency(spendingPeriods.allTimeSecondary),
                 },
             ], spark(spendingSeries, false), null, {
-                headlineSecondary: `${formatCurrency(recurringMonth)} are recurring`,
+                headlineSecondary: `${formatCurrency(recurringMonth)} are fixed`,
                 cardTestId: 'filtered-spending-card',
                 amountTestId: 'filtered-amount',
             });
@@ -4543,9 +4548,12 @@ createApp({
             }
 
             if (caption) {
-                const names = fixedNames.length ? fixedNames.join(', ') : 'none in current filter';
+                const topFixedNames = fixedNames.slice(0, 10);
+                const names = topFixedNames.length ? topFixedNames.join(', ') : 'none in current filter';
+                const hiddenCount = Math.max(fixedNames.length - topFixedNames.length, 0);
+                const more = hiddenCount ? `, + ${hiddenCount} more` : '';
                 const truncation = compareActive && spanYears.length > compareYears.length ? ` · showing last ${COMPARE_YEARS_MAX} years` : '';
-                caption.textContent = `Fixed (${fixedNames.length}): ${names}${truncation}`;
+                caption.textContent = `Top 10 Fixed: ${names}${more}${truncation}`;
             }
         }
 
