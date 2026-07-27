@@ -50,9 +50,14 @@ def format_currency(amount: float, currency_format: str = "${amount}") -> str:
 
     Returns:
         Formatted currency string, e.g. "$1,234" or "1,234 zl"
+
+    Negative amounts put the minus in front of the whole thing ("-$1,234"),
+    matching formatCurrency() in spending_report.js so the CLI and the HTML
+    report never disagree.
     """
-    formatted_num = f"{amount:,.0f}"
-    return currency_format.format(amount=formatted_num)
+    formatted_num = f"{abs(amount):,.0f}"
+    sign = '-' if round(amount) < 0 else ''
+    return sign + currency_format.format(amount=formatted_num)
 
 
 def format_currency_decimal(amount: float, currency_format: str = "${amount}") -> str:
@@ -64,9 +69,23 @@ def format_currency_decimal(amount: float, currency_format: str = "${amount}") -
 
     Returns:
         Formatted currency string with decimals, e.g. "$1,234.56"
+
+    Negative amounts are rendered as "-$1,234.56" for the same reason as
+    format_currency().
     """
-    formatted_num = f"{amount:,.2f}"
-    return currency_format.format(amount=formatted_num)
+    formatted_num = f"{abs(amount):,.2f}"
+    sign = '-' if round(amount, 2) < 0 else ''
+    return sign + currency_format.format(amount=formatted_num)
+
+
+def format_currency_signed(amount: float, currency_format: str = "${amount}") -> str:
+    """Format an amount with an explicit leading sign.
+
+    The sign goes outside the currency symbol ("-$200.00"), which naive
+    formatting of a negative number would render as "$-200.00".
+    """
+    sign = '+' if amount > 0 else ''
+    return f"{sign}{format_currency_decimal(amount, currency_format)}"
 
 
 # ============================================================================
@@ -91,7 +110,33 @@ def generate_embeddings(items):
 # VUE-BASED HTML REPORT (Modern)
 # ============================================================================
 
-def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount}", sources=None, embedded_html=True, title=None):
+def _budgets_payload(budgets):
+    """Shape the budget report for the Vue app, or None when unused."""
+    if not budgets or not budgets.get('enabled') or not budgets.get('results'):
+        return None
+    from .budgets import budget_report_to_dict
+    return budget_report_to_dict(budgets)
+
+
+def _anomalies_payload(anomalies):
+    """Shape the anomaly report for the Vue app, or None when there is nothing."""
+    if not anomalies or not anomalies.get('enabled') or not anomalies.get('anomalies'):
+        return None
+    from .anomalies import anomaly_report_to_dict
+    return anomaly_report_to_dict(anomalies)
+
+
+def _duplicates_payload(duplicates):
+    """Shape the duplicate report for the Vue app, or None when clean."""
+    if not duplicates or not duplicates.get('enabled') or not duplicates.get('cross_file'):
+        return None
+    from .duplicates import duplicate_report_to_dict
+    return duplicate_report_to_dict(duplicates)
+
+
+def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount}", sources=None,
+                           embedded_html=True, title=None, budgets=None, anomalies=None,
+                           duplicates=None):
     """Write summary to HTML file using Vue 3 for client-side rendering.
 
     Args:
@@ -102,6 +147,9 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         sources: List of data source names (e.g., ['Amex', 'Chase'])
         embedded_html: If True (default), embed CSS/JS inline. If False, output separate files.
         title: Custom report title (e.g., "2025 Budget Analysis")
+        budgets: Optional budget report from budgets.build_budget_report()
+        anomalies: Optional report from anomalies.detect_anomalies()
+        duplicates: Optional report from duplicates.build_duplicate_report()
     """
     sources = sources or []
 
@@ -329,6 +377,11 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         'transfersNet': stats.get('transfers_net', 0),  # in - out
         # Investments (401K, IRA - excluded from spending)
         'investmentTotal': stats.get('investment_total', 0),
+        # Review data. Each key is null when the feature is unused, so the Vue
+        # app can hide the corresponding panel entirely.
+        'budgets': _budgets_payload(budgets),
+        'anomalies': _anomalies_payload(anomalies),
+        'duplicates': _duplicates_payload(duplicates),
     }
 
     # Assemble final HTML

@@ -41,9 +41,24 @@ merchants_file: config/merchants.rules
 #   most_specific         - Most specific rule wins. More conditions = wins.
 # rule_mode: first_match
 
-# Views file (optional) - custom spending views
-# Create config/views.rules and uncomment:
-# views_file: config/views.rules
+# Views file - custom spending views (see config/views.rules)
+views_file: config/views.rules
+
+# Budgets (optional) - monthly spending targets shown in the report.
+# Keys are a category, a Category/Subcategory, 'tag:<name>', or 'total'.
+# Run 'tally up --format summary' to see the category names in your data.
+# budgets:
+#   total: 5000              # all spending, per month
+#   Food: 800                # a whole category
+#   Food/Groceries: 500      # a subcategory
+#   tag:business: 400        # everything tagged 'business'
+#   Travel:                  # an annual pot instead of a monthly one
+#     amount: 6000
+#     period: yearly
+
+# Warn when the same transaction shows up in more than one file, which happens
+# when statement exports overlap. Set to false to silence the check.
+# duplicate_check: true
 
 # Home locations (auto-detected if not specified)
 # Transactions outside these locations are classified as travel
@@ -202,33 +217,42 @@ STARTER_VIEWS = '''# Tally Views Configuration (.rules format)
 #   Membership: "tag" in tags
 #   Arithmetic: +  -  *  /  %
 #
+# Run 'tally reference views' for the full syntax reference.
+
 # ============================================================================
-# SAMPLE VIEWS (uncomment and customize)
+# DEFAULT VIEWS
+# ============================================================================
+# These work with any set of categories because they group by spending
+# *behaviour* rather than by category name. Edit or delete freely - the
+# category breakdown in the report does not depend on them.
+
+[Every Month]
+description: Predictable recurring costs - rent, utilities, subscriptions
+filter: months >= 3 and cv < 0.3
+
+[Variable Recurring]
+description: Frequent but lumpy - groceries, fuel, shopping
+filter: months >= 3 and cv >= 0.3
+
+[Occasional]
+description: Shows up now and then rather than every month
+filter: months >= 2 and months < 3
+
+[One Off]
+description: Single-month spending, including big one-time purchases
+filter: months == 1
+
+# ============================================================================
+# MORE IDEAS (uncomment and customize)
 # ============================================================================
 
-# [Every Month]
-# description: Consistent recurring expenses (rent, utilities, subscriptions)
-# filter: months >= 6 and cv < 0.3
-
-# [Variable Recurring]
-# description: Frequent but inconsistent (groceries, shopping, delivery)
-# filter: months >= 6 and cv >= 0.3
-
-# [Periodic]
-# description: Quarterly or semi-annual (tuition, insurance)
-# filter: months >= 2 and months <= 5
+# [Large Purchases]
+# description: Big one-time expenses over 1,000
+# filter: total > 1000 and months <= 3
 
 # [Travel]
 # description: All travel expenses
 # filter: category == "Travel"
-
-# [Large Purchases]
-# description: Big one-time expenses over $1,000
-# filter: total > 1000 and months <= 3
-
-# [Food & Dining]
-# description: All food-related spending
-# filter: category == "Food"
 
 # [Subscriptions]
 # description: Streaming, software, memberships

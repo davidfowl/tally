@@ -26,6 +26,27 @@ tally workflow              # See next steps
 
 Tell your AI assistant: *"Use tally to categorize my transactions"*
 
+## Budgets
+
+Set monthly targets in `config/settings.yaml` and every report compares plan
+against actual:
+
+```yaml
+budgets:
+  total: 5000              # all spending, per month
+  Food: 800                # a category
+  Food/Groceries: 500      # a subcategory
+  tag:business: 400        # everything with a tag
+  Travel:                  # an annual pot instead of monthly
+    amount: 6000
+    period: yearly
+```
+
+`tally up` also flags what changed since previous months - price rises on
+recurring charges, new merchants, recurring bills that did not arrive, and
+category spikes - and warns when two statement exports overlap and would
+otherwise double count.
+
 ## Documentation
 
 Full documentation is available at **[tallyai.money](https://tallyai.money)**:
@@ -46,6 +67,7 @@ Full documentation is available at **[tallyai.money](https://tallyai.money)**:
 | `tally explain` | Explain merchant classifications |
 | `tally inspect` | Analyze CSV structure |
 | `tally reference` | Show full syntax reference |
+| `tally diag` | Diagnose config issues |
 
 ## License
 

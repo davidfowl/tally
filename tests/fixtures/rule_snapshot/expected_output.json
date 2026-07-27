@@ -587,9 +587,9 @@
   },
   "credits": [
     {
-      "amount": 10300.0,
-      "category": "Transfers",
-      "merchant": "Stock Sale Generic"
+      "amount": 125.5,
+      "category": "Subscriptions",
+      "merchant": "Apple Apps"
     }
   ],
   "merchants": [

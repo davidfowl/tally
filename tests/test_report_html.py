@@ -2125,3 +2125,199 @@ class TestTransformDirective:
 
         badge = txn_row.locator(".extra-fields-trigger")
         expect(badge).not_to_be_visible()
+
+
+# =============================================================================
+# Review panels: budgets, anomalies, duplicate warnings
+# =============================================================================
+
+@pytest.fixture(scope="module")
+def review_report_path(tmp_path_factory):
+    """A report exercising budgets, anomalies and duplicate detection.
+
+    Whole Foods runs at 200/month then jumps to 600, Netflix rises from 15.99
+    to 24.99, a new merchant appears in the final month, and one export
+    overlaps another so the same transaction is loaded twice.
+    """
+    tmp_dir = tmp_path_factory.mktemp("review_report")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    for d in (config_dir, data_dir, output_dir):
+        d.mkdir()
+
+    rows = [
+        "01/05/2025,WHOLEFDS MKT,200.00",
+        "02/05/2025,WHOLEFDS MKT,200.00",
+        "03/05/2025,WHOLEFDS MKT,200.00",
+        "04/28/2025,WHOLEFDS MKT,600.00",
+        "01/10/2025,NETFLIX.COM,15.99",
+        "02/10/2025,NETFLIX.COM,15.99",
+        "03/10/2025,NETFLIX.COM,15.99",
+        "04/10/2025,NETFLIX.COM,24.99",
+        "04/20/2025,NEW GYM MEMBERSHIP,120.00",
+    ]
+    (data_dir / "card.csv").write_text("Date,Description,Amount\n" + "\n".join(rows) + "\n")
+    # An overlapping re-export of the first row only.
+    (data_dir / "card-again.csv").write_text("Date,Description,Amount\n" + rows[0] + "\n")
+
+    (config_dir / "settings.yaml").write_text("""title: Review Test
+
+data_sources:
+  - name: Card
+    file: data/card.csv
+    format: "{date:%m/%d/%Y},{description},{amount}"
+    has_header: true
+  - name: Card Re-export
+    file: data/card-again.csv
+    format: "{date:%m/%d/%Y},{description},{amount}"
+    has_header: true
+
+merchants_file: config/merchants.rules
+
+budgets:
+  Food: 250
+  Subscriptions: 100
+  Nonexistent: 50
+""")
+
+    (config_dir / "merchants.rules").write_text("""[Whole Foods]
+match: contains("WHOLEFDS")
+category: Food
+subcategory: Grocery
+
+[Netflix]
+match: contains("NETFLIX")
+category: Subscriptions
+subcategory: Streaming
+
+[New Gym]
+match: contains("NEW GYM")
+category: Health
+subcategory: Fitness
+""")
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "up", "-o", str(report_file), "--config", str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+
+    return str(report_file)
+
+
+class TestBudgetPanel:
+    """Budget targets rendered in the HTML report."""
+
+    def test_budget_section_visible(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        expect(page.get_by_test_id("budget-section")).to_be_visible()
+
+    def test_one_row_per_budget(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        expect(page.get_by_test_id("budget-row")).to_have_count(3)
+
+    def test_over_budget_row_is_marked_over(self, page: Page, review_report_path):
+        """Food averages 300/month against a 250 target."""
+        page.goto(f"file://{review_report_path}")
+        food = page.get_by_test_id("budget-row").filter(has_text="Food")
+        expect(food).to_have_class(re.compile(r"\bover\b"))
+        expect(food).to_contain_text("Over budget")
+
+    def test_under_budget_row_is_marked_under(self, page: Page, review_report_path):
+        """Netflix averages well under the 100 subscriptions target."""
+        page.goto(f"file://{review_report_path}")
+        subs = page.get_by_test_id("budget-row").filter(has_text="Subscriptions")
+        expect(subs).to_have_class(re.compile(r"\bunder\b"))
+        expect(subs).to_contain_text("Within budget")
+
+    def test_header_counts_targets_over_budget(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        expect(page.get_by_test_id("budget-section")).to_contain_text("over budget")
+
+    def test_unmatched_budget_shows_a_suggestion(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        problem = page.locator(".budget-problem")
+        expect(problem).to_contain_text("Nonexistent")
+        expect(problem).to_contain_text("matched no transactions")
+
+    def test_bar_never_overflows_its_track(self, page: Page, review_report_path):
+        """An over-budget bar is capped at 100% width."""
+        page.goto(f"file://{review_report_path}")
+        widths = page.locator(".budget-bar-fill").evaluate_all(
+            "els => els.map(e => parseFloat(e.style.width))"
+        )
+        assert widths, "expected budget bars to render"
+        assert all(w <= 100 for w in widths)
+
+
+class TestAnomalyPanel:
+    """The 'worth a look' list in the HTML report."""
+
+    def test_anomaly_section_visible(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        expect(page.get_by_test_id("anomaly-section")).to_be_visible()
+
+    def test_price_increase_is_listed(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        expect(page.get_by_test_id("anomaly-section")).to_contain_text("Netflix")
+
+    def test_new_merchant_is_listed(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        expect(page.get_by_test_id("anomaly-section")).to_contain_text("New Gym")
+
+    def test_clicking_an_anomaly_filters_to_that_merchant(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        page.get_by_test_id("anomaly-row").filter(has_text="Netflix").first.click()
+        expect(page.get_by_test_id("filter-chip")).to_contain_text("Netflix")
+
+    def test_clicking_a_category_spike_filters_by_category(self, page: Page, review_report_path):
+        """A category spike names a category, so it must not filter by merchant.
+
+        Filtering "Food" as a merchant matches nothing and blanks the report.
+        """
+        page.goto(f"file://{review_report_path}")
+        spike = page.get_by_test_id("anomaly-row").filter(has_text="spiked").first
+        expect(spike).to_be_visible()
+        spike.click()
+
+        # The chip is a category filter (c), not a merchant filter (m).
+        chip = page.get_by_test_id("filter-chip")
+        expect(chip).to_contain_text("Food")
+        expect(chip.locator(".chip-type")).to_have_text("c")
+
+        # And the report still shows data rather than filtering everything out.
+        expect(page.get_by_test_id("filtered-amount")).not_to_have_text(
+            re.compile(r"^[^\d]*0([^\d]|$)"))
+
+
+class TestDuplicateBanner:
+    """The duplicate transaction warning in the HTML report."""
+
+    def test_banner_visible_when_exports_overlap(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        expect(page.get_by_test_id("duplicate-banner")).to_be_visible()
+
+    def test_banner_names_both_files(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        banner = page.get_by_test_id("duplicate-banner")
+        expect(banner).to_contain_text("card.csv")
+        expect(banner).to_contain_text("card-again.csv")
+
+    def test_banner_can_be_dismissed(self, page: Page, review_report_path):
+        page.goto(f"file://{review_report_path}")
+        page.get_by_test_id("duplicate-dismiss").click()
+        expect(page.get_by_test_id("duplicate-banner")).not_to_be_visible()
+
+    def test_no_banner_when_data_is_clean(self, page: Page, report_path):
+        """The standard fixture has no overlapping exports."""
+        page.goto(f"file://{report_path}")
+        expect(page.get_by_test_id("duplicate-banner")).not_to_be_visible()
+
+    def test_no_budget_panel_without_budgets(self, page: Page, report_path):
+        page.goto(f"file://{report_path}")
+        expect(page.get_by_test_id("budget-section")).not_to_be_visible()

@@ -11,6 +11,7 @@ import yaml
 from .format_parser import parse_format_string, is_special_parser_type
 from .section_engine import load_sections, SectionParseError
 from .path_utils import resolve_data_source_paths
+from .budgets import parse_budgets, BudgetConfigError
 
 
 def load_settings(config_dir, settings_file='settings.yaml'):
@@ -209,6 +210,22 @@ def load_config(config_dir, settings_file='settings.yaml'):
         })
         rule_mode = 'first_match'
     config['rule_mode'] = rule_mode
+
+    # Duplicate transaction detection (default on). Overlapping exports are easy
+    # to create with folder/glob sources and silently double count.
+    duplicate_check = config.get('duplicate_check', True)
+    if isinstance(duplicate_check, str):
+        duplicate_check = duplicate_check.strip().lower() not in ('off', 'false', 'no', '0')
+    config['duplicate_check'] = bool(duplicate_check)
+
+    # Budget targets (optional). Parsed here so that a malformed block is
+    # reported once, with the same message, by every command.
+    config['_budgets'] = []
+    config['_budget_error'] = None
+    try:
+        config['_budgets'] = parse_budgets(config)
+    except BudgetConfigError as e:
+        config['_budget_error'] = str(e)
 
 
     # Load merchants file (optional - merchants_file in settings.yaml)

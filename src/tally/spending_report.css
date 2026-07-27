@@ -1449,3 +1449,285 @@ section:nth-child(5) { animation-delay: 0.4s; }
 }
 
 
+
+/* ============================================================
+   REVIEW PANELS - duplicates, budgets, anomalies
+   ============================================================ */
+
+/* ---------- Duplicate warning banner ---------- */
+.duplicate-banner {
+    background: color-mix(in srgb, var(--accent-orange) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-orange) 45%, transparent);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+}
+.duplicate-banner-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+.duplicate-icon {
+    color: var(--accent-orange);
+    font-size: 1.2rem;
+    line-height: 1.4;
+}
+.duplicate-headline {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.duplicate-headline strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.duplicate-sub {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+.duplicate-dismiss {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.25rem;
+}
+.duplicate-dismiss:hover {
+    color: var(--text-primary);
+}
+.duplicate-table {
+    width: 100%;
+    margin-top: 0.75rem;
+    border-collapse: collapse;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.8rem;
+    color: var(--text-lighter);
+}
+.duplicate-table td {
+    padding: 0.25rem 0.5rem 0.25rem 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.duplicate-table .dup-amount {
+    text-align: right;
+    color: var(--text-primary);
+}
+.duplicate-table .dup-desc {
+    max-width: 320px;
+    width: 100%;
+}
+.duplicate-table .dup-files {
+    color: var(--text-muted);
+    text-align: right;
+}
+.duplicate-more {
+    background: none;
+    border: 1px solid var(--border-medium);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    padding: 0.25rem 0.6rem;
+}
+.duplicate-more:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+.duplicate-hint {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin: 0.75rem 0 0;
+}
+.duplicate-hint code {
+    background: var(--bg-code);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
+}
+
+/* ---------- Budgets ---------- */
+.budget-section,
+.anomaly-section {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+.budget-section .section-header,
+.anomaly-section .section-header {
+    margin: -1.5rem -1.5rem 1.5rem -1.5rem;
+    padding: 1rem 1.5rem;
+    border-radius: 16px 16px 0 0;
+}
+.budget-headline,
+.anomaly-headline {
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: var(--bg-table-header);
+    color: var(--text-secondary);
+}
+.budget-headline.over {
+    background: color-mix(in srgb, var(--accent-red) 18%, transparent);
+    color: var(--accent-red);
+}
+.budget-headline.ok {
+    background: color-mix(in srgb, var(--accent-green) 15%, transparent);
+    color: var(--accent-green);
+}
+.budget-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.1rem;
+}
+@media (min-width: 900px) {
+    .budget-list {
+        grid-template-columns: repeat(2, 1fr);
+        column-gap: 2rem;
+    }
+}
+.budget-row-head,
+.budget-row-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+}
+.budget-label {
+    color: var(--text-primary);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.budget-numbers {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+.budget-numbers strong {
+    color: var(--text-primary);
+}
+.budget-of {
+    color: var(--text-muted);
+    margin-left: 0.35rem;
+}
+.budget-bar {
+    background: var(--bg-table-header);
+    border-radius: 999px;
+    height: 8px;
+    margin: 0.45rem 0 0.35rem;
+    overflow: hidden;
+}
+.budget-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.4s ease-out;
+    background: var(--accent-green);
+}
+.budget-row.near .budget-bar-fill {
+    background: var(--accent-yellow);
+}
+.budget-row.over .budget-bar-fill {
+    background: var(--accent-red);
+}
+.budget-row-foot {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.budget-row.over .budget-status,
+.budget-row.over .budget-variance {
+    color: var(--accent-red);
+}
+.budget-row.near .budget-status,
+.budget-row.near .budget-variance {
+    color: var(--accent-yellow);
+}
+.budget-row.under .budget-status,
+.budget-row.under .budget-variance {
+    color: var(--accent-green);
+}
+.budget-variance {
+    font-family: 'SF Mono', Monaco, monospace;
+    white-space: nowrap;
+}
+.budget-note {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-top: 0.3rem;
+}
+.budget-problem {
+    background: color-mix(in srgb, var(--accent-orange) 10%, transparent);
+    border-left: 3px solid var(--accent-orange);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 1.25rem;
+    padding: 0.6rem 0.9rem;
+}
+.budget-problem strong {
+    color: var(--text-primary);
+}
+.budget-partial {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin: 1rem 0 0;
+}
+
+/* ---------- Worth a look ---------- */
+.anomaly-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.anomaly-row {
+    align-items: flex-start;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    transition: background 0.15s;
+}
+.anomaly-row:hover {
+    background: var(--bg-card-hover);
+}
+.anomaly-icon {
+    line-height: 1.5;
+    width: 1rem;
+    text-align: center;
+    color: var(--text-muted);
+}
+.anomaly-row.warn .anomaly-icon {
+    color: var(--accent-orange);
+}
+.anomaly-body {
+    flex: 1;
+    min-width: 0;
+}
+.anomaly-title {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+.anomaly-detail {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 0.1rem;
+}
+.anomaly-impact {
+    color: var(--text-muted);
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+.anomaly-more {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin: 0.75rem 0 0;
+}

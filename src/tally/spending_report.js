@@ -486,6 +486,10 @@ createApp({
         const groupByMode = ref('merchant'); // 'merchant' or 'subcategory'
         const sortConfig = reactive({}); // { 'cat:Food': { column: 'total', dir: 'desc' } }
         const includeNegativeTotals = ref(false); // show categories with negative filteredTotal
+        const budgetsCollapsed = ref(false);
+        const anomaliesCollapsed = ref(false);
+        const duplicatesDismissed = ref(false);
+        const duplicatesExpanded = ref(false);
 
         // Chart refs
         const monthlyChart = ref(null);
@@ -509,6 +513,46 @@ createApp({
             const sources = data.sources || [];
             return sources.length > 0 ? `Data from ${sources.join(', ')}` : '';
         });
+
+        // ---------- Review data (budgets, anomalies, duplicates) ----------
+        // Each of these is null unless the corresponding feature produced
+        // something, so the panels disappear entirely rather than rendering
+        // empty shells.
+        const budgetReport = computed(() => spendingData.value.budgets || null);
+        const budgetTargets = computed(() => (budgetReport.value && budgetReport.value.targets) || []);
+        const budgetProblems = computed(() => (budgetReport.value && budgetReport.value.problems) || []);
+        const budgetsOverCount = computed(() => budgetTargets.value.filter(b => b.status === 'over').length);
+
+        const anomalyReport = computed(() => spendingData.value.anomalies || null);
+        const anomalyItems = computed(() => (anomalyReport.value && anomalyReport.value.items) || []);
+
+        const duplicateReport = computed(() => spendingData.value.duplicates || null);
+        const duplicateGroups = computed(() => (duplicateReport.value && duplicateReport.value.cross_file) || []);
+        const visibleDuplicates = computed(() =>
+            duplicatesExpanded.value ? duplicateGroups.value : duplicateGroups.value.slice(0, 5)
+        );
+
+        // Budget bar width is capped so a 300% overspend still renders a full
+        // bar rather than overflowing its container.
+        function budgetBarWidth(target) {
+            return Math.min(target.pct_used || 0, 100) + '%';
+        }
+
+        function budgetStatusLabel(target) {
+            if (target.status === 'over') return 'Over budget';
+            if (target.status === 'near') return 'Close to limit';
+            return 'Within budget';
+        }
+
+        function budgetPeriodSuffix(target) {
+            return target.period === 'yearly' ? '/yr' : '/mo';
+        }
+
+        // A category_spike anomaly's subject is a category, not a merchant.
+        // Filtering it as a merchant would match nothing and blank the report.
+        function anomalyFilterType(item) {
+            return item.kind === 'category_spike' ? 'category' : 'merchant';
+        }
 
         // Core filtering - returns sections with filtered merchants and transactions
         const filteredSections = computed(() => {
@@ -1536,6 +1580,15 @@ createApp({
             return formatted;
         }
 
+        // Currency with an explicit sign, used for budget variances where the
+        // direction matters as much as the magnitude.
+        function formatCurrencySigned(amount) {
+            const formatted = formatCurrency(Math.abs(amount || 0));
+            if (amount > 0) return '+' + formatted;
+            if (amount < 0) return '-' + formatted;
+            return formatted;
+        }
+
         // Short format for chart Y-axis (e.g., $1k, £1k, 1k zł)
         function formatCurrencyShort(amount) {
             if (amount >= 1000) {
@@ -2002,6 +2055,7 @@ createApp({
             activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
             showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
             currentView, groupByMode, sortConfig, includeNegativeTotals,
+            budgetsCollapsed, anomaliesCollapsed, duplicatesDismissed, duplicatesExpanded,
             // Refs
             monthlyChart, categoryPieChart, categoryByMonthChart,
             // Computed
@@ -2017,12 +2071,17 @@ createApp({
             investmentTotal,
             // Filtered view card
             filteredViewTotals,
+            // Review panels
+            budgetReport, budgetTargets, budgetProblems, budgetsOverCount,
+            anomalyReport, anomalyItems,
+            duplicateReport, duplicateGroups, visibleDuplicates,
+            budgetBarWidth, budgetStatusLabel, budgetPeriodSuffix, anomalyFilterType,
             // All transactions section
             groupedTransactions, expandedTransactions,
             // Methods
             addFilter, removeFilter, toggleFilterMode, clearFilters, addMonthFilter,
             toggleExpand, toggleSection, toggleSort, sortedMerchants,
-            formatCurrency, formatDate, formatMonthLabel, formatPct, filterTypeChar,
+            formatCurrency, formatCurrencySigned, formatDate, formatMonthLabel, formatPct, filterTypeChar,
             highlightDescription,
             onSearchInput, onSearchKeydown, selectAutocompleteItem,
             toggleTheme

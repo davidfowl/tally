@@ -551,6 +551,45 @@ def cmd_diag(args):
         print("    filter: months >= 6 and cv < 0.3")
     print()
 
+    # Budgets configuration
+    print("BUDGETS")
+    print("-" * 70)
+    budget_error = config.get('_budget_error') if config else None
+    budgets = config.get('_budgets') if config else None
+    if budget_error:
+        print(f"  {C.RED}✗{C.RESET}  Invalid 'budgets' block in settings.yaml")
+        for line in budget_error.splitlines():
+            print(f"     {line}")
+    elif budgets:
+        print(f"Targets defined: {len(budgets)}")
+        print()
+        for budget in budgets:
+            period = 'per year' if budget.period == 'yearly' else 'per month'
+            print(f"  [{budget.key}]")
+            print(f"    scope: {budget.scope_type}")
+            print(f"    target: {budget.target:,.2f} {period}")
+    else:
+        print("Not configured (optional)")
+        print("  To track spending against targets, add to settings.yaml:")
+        print("    budgets:")
+        print("      total: 5000            # all spending, per month")
+        print("      Food: 800              # a category")
+        print("      Food/Groceries: 500    # a subcategory")
+        print("      tag:business: 400      # everything with a tag")
+    print()
+
+    # Duplicate detection
+    print("DUPLICATE CHECK")
+    print("-" * 70)
+    if config and config.get('duplicate_check', True):
+        print("Enabled (default)")
+        print("  Warns when the same date, amount and description appear in more")
+        print("  than one file, which usually means two exports overlap.")
+        print("  Disable with: duplicate_check: false")
+    else:
+        print("Disabled via 'duplicate_check: false' in settings.yaml")
+    print()
+
     # JSON output option
     if args.format == 'json':
         print("JSON OUTPUT")
@@ -562,6 +601,15 @@ def cmd_diag(args):
             'settings_file': settings_path,
             'settings_exists': os.path.exists(settings_path),
             'data_sources': [],
+            'budgets': {
+                'configured': bool(budgets),
+                'error': budget_error,
+                'targets': [
+                    {'key': b.key, 'scope': b.scope_type, 'target': b.target, 'period': b.period}
+                    for b in (budgets or [])
+                ],
+            },
+            'duplicate_check': bool(config.get('duplicate_check', True)) if config else True,
             'rules': {
                 'user_rules_path': diag['user_rules_path'],
                 'user_rules_exists': diag['user_rules_exists'],
