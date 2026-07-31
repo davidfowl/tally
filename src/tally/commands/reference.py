@@ -229,6 +229,12 @@ def cmd_reference(args):
   {C.CYAN}investment{C.RESET}   Retirement contributions (401K, IRA, HSA)
                {C.DIM}→ Tracked separately in Investment card and charts{C.RESET}
 
+  {C.CYAN}fixed{C.RESET}        Force merchant into fixed/recurring spend charts
+               {C.DIM}→ Overrides recurrence inference{C.RESET}
+
+  {C.CYAN}variable{C.RESET}     Force merchant out of fixed/recurring spend charts
+               {C.DIM}→ Overrides recurrence inference{C.RESET}
+
   {C.CYAN}refund{C.RESET}       Returns and credits on purchases
                {C.DIM}→ Shown in "Credits Applied" section, nets against spending{C.RESET}
 """)

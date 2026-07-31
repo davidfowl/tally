@@ -3323,3 +3323,100 @@ field: fee = 0
             assert info['extra_fields'] == {'fee': 0}
 
             clear_engine_cache()
+
+
+class TestRecurrenceClassification:
+    """Tests for recurrence inference and tag overrides in analyze_transactions."""
+
+    def _txn(self, merchant, amount, year, month, day, tags=None):
+        return {
+            'date': date(year, month, day),
+            'description': merchant,
+            'raw_description': merchant,
+            'merchant': merchant,
+            'amount': amount,
+            'category': 'Subscriptions',
+            'subcategory': 'General',
+            'source': 'test.csv',
+            'match_info': {'tags': tags or []},
+            'tags': tags or [],
+            'excluded': None,
+        }
+
+    def test_monthly_inference_requires_half_span(self):
+        txns = []
+
+        # Force an 8-month span in the dataset.
+        for m in range(1, 9):
+            txns.append(self._txn('Span Anchor', 10.0, 2025, m, 1))
+
+        # Active 3/8 months with consistent amounts: below ceil(8 * 0.5) = 4.
+        for m in (1, 3, 7):
+            txns.append(self._txn('Borderline Monthly', 50.0, 2025, m, 5))
+
+        stats = analyze_transactions(txns)
+        merchant = stats['by_merchant']['Borderline Monthly']
+
+        assert merchant['months_active'] == 3
+        assert merchant['recurrence'] is None
+        assert merchant['recurring_monthly_cost'] == 0
+
+    def test_monthly_inference_requires_low_cv(self):
+        txns = []
+
+        for m in range(1, 9):
+            txns.append(self._txn('Span Anchor', 10.0, 2025, m, 1))
+
+        # Active 4/8 months (meets threshold), but lumpy amounts fail cv < 0.3.
+        for m, amount in ((1, 10.0), (3, 10.0), (5, 10.0), (7, 200.0)):
+            txns.append(self._txn('Lumpy Utility', amount, 2025, m, 7))
+
+        stats = analyze_transactions(txns)
+        merchant = stats['by_merchant']['Lumpy Utility']
+
+        assert merchant['months_active'] == 4
+        assert merchant['cv'] >= 0.3
+        assert merchant['recurrence'] is None
+
+    def test_fixed_tag_override_forces_monthly(self):
+        txns = [
+            self._txn('Manual Fixed', 20.0, 2025, 1, 10, tags=['fixed']),
+            self._txn('Manual Fixed', 500.0, 2025, 6, 10, tags=['fixed']),
+        ]
+
+        stats = analyze_transactions(txns)
+        merchant = stats['by_merchant']['Manual Fixed']
+
+        assert merchant['recurrence'] == 'monthly'
+        assert merchant['recurring_monthly_cost'] > 0
+
+    def test_variable_tag_override_blocks_monthly(self):
+        txns = []
+
+        for m in range(1, 7):
+            txns.append(self._txn('Variable Override', 40.0, 2025, m, 8, tags=['variable']))
+
+        stats = analyze_transactions(txns)
+        merchant = stats['by_merchant']['Variable Override']
+
+        assert merchant['months_active'] == 6
+        assert merchant['cv'] < 0.3
+        assert merchant['recurrence'] is None
+        assert merchant['recurring_monthly_cost'] == 0
+
+    def test_annual_inference_detects_similar_12_month_spacing(self):
+        txns = []
+
+        # Force a long span so monthly inference cannot apply.
+        for m in range(1, 13):
+            txns.append(self._txn('Span Anchor', 5.0, 2025, m, 1))
+            txns.append(self._txn('Span Anchor', 5.0, 2026, m, 1))
+
+        txns.append(self._txn('Annual License', 1200.0, 2025, 2, 14))
+        txns.append(self._txn('Annual License', 1180.0, 2026, 2, 14))
+
+        stats = analyze_transactions(txns)
+        merchant = stats['by_merchant']['Annual License']
+
+        assert merchant['recurrence'] == 'annual'
+        assert merchant['recurring_monthly_cost'] == pytest.approx(((1200.0 + 1180.0) / 2) / 12, rel=1e-3)

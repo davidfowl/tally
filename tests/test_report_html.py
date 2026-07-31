@@ -817,34 +817,42 @@ class TestEdgeCasesAndCalculations:
         page.goto(f"file://{edge_case_report_path}")
         page.wait_for_timeout(500)  # Wait for Vue and Chart.js to initialize
 
-        # Access the Chart.js instance data from the monthly chart canvas
+        # Access the category trend chart and sum all stacked category datasets for Jan 2024.
         result = page.evaluate("""() => {
-            // Chart.js stores chart instance as a property on canvas
-            const canvas = document.querySelector('canvas');
-            if (!canvas) return { error: 'No canvas found' };
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
 
-            // Chart.js 3+ stores instance in Chart.instances or on element
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+
             const chartInstance = Chart.getChart(canvas);
             if (!chartInstance) return { error: 'No chart instance found' };
 
-            // Get the data from the chart
-            const labels = chartInstance.data.labels;
-            const data = chartInstance.data.datasets[0].data;
+            const labels = chartInstance.data.labels || [];
+            const janIdx = labels.findIndex(label => /^Jan(?:\\s|\\b)/i.test(String(label || '')));
+            if (janIdx < 0) return { error: 'January label not found', labels };
 
-            // Return as object with month labels as keys
-            const byMonth = {};
-            labels.forEach((label, idx) => {
-                byMonth[label] = data[idx];
-            });
-            return { byMonth, labels, data };
+            const datasets = chartInstance.data.datasets || [];
+            const monthlyTotal = datasets.reduce((sum, ds) => {
+                const val = Number(ds?.data?.[janIdx]) || 0;
+                return sum + val;
+            }, 0);
+
+            const negatives = datasets
+                .map(ds => ({
+                    label: ds?.label || '',
+                    value: Number(ds?.data?.[janIdx]) || 0,
+                }))
+                .filter(row => row.value < 0);
+
+            return { monthlyTotal, janIdx, labels, negatives };
         }""")
 
         if 'error' in result:
             pytest.fail(f"Could not access chart data: {result['error']}")
 
         # January should show $550 (positive amounts only), not $450 (with refund subtracted)
-        # The month label format is "Jan 2024"
-        january_total = result['byMonth'].get('Jan 2024', 0)
+        january_total = result['monthlyTotal']
 
         # This assertion documents the expected behavior after the fix:
         # Only positive amounts should be included in the chart
@@ -856,42 +864,51 @@ class TestEdgeCasesAndCalculations:
             f"Chart data: {result}"
         )
 
+        assert not result['negatives'], (
+            f"Found negative category values in Jan 2024 stacked data: {result['negatives']}"
+        )
+
     def test_chart_category_totals_exclude_negative_amounts(self, page: Page, edge_case_report_path):
         """Category totals in chart should only include positive amounts.
 
         Bug: chartAggregations.byCategory sums ALL transaction amounts including
-        negative ones, incorrectly reducing category totals in the pie/bar charts.
+        negative ones, incorrectly reducing category totals in the category chart.
 
         Fixture Refunds category total: -$150 (should NOT appear in chart data)
         """
         page.goto(f"file://{edge_case_report_path}")
         page.wait_for_timeout(500)
 
-        # Access the category pie chart data
+        # Access the category chart datasets and aggregate totals by dataset label.
         result = page.evaluate("""() => {
-            // Find the pie chart canvas (second canvas)
-            const canvases = document.querySelectorAll('canvas');
-            if (canvases.length < 2) return { error: 'Pie chart canvas not found' };
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
 
-            const pieCanvas = canvases[1];  // Pie chart is second
-            const chartInstance = Chart.getChart(pieCanvas);
-            if (!chartInstance) return { error: 'No pie chart instance found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
 
-            // Get category labels and values
-            const labels = chartInstance.data.labels;
-            const data = chartInstance.data.datasets[0].data;
+            const chartInstance = Chart.getChart(canvas);
+            if (!chartInstance) return { error: 'No category chart instance found' };
 
+            const datasets = chartInstance.data.datasets || [];
             const byCategory = {};
-            labels.forEach((label, idx) => {
-                byCategory[label] = data[idx];
+            const minByCategory = {};
+
+            datasets.forEach(ds => {
+                const label = ds?.label || '';
+                const values = (Array.isArray(ds?.data) ? ds.data : []).map(v => Number(v) || 0);
+                byCategory[label] = values.reduce((sum, v) => sum + v, 0);
+                minByCategory[label] = values.length ? Math.min(...values) : 0;
             });
-            return { byCategory, labels, data };
+
+            return { byCategory, minByCategory, datasetCount: datasets.length };
         }""")
 
         if 'error' in result:
-            pytest.fail(f"Could not access pie chart data: {result['error']}")
+            pytest.fail(f"Could not access category chart data: {result['error']}")
 
         by_category = result['byCategory']
+        min_by_category = result['minByCategory']
 
         # Refunds category should NOT be in chart data (all negative amounts)
         # or if present, should have 0 value (not -150)
@@ -900,6 +917,395 @@ class TestEdgeCasesAndCalculations:
             f"Refunds category total should be 0 or not present in chart data, "
             f"but got ${refunds_total}. Negative amounts should be excluded from charts. "
             f"Chart data: {result}"
+        )
+
+        refunds_min = min_by_category.get('Refunds', 0)
+        assert refunds_min >= 0, (
+            f"Refunds category contains negative monthly values in chart datasets: {refunds_min}. "
+            f"Chart data: {result}"
+        )
+
+    def test_volatility_chart_applies_top10_and_edge_padding(self, page: Page, edge_case_report_path):
+        """Volatility chart keeps top-10 rows and applies y-axis edge breathing room."""
+        page.goto(f"file://{edge_case_report_path}")
+        page.wait_for_timeout(500)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-volatility');
+            if (!panel) return { error: 'Volatility chart panel not found' };
+
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No volatility chart canvas found' };
+
+            const chartInstance = Chart.getChart(canvas);
+            if (!chartInstance) return { error: 'No volatility chart instance found' };
+
+            const labels = chartInstance.data?.labels || [];
+            const yOffset = chartInstance.options?.scales?.y?.offset;
+            const layoutPadding = chartInstance.options?.layout?.padding || {};
+            const topPadding = Number(layoutPadding.top || 0);
+            const bottomPadding = Number(layoutPadding.bottom || 0);
+
+            return {
+                labelCount: labels.length,
+                yOffset,
+                topPadding,
+                bottomPadding,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not access volatility chart data: {result['error']}")
+
+        assert result['labelCount'] <= 10, (
+            f"Volatility chart should render at most 10 rows, got {result['labelCount']}"
+        )
+        assert result['yOffset'] is True, (
+            f"Expected volatility y-axis offset=true for edge spacing, got {result['yOffset']}"
+        )
+        assert result['topPadding'] >= 10 and result['bottomPadding'] >= 10, (
+            f"Expected volatility layout padding top/bottom >= 10, got {result}"
+        )
+
+
+@pytest.fixture(scope="module")
+def chart_controls_report_path(tmp_path_factory):
+    """Generate a multi-year report for chart-control interaction tests.
+
+    Fixture properties:
+    - 30 months of data (2024-01 through 2026-06) so month paging is required.
+    - Multiple categories so focused/tooltip behavior can be validated.
+    - One category present only on alternating months to create zero-value buckets.
+    """
+    tmp_dir = tmp_path_factory.mktemp("chart_controls_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = []
+    for idx in range(30):
+        year = 2024 + (idx // 12)
+        month = (idx % 12) + 1
+        rows.append(f"{month:02d}/10/{year},ALPHA STORE,{120 + (idx % 5) * 10:.2f}")
+        if idx % 2 == 0:
+            rows.append(f"{month:02d}/12/{year},BETA SHOP,{55 + (idx % 4) * 5:.2f}")
+
+    csv_content = "Date,Description,Amount\n" + "\n".join(rows) + "\n"
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    settings_content = """title: "Tally Spending Analysis"
+
+data_sources:
+  - name: Test
+    file: data/transactions.csv
+    format: "{date},{description},{amount}"
+
+merchants_file: config/merchants.rules
+"""
+    (config_dir / "settings.yaml").write_text(settings_content)
+
+    rules_content = """[Alpha]
+match: contains("ALPHA STORE")
+category: Housing
+subcategory: Rent
+
+[Beta]
+match: contains("BETA SHOP")
+category: Shopping
+subcategory: Retail
+"""
+    (config_dir / "merchants.rules").write_text(rules_content)
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+
+    return str(report_file)
+
+
+def _goto_chart_report_fresh(page: Page, report_path: str):
+    """Reset persisted chart UI state so chart-control tests are deterministic."""
+    page.goto(f"file://{report_path}")
+    page.evaluate("""() => {
+        localStorage.removeItem('spending-report-ui-state-v1');
+    }""")
+    page.reload()
+    page.wait_for_timeout(250)
+
+
+class TestChartControlsMinimum:
+    """Minimum chart interaction coverage for core controls and tooltip behavior."""
+
+    def test_category_chart_grouping_switches_to_years(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        years_btn = page.locator("#cat-group-pills .proto-pill", has_text="Years")
+        expect(years_btn).to_be_visible()
+        years_btn.click()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const labels = chart.data?.labels || [];
+            const allYears = labels.every(label => /^\\d{4}$/.test(String(label || '')));
+            return { labels, allYears };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect category grouping chart: {result['error']}")
+
+        assert len(result['labels']) >= 3, f"Expected 3+ year labels, got {result['labels']}"
+        assert result['allYears'], f"Expected year-form labels after Years grouping, got {result['labels']}"
+
+    def test_category_chart_focused_mode_uses_line_and_bold_label(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        focused_box = page.locator("#cat-unstack-checkbox")
+        expect(focused_box).to_be_visible()
+        focused_box.check()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const focusedCount = (chart.data?.datasets || []).filter(ds => Number(ds.borderWidth || 0) >= 3).length;
+            const compareDisabled = !!document.getElementById('cat-compare-checkbox')?.disabled;
+
+            return {
+                type: chart.config?.type,
+                ttBoldLabel: chart.options?.ttBoldLabel || null,
+                focusedCount,
+                compareDisabled,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect focused chart mode: {result['error']}")
+
+        assert result['type'] == 'line', f"Focused mode should render a line chart, got {result['type']}"
+        assert result['ttBoldLabel'], f"Focused mode should set ttBoldLabel, got {result}"
+        assert result['focusedCount'] == 1, f"Expected exactly one focused series, got {result}"
+        assert result['compareDisabled'] is True, f"Compare should be disabled in focused mode: {result}"
+
+    def test_category_chart_compare_years_builds_year_split_datasets(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        compare_box = page.locator("#cat-compare-checkbox")
+        expect(compare_box).to_be_visible()
+        compare_box.check()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const datasets = chart.data?.datasets || [];
+            const years = [...new Set(datasets.map(ds => ds.ttYear).filter(Boolean))];
+            const labels = chart.data?.labels || [];
+
+            return {
+                labels,
+                years,
+                yearSubLabels: !!chart.options?.yearSubLabels,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect compare-years chart mode: {result['error']}")
+
+        assert len(result['years']) >= 2, f"Expected at least two compare years, got {result}"
+        assert result['yearSubLabels'] is True, f"Expected yearSubLabels enabled in compare mode, got {result}"
+        assert len(result['labels']) == 12, f"Expected month compare labels (12), got {result['labels']}"
+
+    def test_category_chart_month_grouping_pages_when_over_24_months(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        months_btn = page.locator("#cat-group-pills .proto-pill", has_text="Months")
+        expect(months_btn).to_be_visible()
+        months_btn.click()
+        page.wait_for_timeout(150)
+
+        pager_range = page.locator("#cat-chart-pager .pager-range")
+        expect(pager_range).to_be_visible()
+        expect(pager_range).to_contain_text("showing 24 of 30 months")
+
+        prev_btn = page.locator("#cat-chart-pager button").first
+        expect(prev_btn).to_be_enabled()
+        prev_btn.click()
+        page.wait_for_timeout(150)
+
+        expect(pager_range).to_contain_text("showing 6 of 30 months")
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+            return { labelCount: (chart.data?.labels || []).length };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect category pager state: {result['error']}")
+
+        assert result['labelCount'] == 6, f"Expected 6 labels on older page, got {result}"
+
+    def test_category_tooltip_hides_zero_rows(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const datasets = chart.data?.datasets || [];
+            const labels = chart.data?.labels || [];
+            let targetDataIndex = -1;
+            let hoveredDatasetIndex = -1;
+
+            for (let idx = 0; idx < labels.length; idx += 1) {
+                const vals = datasets.map(ds => Number(ds?.data?.[idx]) || 0);
+                const positiveCount = vals.filter(v => v > 0).length;
+                const zeroCount = vals.filter(v => Math.abs(v) < 1e-9).length;
+                if (positiveCount >= 1 && zeroCount >= 1) {
+                    targetDataIndex = idx;
+                    hoveredDatasetIndex = vals.findIndex(v => v > 0);
+                    break;
+                }
+            }
+
+            if (targetDataIndex < 0 || hoveredDatasetIndex < 0) {
+                return { error: 'No mixed zero/non-zero bucket found for tooltip test' };
+            }
+
+            const external = chart.options?.plugins?.tooltip?.external;
+            if (typeof external !== 'function') {
+                return { error: 'External tooltip handler unavailable' };
+            }
+
+            external({
+                chart,
+                tooltip: {
+                    opacity: 1,
+                    dataPoints: [{ dataIndex: targetDataIndex, datasetIndex: hoveredDatasetIndex }],
+                    caretX: 40,
+                    caretY: 40,
+                },
+            });
+
+            const tip = document.getElementById('ext-tooltip');
+            if (!tip) return { error: 'Tooltip element missing' };
+
+            const rowNames = Array.from(tip.querySelectorAll('.tt-row .tt-name'))
+                .map(el => (el.textContent || '').trim())
+                .filter(Boolean);
+            const zeroNames = datasets
+                .filter(ds => Math.abs(Number(ds?.data?.[targetDataIndex]) || 0) < 1e-9)
+                .map(ds => ds.label)
+                .filter(Boolean);
+
+            const includesZeroName = zeroNames.some(name => rowNames.includes(name));
+            return {
+                rowNames,
+                zeroNames,
+                includesZeroName,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not validate tooltip zero-row behavior: {result['error']}")
+
+        assert result['zeroNames'], f"Expected at least one zero-valued dataset in sampled bucket: {result}"
+        assert result['includesZeroName'] is False, (
+            f"Tooltip should hide zero rows but included one: {result}"
+        )
+
+    def test_category_compare_years_caps_window_and_pages(self, page: Page, multiyear_report_path):
+        _goto_chart_report_fresh(page, multiyear_report_path)
+
+        compare_box = page.locator("#cat-compare-checkbox")
+        expect(compare_box).to_be_visible()
+        compare_box.check()
+        page.wait_for_timeout(150)
+
+        pager_range = page.locator("#cat-chart-pager .pager-range")
+        expect(pager_range).to_be_visible()
+        expect(pager_range).to_contain_text("showing 3 of 4 years")
+
+        result_latest = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const years = [...new Set((chart.data?.datasets || []).map(ds => ds.ttYear).filter(Boolean))];
+            return { years };
+        }""")
+
+        if 'error' in result_latest:
+            pytest.fail(f"Could not inspect latest compare-year window: {result_latest['error']}")
+
+        assert len(result_latest['years']) == 3, (
+            f"Expected compare mode to cap at 3 years, got {result_latest}"
+        )
+
+        prev_btn = page.locator("#cat-chart-pager button").first
+        expect(prev_btn).to_be_enabled()
+        prev_btn.click()
+        page.wait_for_timeout(150)
+
+        result_older = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const years = [...new Set((chart.data?.datasets || []).map(ds => ds.ttYear).filter(Boolean))];
+            return { years };
+        }""")
+
+        if 'error' in result_older:
+            pytest.fail(f"Could not inspect older compare-year window: {result_older['error']}")
+
+        assert len(result_older['years']) == 3, (
+            f"Expected paged compare mode to keep a 3-year window, got {result_older}"
+        )
+        assert result_latest['years'] != result_older['years'], (
+            f"Expected year window to change when paging, but it did not. latest={result_latest}, older={result_older}"
         )
 
 

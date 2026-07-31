@@ -135,73 +135,8 @@
                 </div>
             </div>
 
-            <!-- Summary Cards -->
-            <div class="summary-grid">
-                <div class="card cashflow" data-testid="cashflow-card">
-                    <h2>Cash Flow</h2>
-                    <div class="amount" data-testid="cashflow-amount" :class="{ positive: cashFlow >= 0, negative: cashFlow < 0 }">
-                        {{ cashFlow >= 0 ? '+' : '' }}{{ formatCurrency(cashFlow) }}
-                    </div>
-                    <div class="breakdown">
-                        <div class="breakdown-item clickable" @click="addFilter('income', 'tag')">
-                            <span class="name income-label">Income</span>
-                            <span class="value">+{{ formatCurrency(incomeTotal) }}</span>
-                        </div>
-                        <div class="breakdown-item">
-                            <span class="name">Spending</span>
-                            <span class="value">-{{ formatCurrency(spendingTotal) }}</span>
-                        </div>
-                        <div class="breakdown-item" v-if="dataCreditsTotal > 0">
-                            <span class="name">Credits</span>
-                            <span class="value">+{{ formatCurrency(dataCreditsTotal) }}</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="card investment" data-testid="investment-card" v-if="investmentTotal > 0">
-                    <h2>Investments</h2>
-                    <div class="amount">
-                        {{ formatCurrency(investmentTotal) }}
-                    </div>
-                    <div class="breakdown">
-                        <div class="breakdown-item clickable" @click="addFilter('investment', 'tag')">
-                            <span class="name">401K, IRA, etc.</span>
-                            <span class="value">{{ formatCurrency(investmentTotal) }}</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="card filtered-spending" data-testid="filtered-spending-card">
-                    <h2>Filtered View</h2>
-                    <div class="amount" data-testid="filtered-amount" :class="{ positive: filteredViewTotals.hasIncome && filteredViewTotals.net >= 0 }">
-                        {{ filteredViewTotals.hasIncome && filteredViewTotals.net >= 0 ? '+' : '' }}{{ formatCurrency(filteredViewTotals.net) }}
-                    </div>
-                    <div class="breakdown">
-                        <div class="breakdown-item" v-if="filteredViewTotals.income > 0">
-                            <span class="name income-label">Income</span>
-                            <span class="value">+{{ formatCurrency(filteredViewTotals.income) }}</span>
-                        </div>
-                        <div class="breakdown-item" v-if="filteredViewTotals.spending > 0">
-                            <span class="name">Spending</span>
-                            <span class="value">{{ formatCurrency(filteredViewTotals.spending) }}</span>
-                        </div>
-                        <div class="breakdown-item" v-if="filteredViewTotals.credits > 0">
-                            <span class="name">Credits</span>
-                            <span class="value">+{{ formatCurrency(filteredViewTotals.credits) }}</span>
-                        </div>
-                        <div class="breakdown-item" v-if="filteredViewTotals.investment > 0">
-                            <span class="name">Investment</span>
-                            <span class="value">{{ formatCurrency(filteredViewTotals.investment) }}</span>
-                        </div>
-                        <div class="breakdown-item" v-if="filteredViewTotals.transfers !== 0">
-                            <span class="name">Transfers</span>
-                            <span class="value">{{ filteredViewTotals.transfers >= 0 ? '+' : '' }}{{ formatCurrency(filteredViewTotals.transfers) }}</span>
-                        </div>
-                        <div class="breakdown-item">
-                            <span class="name">Transactions</span>
-                            <span class="value">{{ filteredViewTotals.count.toLocaleString() }}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- KPI Strip -->
+            <div class="kpi-grid" ref="kpiGrid" data-testid="kpi-strip"></div>
 
             <!-- Charts Section -->
             <div class="chart-section" :class="{ collapsed: chartsCollapsed }">
@@ -212,25 +147,105 @@
                     </h2>
                 </div>
                 <div class="section-content" :class="{ collapsed: chartsCollapsed }">
-                    <div class="charts-grid">
-                        <div class="chart-container">
-                            <h3>Cash Flow Trend</h3>
-                            <div class="chart-wrapper">
-                                <canvas ref="monthlyChart"></canvas>
+                    <div class="chart-container" :class="{ collapsed: chartPanels.category }" id="chart-panel-category">
+                        <div class="chart-head">
+                            <h3 class="chart-title-toggle" @click="toggleChartPanel('category')">
+                                <span class="toggle">{{ chartPanels.category ? '▶' : '▼' }}</span>
+                                Spending by Category
+                            </h3>
+                            <div class="chart-controls">
+                                <div class="proto-pill-row" id="cat-group-pills"></div>
+                                <label class="compare-toggle" id="cat-unstack-wrap">
+                                    <input type="checkbox" id="cat-unstack-checkbox"> Focused
+                                </label>
+                                <label class="compare-toggle" id="cat-compare-wrap">
+                                    <input type="checkbox" id="cat-compare-checkbox"> Compare years
+                                </label>
                             </div>
                         </div>
-                        <div class="chart-container">
-                            <h3>Spending by Category</h3>
-                            <div class="chart-wrapper">
-                                <canvas ref="categoryPieChart"></canvas>
+                        <div class="chart-wrapper tall"><canvas ref="categoryTrendChart"></canvas></div>
+                        <div class="none-share-view" id="cat-share-view" hidden></div>
+                        <div class="legend-chips" id="cat-legend-chips"></div>
+                        <div class="chart-pager" id="cat-chart-pager"></div>
+                        <div class="chart-caption" id="cat-chart-caption"></div>
+                    </div>
+
+                    <div class="chart-container" :class="{ collapsed: chartPanels.seasonality }" id="chart-panel-seasonality">
+                        <div class="chart-head">
+                            <h3 class="chart-title-toggle" @click="toggleChartPanel('seasonality')">
+                                <span class="toggle">{{ chartPanels.seasonality ? '▶' : '▼' }}</span>
+                                Spending Seasonality
+                            </h3>
+                            <span class="head-chip">Top 10 Expense Categories</span>
+                        </div>
+                        <div class="heatmap" id="seasonality-heatmap"></div>
+                        <div class="chart-pager" id="seasonality-heatmap-pager"></div>
+                        <div class="chart-caption" id="seasonality-heatmap-caption"></div>
+                    </div>
+
+                    <div :class="['split-row', { 'single-expanded': chartPanels.volatility !== chartPanels.audit }]">
+                        <div class="chart-container" :class="{ collapsed: chartPanels.volatility }" id="chart-panel-volatility">
+                            <div class="chart-head">
+                                <h3 class="chart-title-toggle" @click="toggleChartPanel('volatility')">
+                                    <span class="toggle">{{ chartPanels.volatility ? '▶' : '▼' }}</span>
+                                    Expense Volatility
+                                </h3>
+                                <span class="head-chip">Top 10 · by monthly swing</span>
                             </div>
+                            <div class="chart-wrapper volatility"><canvas ref="volatilityChart"></canvas></div>
+                            <div class="chart-caption">
+                                <span>Bar = min-max monthly spend · tick = monthly average.</span>
+                                <div class="chart-caption-break">Wide bars are the budget-breakers that need a sinking fund.</div>
+                            </div>
+                        </div>
+                        <div class="chart-container" :class="{ collapsed: chartPanels.audit }" id="chart-panel-audit">
+                            <div class="chart-head">
+                                <h3 class="chart-title-toggle" @click="toggleChartPanel('audit')">
+                                    <span class="toggle">{{ chartPanels.audit ? '▶' : '▼' }}</span>
+                                    Subscription &amp; Recurring Audit
+                                </h3>
+                                <span class="head-chip">Top 10 · by annualized</span>
+                            </div>
+                            <div id="recurring-audit"></div>
                         </div>
                     </div>
-                    <div class="chart-container" style="margin-top: 2rem;">
-                        <h3>Spending by Category Trend</h3>
-                        <div class="chart-wrapper" style="height: 350px;">
-                            <canvas ref="categoryByMonthChart"></canvas>
+
+                    <div class="chart-container" :class="{ collapsed: chartPanels.cash }" id="chart-panel-cash">
+                        <div class="chart-head">
+                            <h3 class="chart-title-toggle" @click="toggleChartPanel('cash')">
+                                <span class="toggle">{{ chartPanels.cash ? '▶' : '▼' }}</span>
+                                Cash Flow
+                            </h3>
+                            <div class="chart-controls">
+                                <div class="proto-pill-row" id="cash-group-pills"></div>
+                                <label class="compare-toggle" id="cash-compare-wrap">
+                                    <input type="checkbox" id="cash-compare-checkbox"> Compare years
+                                </label>
+                            </div>
                         </div>
+                        <div class="chart-wrapper"><canvas ref="cashFlowTrendChart"></canvas></div>
+                        <div class="legend-chips" id="cash-legend-chips"></div>
+                        <div class="chart-pager" id="cash-chart-pager"></div>
+                        <div class="chart-caption" id="cash-chart-caption"></div>
+                    </div>
+
+                    <div class="chart-container" :class="{ collapsed: chartPanels.fixed }" id="chart-panel-fixed">
+                        <div class="chart-head">
+                            <h3 class="chart-title-toggle" @click="toggleChartPanel('fixed')">
+                                <span class="toggle">{{ chartPanels.fixed ? '▶' : '▼' }}</span>
+                                Fixed vs Variable Spending
+                            </h3>
+                            <div class="chart-controls">
+                                <div class="proto-pill-row" id="fixed-group-pills"></div>
+                                <label class="compare-toggle" id="fixed-compare-wrap">
+                                    <input type="checkbox" id="fixed-compare-checkbox"> Compare years
+                                </label>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper"><canvas ref="fixedVariableChart"></canvas></div>
+                        <div class="legend-chips" id="fixed-legend-chips"></div>
+                        <div class="chart-pager" id="fixed-chart-pager"></div>
+                        <div class="chart-caption" id="fixed-chart-caption"></div>
                     </div>
                 </div>
             </div>
@@ -370,6 +385,8 @@
             </footer>
         </div>
     </div>
+
+    <div id="ext-tooltip"></div>
 
     <!-- Dependencies -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>

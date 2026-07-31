@@ -169,6 +169,8 @@ def cmd_workflow(args):
     print(f"    {C.CYAN}income{C.RESET}       {C.DIM}Salary, deposits, interest → excluded from spending{C.RESET}")
     print(f"    {C.CYAN}transfer{C.RESET}     {C.DIM}CC payments, account transfers → excluded from spending{C.RESET}")
     print(f"    {C.CYAN}investment{C.RESET}   {C.DIM}401K, IRA contributions → tracked separately{C.RESET}")
+    print(f"    {C.CYAN}fixed{C.RESET}        {C.DIM}Force merchant into fixed/recurring spend charts{C.RESET}")
+    print(f"    {C.CYAN}variable{C.RESET}     {C.DIM}Force merchant out of fixed/recurring spend charts{C.RESET}")
     print(f"    {C.CYAN}refund{C.RESET}       {C.DIM}Returns and credits → shown in Credits Applied section{C.RESET}")
     print()
     print(f"    {C.DIM}Example:{C.RESET}")

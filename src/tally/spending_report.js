@@ -1,7 +1,7 @@
 // spending_report.js - Vue 3 app for spending report
 // This file is embedded into the HTML at build time by analyzer.py
 
-const { createApp, ref, reactive, computed, watch, onMounted, nextTick, defineComponent } = Vue;
+const { createApp, ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, defineComponent } = Vue;
 
 function setAppInitializingState() {
     document.body.classList.add('app-initializing');
@@ -861,19 +861,24 @@ createApp({
         let txMeasureAmountEl = null;
         let txMeasureAccountEl = null;
         let txResizeDebounceHandle = null;
+        let chartResizeDebounceHandle = null;
+        let chartLayoutObserver = null;
+        let suppressChartAnimationForResize = false;
 
         // Chart refs
-        const monthlyChart = ref(null);
-        const categoryPieChart = ref(null);
-        const categoryByMonthChart = ref(null);
+        const kpiGrid = ref(null);
+        const categoryTrendChart = ref(null);
+        const cashFlowTrendChart = ref(null);
+        const fixedVariableChart = ref(null);
+        const volatilityChart = ref(null);
 
         // Chart instances
-        let monthlyChartInstance = null;
-        let pieChartInstance = null;
-        let categoryMonthChartInstance = null;
-        // Months actually plotted on the monthly trend chart; bar clicks index into
-        // this, not availableMonths, since empty months and date filters drop months
-        let monthlyChartMonths = [];
+        const chartInstances = {
+            category: null,
+            cashFlow: null,
+            fixedVariable: null,
+            volatility: null,
+        };
 
         // ========== COMPUTED ==========
 
@@ -1558,69 +1563,122 @@ createApp({
             return [f.text];
         }
 
-        // Chart data aggregations - always uses categoryView for consistent data
-        // Includes spending, income, credits, and investment; excludes transfers (money moving between accounts)
+        // Chart data aggregations - always sourced from filtered category view.
+        // Includes all flow buckets and category/month spending for chart builders.
         const chartAggregations = computed(() => {
             const spendingByMonth = {};
             const incomeByMonth = {};
             const investmentByMonth = {};
             const creditsByMonth = {};
-            const byCategory = {};  // Spending only (income doesn't have meaningful categories)
+            const transfersByMonth = {};
+            const txnCountByMonth = {};
+            const byCategory = {};
             const byCategoryByMonth = {};
+            const recurringMerchants = [];
+            const seenRecurring = new Set();
+            const recurringSpendingByMonth = {};
 
-            // Use categoryView which always has data (doesn't require views_file)
             const categoryView = filteredCategoryView.value;
             for (const [catName, category] of Object.entries(categoryView)) {
                 for (const subcat of Object.values(category.filteredSubcategories || {})) {
-                    for (const merchant of Object.values(subcat.filteredMerchants || {})) {
-                        for (const txn of merchant.filteredTxns || []) {
-                            // Classify with the transaction's OWN tags, not merchant.tags
-                            // (a union across the merchant's txns) - see filteredViewTotals
-                            const c = categorizeAmount(txn.amount, txn.tags || []);
+                    for (const [merchantId, merchant] of Object.entries(subcat.filteredMerchants || {})) {
+                        const recurrence = merchant.recurrence || null;
+                        const recurringMonthlyCost = Number(merchant.recurringMonthlyCost || 0);
+                        const isRecurringMerchant = recurrence && recurringMonthlyCost > 0;
+                        if (isRecurringMerchant && !seenRecurring.has(merchantId)) {
+                            seenRecurring.add(merchantId);
+                            recurringMerchants.push({
+                                id: merchantId,
+                                merchant: merchant.displayName,
+                                category: merchant.category,
+                                cadence: recurrence,
+                                recurringMonthlyCost,
+                            });
+                        }
 
-                            // Track spending by month and category
+                        for (const txn of merchant.filteredTxns || []) {
+                            const c = categorizeAmount(txn.amount, txn.tags || []);
+                            txnCountByMonth[txn.month] = (txnCountByMonth[txn.month] || 0) + 1;
+
                             if (c.spending > 0) {
                                 spendingByMonth[txn.month] = (spendingByMonth[txn.month] || 0) + c.spending;
                                 byCategory[catName] = (byCategory[catName] || 0) + c.spending;
                                 if (!byCategoryByMonth[catName]) byCategoryByMonth[catName] = {};
                                 byCategoryByMonth[catName][txn.month] =
                                     (byCategoryByMonth[catName][txn.month] || 0) + c.spending;
+                                if (isRecurringMerchant) {
+                                    recurringSpendingByMonth[txn.month] =
+                                        (recurringSpendingByMonth[txn.month] || 0) + c.spending;
+                                }
                             }
-
-                            // Track income by month (no category breakdown)
                             if (c.income > 0) {
                                 incomeByMonth[txn.month] = (incomeByMonth[txn.month] || 0) + c.income;
                             }
-
-                            // Track investment by month
                             if (c.investment > 0) {
                                 investmentByMonth[txn.month] = (investmentByMonth[txn.month] || 0) + c.investment;
                             }
-
-                            // Track credits by month (refunds are part of cash flow)
                             if (c.credits > 0) {
                                 creditsByMonth[txn.month] = (creditsByMonth[txn.month] || 0) + c.credits;
                             }
-
-                            // Transfers excluded - they're just money moving between accounts
+                            if (c.transferIn > 0 || c.transferOut > 0) {
+                                transfersByMonth[txn.month] =
+                                    (transfersByMonth[txn.month] || 0) + c.transferIn - c.transferOut;
+                            }
                         }
                     }
                 }
             }
 
-            return { spendingByMonth, incomeByMonth, investmentByMonth, creditsByMonth, byCategory, byCategoryByMonth };
+            return {
+                spendingByMonth,
+                incomeByMonth,
+                investmentByMonth,
+                creditsByMonth,
+                transfersByMonth,
+                txnCountByMonth,
+                byCategory,
+                byCategoryByMonth,
+                recurringMerchants,
+                recurringSpendingByMonth,
+            };
         });
 
-        // Map category names to colors (matches pie chart order)
+        // Assign category colors from a stable global ranking so filtering/regrouping
+        // never repaints surviving categories.
+        const stableCategoryRanking = computed(() => {
+            const totals = {};
+            const categoryView = spendingData.value.categoryView || {};
+            for (const [catName, category] of Object.entries(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const merchant of Object.values(subcat.merchants || {})) {
+                        for (const txn of merchant.transactions || []) {
+                            const c = categorizeAmount(txn.amount || 0, txn.tags || []);
+                            if (c.spending > 0) totals[catName] = (totals[catName] || 0) + c.spending;
+                        }
+                    }
+                }
+            }
+            return Object.entries(totals)
+                .filter(([, total]) => total > 0)
+                .sort((a, b) => b[1] - a[1])
+                .map(([name]) => name);
+        });
+
         const categoryColorMap = computed(() => {
-            const agg = chartAggregations.value;
-            const entries = Object.entries(agg.byCategory)
-                .filter(([_, v]) => v > 0)
-                .sort((a, b) => b[1] - a[1]);
             const colorMap = {};
-            entries.forEach((entry, idx) => {
-                colorMap[entry[0]] = CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
+            stableCategoryRanking.value.forEach((name, idx) => {
+                colorMap[name] = CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
             });
+
+            // Backfill any category not in the ranking (e.g., zero-spend categories).
+            let offset = stableCategoryRanking.value.length;
+            for (const catName of Object.keys(spendingData.value.categoryView || {})) {
+                if (!colorMap[catName]) {
+                    colorMap[catName] = CATEGORY_COLORS[offset % CATEGORY_COLORS.length];
+                    offset += 1;
+                }
+            }
+
             return colorMap;
         });
 
@@ -2232,6 +2290,15 @@ createApp({
             return currencyFormat.replace('{amount}', amount.toFixed(0));
         }
 
+        function formatCurrencyDecimalValue(amount) {
+            const formatted = Math.abs(amount).toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            });
+            const text = currencyFormat.replace('{amount}', formatted);
+            return amount < 0 ? '-' + text : text;
+        }
+
         function formatDate(dateStr, monthStr) {
             if (!dateStr) return '';
             const yearSuffix = monthStr ? `, ${monthStr.slice(0, 4)}` : '';
@@ -2405,6 +2472,42 @@ createApp({
             }, 200);
         }
 
+        function rerenderChartsDebounced() {
+            if (chartResizeDebounceHandle) clearTimeout(chartResizeDebounceHandle);
+            chartResizeDebounceHandle = setTimeout(() => {
+                if (!chartsInitialized) return;
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        suppressChartAnimationForResize = true;
+                        renderAllCharts();
+                        suppressChartAnimationForResize = false;
+                    });
+                });
+            }, 180);
+        }
+
+        function initChartLayoutObserver() {
+            if (typeof ResizeObserver === 'undefined') return;
+            if (chartLayoutObserver) chartLayoutObserver.disconnect();
+
+            chartLayoutObserver = new ResizeObserver(() => {
+                rerenderChartsDebounced();
+            });
+
+            const targets = [
+                document.getElementById('app'),
+                document.querySelector('.chart-section'),
+                categoryTrendChart.value?.closest('.chart-wrapper'),
+                cashFlowTrendChart.value?.closest('.chart-wrapper'),
+                fixedVariableChart.value?.closest('.chart-wrapper'),
+                volatilityChart.value?.closest('.chart-wrapper'),
+            ].filter(Boolean);
+
+            for (const target of targets) {
+                chartLayoutObserver.observe(target);
+            }
+        }
+
         function formatMonthLabel(key) {
             if (!key) return '';
             const [year, month] = key.split('-');
@@ -2502,6 +2605,8 @@ createApp({
             isDarkTheme.value = !isDarkTheme.value;
             document.documentElement.setAttribute('data-theme', isDarkTheme.value ? 'dark' : 'light');
             localStorage.setItem('theme', isDarkTheme.value ? 'dark' : 'light');
+            applyChartDefaults();
+            renderAllCharts();
         }
 
         function initTheme() {
@@ -2530,15 +2635,74 @@ createApp({
             groupByMode.value = mode === 'subcategory' ? 'subcategory' : 'merchant';
         }
 
+        function resetChartUiStateDefaults() {
+            categoryState.grouping = 'month';
+            categoryState.compare = false;
+            categoryState.comparePage = 0;
+            categoryState.unstack = false;
+            categoryState.focused = null;
+            categoryState.page = 0;
+
+            cashState.grouping = 'month';
+            cashState.compare = false;
+            cashState.comparePage = 0;
+            cashState.page = 0;
+
+            fixedState.grouping = 'month';
+            fixedState.compare = false;
+            fixedState.comparePage = 0;
+            fixedState.page = 0;
+
+            heatmapState.page = 0;
+
+            categoryHidden.clear();
+            cashHidden.clear();
+            fixedHidden.clear();
+
+            chartPanels.category = false;
+            chartPanels.seasonality = false;
+            chartPanels.volatility = false;
+            chartPanels.audit = false;
+            chartPanels.cash = false;
+            chartPanels.fixed = false;
+        }
+
         function saveUiState() {
             if (isHydratingUiState) return;
             try {
                 const state = {
-                    version: 1,
+                    version: 2,
                     detailsViewMode: parseDetailsViewMode(currentView.value, groupByMode.value),
                     includeNegativeTotals: !!includeNegativeTotals.value,
                     chartsCollapsed: !!chartsCollapsed.value,
                     detailsCollapsed: !!detailsCollapsed.value,
+                    chartPanels: {
+                        category: !!chartPanels.category,
+                        seasonality: !!chartPanels.seasonality,
+                        volatility: !!chartPanels.volatility,
+                        audit: !!chartPanels.audit,
+                        cash: !!chartPanels.cash,
+                        fixed: !!chartPanels.fixed,
+                    },
+                    chartPreferences: {
+                        category: {
+                            grouping: categoryState.grouping,
+                            compare: !!categoryState.compare,
+                            comparePage: categoryState.comparePage,
+                            unstack: !!categoryState.unstack,
+                            focused: categoryState.focused || null,
+                        },
+                        cash: {
+                            grouping: cashState.grouping,
+                            compare: !!cashState.compare,
+                            comparePage: cashState.comparePage,
+                        },
+                        fixed: {
+                            grouping: fixedState.grouping,
+                            compare: !!fixedState.compare,
+                            comparePage: fixedState.comparePage,
+                        },
+                    },
                     knownSectionKeys: toSortedArray(allPersistableSectionKeys.value),
                     collapsedSectionKeys: toSortedArray(collapsedSections),
                     knownItemIds: toSortedArray(allPersistableItemIds.value),
@@ -2593,6 +2757,7 @@ createApp({
                 includeNegativeTotals.value = false;
                 chartsCollapsed.value = false;
                 detailsCollapsed.value = false;
+                resetChartUiStateDefaults();
                 return;
             }
 
@@ -2626,6 +2791,48 @@ createApp({
             includeNegativeTotals.value = !!state.includeNegativeTotals;
             chartsCollapsed.value = !!state.chartsCollapsed;
             detailsCollapsed.value = !!state.detailsCollapsed;
+
+            resetChartUiStateDefaults();
+            const validGroupings = new Set(['year', 'quarter', 'month', 'none']);
+            const chartPrefs = state.chartPreferences && typeof state.chartPreferences === 'object'
+                ? state.chartPreferences
+                : {};
+
+            const catPrefs = chartPrefs.category || {};
+            if (validGroupings.has(catPrefs.grouping)) categoryState.grouping = catPrefs.grouping;
+            categoryState.compare = !!catPrefs.compare;
+            categoryState.comparePage = Number.isInteger(catPrefs.comparePage) && catPrefs.comparePage >= 0
+                ? catPrefs.comparePage
+                : 0;
+            categoryState.unstack = !!catPrefs.unstack;
+            categoryState.focused = typeof catPrefs.focused === 'string' && catPrefs.focused.trim()
+                ? catPrefs.focused.trim()
+                : null;
+
+            const cashPrefs = chartPrefs.cash || {};
+            if (validGroupings.has(cashPrefs.grouping)) cashState.grouping = cashPrefs.grouping;
+            cashState.compare = !!cashPrefs.compare;
+            cashState.comparePage = Number.isInteger(cashPrefs.comparePage) && cashPrefs.comparePage >= 0
+                ? cashPrefs.comparePage
+                : 0;
+
+            const fixedPrefs = chartPrefs.fixed || {};
+            if (validGroupings.has(fixedPrefs.grouping)) fixedState.grouping = fixedPrefs.grouping;
+            fixedState.compare = !!fixedPrefs.compare;
+            fixedState.comparePage = Number.isInteger(fixedPrefs.comparePage) && fixedPrefs.comparePage >= 0
+                ? fixedPrefs.comparePage
+                : 0;
+
+            const savedPanels = state.chartPanels && typeof state.chartPanels === 'object'
+                ? state.chartPanels
+                : {};
+            chartPanels.category = !!savedPanels.category;
+            chartPanels.seasonality = !!savedPanels.seasonality;
+            chartPanels.volatility = !!savedPanels.volatility;
+            chartPanels.audit = !!savedPanels.audit;
+            chartPanels.cash = !!savedPanels.cash;
+            chartPanels.fixed = !!savedPanels.fixed;
+
             normalizeUiStateForCurrentData();
         }
 
@@ -2637,6 +2844,7 @@ createApp({
             }
             initUiState();
             saveUiState();
+            if (chartsInitialized) renderAllCharts();
         }
 
         // ========== URL HASH ==========
@@ -2674,203 +2882,1753 @@ createApp({
 
         // ========== CHARTS ==========
 
-        function initCharts() {
-            // Cash flow trend chart (datasets are built per update so empty series drop out)
-            if (monthlyChart.value) {
-                const ctx = monthlyChart.value.getContext('2d');
-                const labels = availableMonths.value.map(m => m.label);
-                monthlyChartInstance = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels,
-                        datasets: []
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { display: true, position: 'top' }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                grace: '5%',
-                                ticks: {
-                                    callback: v => formatCurrencyShort(v)
-                                }
-                            }
-                        },
-                        onClick: (e, elements) => {
-                            if (elements.length > 0) {
-                                const idx = elements[0].index;
-                                const month = monthlyChartMonths[idx];
-                                if (month) addFilter(month.key, 'month', month.label);
-                            }
-                        }
-                    }
-                });
-            }
+        const CHART_PAGE_SIZE = 24;
+        const COMPARE_YEARS_MAX = 3;
+        const HEATMAP_PAGE_SIZE = 24;
+        const HEATMAP_ALPHAS = [0.06, 0.22, 0.4, 0.58, 0.76, 0.95];
+        const CASH_FLOW_SERIES = [
+            { label: 'Spending', byMonthKey: 'spendingByMonth', color: '#4facfe' },
+            { label: 'Income', byMonthKey: 'incomeByMonth', color: '#00c9a7' },
+            { label: 'Credits', byMonthKey: 'creditsByMonth', color: '#ffa94d' },
+            { label: 'Investment', byMonthKey: 'investmentByMonth', color: '#7c3aed' },
+        ];
 
-            // Category pie chart
-            if (categoryPieChart.value) {
-                const ctx = categoryPieChart.value.getContext('2d');
-                pieChartInstance = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: [],
-                        datasets: [{
-                            data: [],
-                            backgroundColor: []
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'right',
-                                labels: { boxWidth: 12, padding: 8 }
-                            }
-                        }
-                    }
-                });
-            }
+        const categoryState = reactive({ grouping: 'month', compare: false, comparePage: 0, unstack: false, focused: null, page: 0 });
+        const cashState = reactive({ grouping: 'month', compare: false, comparePage: 0, page: 0 });
+        const fixedState = reactive({ grouping: 'month', compare: false, comparePage: 0, page: 0 });
+        const heatmapState = reactive({ page: 0 });
+        const chartPanels = reactive({
+            category: false,
+            seasonality: false,
+            volatility: false,
+            audit: false,
+            cash: false,
+            fixed: false,
+        });
 
-            // Category by month chart
-            if (categoryByMonthChart.value) {
-                const ctx = categoryByMonthChart.value.getContext('2d');
-                const labels = availableMonths.value.map(m => m.label);
-                categoryMonthChartInstance = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels,
-                        datasets: []
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'top',
-                                labels: { boxWidth: 12, padding: 8 }
-                            }
-                        },
-                        scales: {
-                            x: { stacked: true },
-                            y: {
-                                stacked: true,
-                                beginAtZero: true,
-                                grace: '5%',
-                                ticks: {
-                                    callback: v => formatCurrencyShort(v)
-                                }
-                            }
-                        }
-                    }
-                });
-            }
+        const categoryHidden = new Set();
+        const cashHidden = new Set();
+        const fixedHidden = new Set();
+        let categoryFocusedHasAnimated = false;
 
-            updateCharts();
+        let chartsInitialized = false;
+        let tooltipEl = null;
+        let tooltipAnchorKey = null;
+
+        function toggleChartPanel(panelKey) {
+            if (!(panelKey in chartPanels)) return;
+            chartPanels[panelKey] = !chartPanels[panelKey];
+            saveUiState();
+            if (chartsInitialized) {
+                nextTick(() => renderAllCharts());
+            }
         }
 
-        function updateCharts() {
-            const agg = chartAggregations.value;
-            const monthsToShow = filteredMonthsForCharts.value;
+        function cssVar(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
 
-            // Update cash flow trend. Months with nothing to plot (e.g. only transfers)
-            // are dropped so the axis doesn't carry empty columns, and series without
-            // data are left out entirely so they don't linger in the legend.
-            if (monthlyChartInstance) {
-                const CASH_FLOW_SERIES = [
-                    { label: 'Spending', byMonth: agg.spendingByMonth, color: '#4facfe' },
-                    { label: 'Income', byMonth: agg.incomeByMonth, color: '#00c9a7' },
-                    { label: 'Credits', byMonth: agg.creditsByMonth, color: '#ffa94d' },
-                    { label: 'Investment', byMonth: agg.investmentByMonth, color: '#7c3aed' }
-                ];
+        function withAlpha(hex, alpha) {
+            if (!hex || !hex.startsWith('#') || hex.length < 7) return hex;
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
 
-                monthlyChartMonths = monthsToShow.filter(m =>
-                    CASH_FLOW_SERIES.some(s => (s.byMonth[m.key] || 0) > 0)
-                );
+        function surfaceColor() {
+            return cssVar('--bg-gradient-start') || '#1a1a2e';
+        }
 
-                const datasets = [];
-                let maxVal = 1;
-                for (const series of CASH_FLOW_SERIES) {
-                    const data = monthlyChartMonths.map(m => series.byMonth[m.key] || 0);
-                    if (!data.some(v => v > 0)) continue;
-                    datasets.push({
-                        label: series.label,
-                        data,
-                        backgroundColor: series.color,
-                        borderRadius: 4
-                    });
-                    maxVal = Math.max(maxVal, ...data);
-                }
+        function monthLabel(mk) {
+            const [year, month] = mk.split('-');
+            return `${MONTH_NAMES_SHORT[parseInt(month, 10) - 1]} '${year.slice(2)}`;
+        }
 
-                monthlyChartInstance.data.labels = monthlyChartMonths.map(m => m.label);
-                monthlyChartInstance.data.datasets = datasets;
-                monthlyChartInstance.options.scales.y.suggestedMax = maxVal * 1.1;
-                monthlyChartInstance.update();
+        function getMonthKeys() {
+            return filteredMonthsForCharts.value.map(m => m.key);
+        }
+
+        function getGroupingOptions(monthKeys) {
+            const options = [];
+            const years = [...new Set(monthKeys.map(mk => mk.split('-')[0]))];
+            if (years.length > 1) options.push({ value: 'year', label: 'Years' });
+            if (buildBuckets('quarter', monthKeys).length > 1) options.push({ value: 'quarter', label: 'Quarters' });
+            options.push({ value: 'month', label: 'Months' });
+            options.push({ value: 'none', label: 'None' });
+            return options;
+        }
+
+        function ensureGroupingState(state, options) {
+            const allowed = new Set(options.map(opt => opt.value));
+            if (!allowed.has(state.grouping)) state.grouping = 'month';
+        }
+
+        function getSpanYears(monthKeys) {
+            return [...new Set(monthKeys.map(mk => mk.split('-')[0]))].sort();
+        }
+
+        function getCompareYears(monthKeys, state) {
+            const spanYears = getSpanYears(monthKeys);
+            return pagedCompareYears(spanYears, state).years;
+        }
+
+        function pagedCompareYears(spanYears, state, pageSize = COMPARE_YEARS_MAX) {
+            const pagerState = state || { comparePage: 0 };
+            const total = spanYears.length;
+            if (total <= pageSize) {
+                if (state && pagerState.comparePage !== 0) pagerState.comparePage = 0;
+                return {
+                    years: spanYears,
+                    total,
+                    page: 0,
+                    maxPage: 0,
+                };
             }
 
-            // Both category charts share this ranking so their series and colors line up
+            const maxPage = Math.max(0, total - pageSize);
+            if (pagerState.comparePage > maxPage) pagerState.comparePage = maxPage;
+            if (pagerState.comparePage < 0) pagerState.comparePage = 0;
+
+            const startIdx = Math.max(0, total - pageSize - pagerState.comparePage);
+            const endIdx = Math.min(total, startIdx + pageSize);
+
+            return {
+                years: spanYears.slice(startIdx, endIdx),
+                total,
+                page: pagerState.comparePage,
+                maxPage,
+            };
+        }
+
+        function yearAlpha(compareYears, year) {
+            const idx = compareYears.length - 1 - compareYears.indexOf(year);
+            return idx % 2 === 0 ? 1 : 0.55;
+        }
+
+        function buildBuckets(grouping, monthKeys) {
+            const map = new Map();
+            for (const mk of monthKeys) {
+                const [y, m] = mk.split('-');
+                let key;
+                let label;
+                if (grouping === 'year') {
+                    key = y;
+                    label = y;
+                } else if (grouping === 'quarter') {
+                    const q = Math.floor((parseInt(m, 10) - 1) / 3) + 1;
+                    key = `${y}-Q${q}`;
+                    label = `Q${q} '${y.slice(2)}`;
+                } else {
+                    key = mk;
+                    label = monthLabel(mk);
+                }
+                if (!map.has(key)) map.set(key, { key, label, months: [] });
+                map.get(key).months.push(mk);
+            }
+            return [...map.values()];
+        }
+
+        function sumFor(byMonth, bucket) {
+            return bucket.months.reduce((sum, mk) => sum + (byMonth?.[mk] || 0), 0);
+        }
+
+        function comparePeriods(grouping) {
+            if (grouping === 'quarter') {
+                return [
+                    { label: 'Q1', months: [1, 2, 3] },
+                    { label: 'Q2', months: [4, 5, 6] },
+                    { label: 'Q3', months: [7, 8, 9] },
+                    { label: 'Q4', months: [10, 11, 12] },
+                ];
+            }
+            return MONTH_NAMES_SHORT.map((name, idx) => ({ label: name, months: [idx + 1] }));
+        }
+
+        function xTickOptions(labels, canvasRef, compareActive = false) {
+            const width = Math.max(
+                canvasRef?.value?.clientWidth || canvasRef?.value?.parentElement?.clientWidth || 0,
+                320
+            );
+            const count = Math.max(labels?.length || 0, 1);
+            const pixelsPerTick = width / count;
+
+            let rotation = 0;
+            if (pixelsPerTick < 22) rotation = 90;
+            else if (pixelsPerTick < 40) rotation = 45;
+
+            const shouldAutoSkip = pixelsPerTick < (compareActive ? 34 : 26);
+            const maxTicksLimit = Math.max(3, Math.floor(width / (compareActive ? 56 : 64)));
+
+            return {
+                minRotation: rotation,
+                maxRotation: rotation,
+                autoSkip: shouldAutoSkip,
+                maxTicksLimit,
+            };
+        }
+
+        function sumForPeriod(byMonth, year, period, monthSet) {
+            let total = 0;
+            for (const monthNum of period.months) {
+                const mk = `${year}-${String(monthNum).padStart(2, '0')}`;
+                if (!monthSet.has(mk)) continue;
+                total += byMonth?.[mk] || 0;
+            }
+            return total;
+        }
+
+        function stripEmptyAxisSlots(labels, datasets) {
+            if (!labels?.length || !datasets?.length) return { labels, datasets };
+
+            const keepIndexes = [];
+            for (let i = 0; i < labels.length; i += 1) {
+                const hasValue = datasets.some(ds => Number(ds?.data?.[i] || 0) > 0);
+                if (hasValue) keepIndexes.push(i);
+            }
+
+            if (keepIndexes.length === labels.length) return { labels, datasets };
+
+            return {
+                labels: keepIndexes.map(i => labels[i]),
+                datasets: datasets.map(ds => ({
+                    ...ds,
+                    data: keepIndexes.map(i => Number(ds?.data?.[i] || 0)),
+                })),
+            };
+        }
+
+        function pagedBuckets(buckets, state, pageSize = CHART_PAGE_SIZE) {
+            const total = buckets.length;
+            const maxPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+            if (state.page > maxPage) state.page = maxPage;
+            const end = total - state.page * pageSize;
+            const start = Math.max(0, end - pageSize);
+            return {
+                all: buckets,
+                page: buckets.slice(start, end),
+                start,
+                end,
+                total,
+                maxPage,
+            };
+        }
+
+        function resetChartPages() {
+            categoryState.page = 0;
+            categoryState.comparePage = 0;
+            cashState.page = 0;
+            cashState.comparePage = 0;
+            fixedState.page = 0;
+            fixedState.comparePage = 0;
+            heatmapState.page = 0;
+        }
+
+        function ensureTooltip() {
+            if (!tooltipEl) tooltipEl = document.getElementById('ext-tooltip');
+            return tooltipEl;
+        }
+
+        function extTooltipHandler(context) {
+            const el = ensureTooltip();
+            if (!el) return;
+
+            const { chart, tooltip } = context;
+            if (!tooltip || tooltip.opacity === 0 || !tooltip.dataPoints || !tooltip.dataPoints.length) {
+                el.style.opacity = 0;
+                tooltipAnchorKey = null;
+                return;
+            }
+
+            const dp = tooltip.dataPoints[0];
+            const dataIndex = dp.dataIndex;
+            const hoveredDatasetIndex = dp.datasetIndex;
+            const hoveredDataset = chart.data.datasets[hoveredDatasetIndex];
+            const hoveredStack = hoveredDataset.stack;
+
+            const rows = [];
+            chart.data.datasets.forEach((ds, i) => {
+                if (!chart.isDatasetVisible(i)) return;
+                if (ds.ttSkip) return;
+                if (hoveredStack !== undefined && ds.stack !== undefined && ds.stack !== hoveredStack) return;
+                const value = ds.data[dataIndex];
+                if (value === null || value === undefined) return;
+                if (chart.options.ttHideZero && Math.abs(Number(value) || 0) < 1e-9) return;
+                rows.push({
+                    name: ds.label,
+                    color: ds.baseColor || (Array.isArray(ds.backgroundColor) ? ds.backgroundColor[dataIndex] : ds.backgroundColor),
+                    value,
+                    active: chart.options.ttBoldLabel ? ds.label === chart.options.ttBoldLabel : i === hoveredDatasetIndex,
+                });
+            });
+            if (chart.options.ttSortByValueDesc) {
+                rows.sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
+            }
+
+            let title = chart.data.labels[dataIndex];
+            if (hoveredDataset.ttYear) title = `${title} ${hoveredDataset.ttYear}`;
+
+            const totalLabel = chart.options.ttNet ? 'Net' : 'Total';
+            const total = chart.options.ttNet
+                ? rows.reduce((sum, row) => sum + ((row.name === 'Income' || row.name === 'Credits') ? row.value : -row.value), 0)
+                : rows.reduce((sum, row) => sum + row.value, 0);
+
+            el.textContent = '';
+            const titleEl = document.createElement('div');
+            titleEl.className = 'tt-title';
+            titleEl.textContent = title;
+            el.appendChild(titleEl);
+
+            for (const rowData of rows) {
+                const row = document.createElement('div');
+                row.className = `tt-row${rowData.active ? ' active' : ''}`;
+                const sw = document.createElement('span');
+                sw.className = 'swatch';
+                sw.style.background = rowData.color;
+                const name = document.createElement('span');
+                name.className = 'tt-name';
+                name.textContent = rowData.name;
+                const value = document.createElement('span');
+                value.className = 'tt-val';
+                value.textContent = formatCurrency(rowData.value);
+                row.append(sw, name, value);
+                el.appendChild(row);
+            }
+
+            const totalRow = document.createElement('div');
+            totalRow.className = 'tt-total';
+            const tn = document.createElement('span');
+            tn.textContent = totalLabel;
+            const tv = document.createElement('span');
+            tv.textContent = formatCurrency(total);
+            totalRow.append(tn, tv);
+            el.appendChild(totalRow);
+
+            el.style.opacity = 1;
+            const anchorKey = `${chart.canvas.id}:${dataIndex}:${hoveredStack || ''}`;
+            if (anchorKey !== tooltipAnchorKey) {
+                tooltipAnchorKey = anchorKey;
+                const rect = chart.canvas.getBoundingClientRect();
+                let x = rect.left + window.scrollX + tooltip.caretX + 14;
+                let y = rect.top + window.scrollY + tooltip.caretY - el.offsetHeight / 2;
+                if (x + el.offsetWidth > window.scrollX + document.documentElement.clientWidth - 8) {
+                    x = rect.left + window.scrollX + tooltip.caretX - el.offsetWidth - 14;
+                }
+                y = Math.max(window.scrollY + 8, y);
+                el.style.left = `${x}px`;
+                el.style.top = `${y}px`;
+            }
+        }
+
+        function showHeatmapTooltip(cell, category, mk, amount, min, max) {
+            const el = ensureTooltip();
+            if (!el) return;
+
+            tooltipAnchorKey = null;
+            el.textContent = '';
+
+            const title = document.createElement('div');
+            title.className = 'tt-title';
+            title.textContent = `${category} - ${monthLabel(mk)}`;
+            el.appendChild(title);
+
+            const row1 = document.createElement('div');
+            row1.className = 'tt-row';
+            row1.innerHTML = `<span class="tt-name">Spent</span><span class="tt-val">${formatCurrency(amount)}</span>`;
+            const row2 = document.createElement('div');
+            row2.className = 'tt-row';
+            row2.innerHTML = `<span class="tt-name">Row range</span><span class="tt-val">${formatCurrency(min)} - ${formatCurrency(max)}</span>`;
+            el.append(row1, row2);
+
+            const rect = cell.getBoundingClientRect();
+            el.style.opacity = 1;
+            let x = rect.left + window.scrollX + rect.width / 2 + 12;
+            if (x + el.offsetWidth > window.scrollX + document.documentElement.clientWidth - 8) {
+                x = rect.left + window.scrollX - el.offsetWidth - 12;
+            }
+            el.style.left = `${x}px`;
+            el.style.top = `${rect.top + window.scrollY - el.offsetHeight - 8}px`;
+        }
+
+        function externalTooltipConfig() {
+            return { enabled: false, external: extTooltipHandler };
+        }
+
+        function ensureChartPlugins() {
+            if (window.__tallyChartsReimaginedPlugins) return;
+
+            const yearSubLabelsPlugin = {
+                id: 'yearSubLabels',
+                afterDraw(chart) {
+                    if (!chart.options.yearSubLabels) return;
+                    const xScale = chart.scales.x;
+                    if (!xScale) return;
+
+                    const ctx = chart.ctx;
+                    ctx.save();
+                    const tickFont = Chart.helpers.toFont(
+                        xScale.options?.ticks?.font,
+                        Chart.defaults.font
+                    );
+                    ctx.font = tickFont.string;
+                    ctx.fillStyle = cssVar('--text-muted') || '#666';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    const tickCount = chart.data?.labels?.length || 0;
+                    const pixelsPerTick = tickCount ? (xScale.width / tickCount) : xScale.width;
+                    let angle = 0;
+                    if (pixelsPerTick < 22) angle = -Math.PI / 2;
+                    else if (pixelsPerTick < 40) angle = -Math.PI / 4;
+
+                    let drawEvery = 1;
+                    if (pixelsPerTick < 14) drawEvery = 4;
+                    else if (pixelsPerTick < 20) drawEvery = 3;
+                    else if (pixelsPerTick < 28) drawEvery = 2;
+
+                    const y = xScale.bottom - 4;
+
+                    const byYear = new Map();
+                    chart.data.datasets.forEach((ds, i) => {
+                        if (!ds.ttYear || !chart.isDatasetVisible(i)) return;
+                        if (!byYear.has(ds.ttYear)) byYear.set(ds.ttYear, []);
+                        byYear.get(ds.ttYear).push(i);
+                    });
+
+                    for (const [year, indexes] of byYear.entries()) {
+                        for (let di = 0; di < chart.data.labels.length; di += drawEvery) {
+                            let sumX = 0;
+                            let count = 0;
+                            let hasValue = false;
+                            for (const datasetIndex of indexes) {
+                                const point = chart.getDatasetMeta(datasetIndex).data[di];
+                                if (!point) continue;
+                                sumX += point.x;
+                                count += 1;
+                                if ((chart.data.datasets[datasetIndex].data[di] || 0) > 0) hasValue = true;
+                            }
+                            if (count && hasValue) {
+                                const shortYear = String(year).slice(-2);
+                                const x = sumX / count;
+                                if (angle === 0) {
+                                    ctx.fillText(`'${shortYear}`, x, y);
+                                } else {
+                                    ctx.save();
+                                    ctx.translate(x, y);
+                                    ctx.rotate(angle);
+                                    ctx.fillText(`'${shortYear}`, 0, 0);
+                                    ctx.restore();
+                                }
+                            }
+                        }
+                    }
+
+                    ctx.restore();
+                },
+            };
+
+            const crosshairPlugin = {
+                id: 'crosshair',
+                afterDraw(chart) {
+                    if (!chart.options.crosshair || !chart.tooltip) return;
+                    const active = chart.tooltip.getActiveElements();
+                    if (!active.length) return;
+
+                    const x = active[0].element.x;
+                    const { top, bottom } = chart.chartArea;
+                    const ctx = chart.ctx;
+                    ctx.save();
+                    ctx.strokeStyle = cssVar('--border-medium') || 'rgba(255,255,255,0.2)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x, top);
+                    ctx.lineTo(x, bottom);
+                    ctx.stroke();
+                    ctx.restore();
+                },
+            };
+
+            Chart.register(yearSubLabelsPlugin, crosshairPlugin);
+            window.__tallyChartsReimaginedPlugins = true;
+        }
+
+        function applyChartDefaults() {
+            Chart.defaults.color = cssVar('--text-secondary') || '#888';
+            Chart.defaults.borderColor = cssVar('--border-light') || 'rgba(255,255,255,0.1)';
+            Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+            Chart.defaults.maintainAspectRatio = false;
+            Chart.defaults.responsive = true;
+        }
+
+        function destroyChart(key) {
+            if (chartInstances[key]) {
+                chartInstances[key].destroy();
+                chartInstances[key] = null;
+            }
+        }
+
+        function renderChart(key, canvasRef, config) {
+            if (!canvasRef?.value) return null;
+            destroyChart(key);
+            let finalConfig = config;
+            if (suppressChartAnimationForResize) {
+                finalConfig = {
+                    ...config,
+                    options: {
+                        ...(config.options || {}),
+                        animation: false,
+                    },
+                };
+            }
+            chartInstances[key] = new Chart(canvasRef.value, finalConfig);
+            return chartInstances[key];
+        }
+
+        function pillGroup(el, options, current, onChange) {
+            if (!el) return;
+            el.textContent = '';
+            for (const option of options) {
+                const b = document.createElement('button');
+                b.className = `proto-pill${option.value === current ? ' active' : ''}`;
+                b.textContent = option.label;
+                b.setAttribute('aria-pressed', option.value === current ? 'true' : 'false');
+                b.addEventListener('click', () => onChange(option.value));
+                el.appendChild(b);
+            }
+        }
+
+        function chipLegend(el, items) {
+            if (!el) return;
+            el.textContent = '';
+            for (const item of items) {
+                const b = document.createElement('button');
+                b.className = `legend-chip${item.active ? ' active' : ''}`;
+                if (item.active) b.style.borderColor = item.color;
+                const dot = document.createElement('span');
+                dot.className = 'chip-dot';
+                dot.style.background = item.active ? item.color : 'rgba(128,134,150,0.6)';
+                b.append(dot, document.createTextNode(item.label));
+                b.addEventListener('click', item.onClick);
+                el.appendChild(b);
+            }
+        }
+
+        function sparklineSVG(values, dotColor) {
+            const w = 260;
+            const h = 28;
+            const pad = 4;
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const span = max - min || 1;
+            const points = values.map((value, idx) => [
+                pad + idx * (w - pad * 2) / Math.max(values.length - 1, 1),
+                h - pad - (value - min) / span * (h - pad * 2),
+            ]);
+
+            const svgNs = 'http://www.w3.org/2000/svg';
+            const svg = document.createElementNS(svgNs, 'svg');
+            svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+            svg.setAttribute('preserveAspectRatio', 'none');
+
+            const polyline = document.createElementNS(svgNs, 'polyline');
+            polyline.setAttribute('points', points.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '));
+            polyline.setAttribute('fill', 'none');
+            polyline.setAttribute('stroke', cssVar('--text-muted') || '#666');
+            polyline.setAttribute('stroke-width', '1.5');
+            polyline.setAttribute('stroke-linejoin', 'round');
+            polyline.setAttribute('stroke-linecap', 'round');
+
+            const last = points[points.length - 1];
+            const dot = document.createElementNS(svgNs, 'circle');
+            dot.setAttribute('cx', last[0].toFixed(1));
+            dot.setAttribute('cy', last[1].toFixed(1));
+            dot.setAttribute('r', '3');
+            dot.setAttribute('fill', dotColor);
+
+            svg.append(polyline, dot);
+            return svg;
+        }
+
+        function trendStatement(series, upIsGood) {
+            const len = series.length;
+            const n = len > 12 ? 12 : len > 6 ? 6 : len > 3 ? 3 : len > 1 ? 1 : 0;
+            if (!n) return null;
+
+            const last = series[len - 1] || 0;
+            const baseline = series.slice(len - 1 - n, len - 1).reduce((sum, v) => sum + v, 0) / n;
+            const delta = last - baseline;
+            const pct = baseline ? Math.abs(delta / baseline * 100) : 0;
+            return {
+                arrow: delta >= 0 ? '↑' : '↓',
+                value: `${delta >= 0 ? '+' : '-'}${pct.toFixed(1)}%`,
+                sentence: n === 1 ? ' this month vs last month' : ` this month vs prior ${n} mo`,
+                cls: (delta >= 0) === upIsGood ? 'pos' : 'neg',
+            };
+        }
+
+        function renderKpis(monthKeys, agg, fixedMonthlyBaseline) {
+            const grid = kpiGrid.value;
+            if (!grid) return;
+            if (!monthKeys.length) {
+                grid.textContent = '';
+                return;
+            }
+
+            const sum = byMonth => monthKeys.reduce((total, mk) => total + (byMonth?.[mk] || 0), 0);
+            const income = sum(agg.incomeByMonth);
+            const credits = sum(agg.creditsByMonth);
+            const spending = sum(agg.spendingByMonth);
+            const investment = sum(agg.investmentByMonth);
+            const transfers = sum(agg.transfersByMonth);
+            const txCount = monthKeys.reduce((total, mk) => total + (agg.txnCountByMonth?.[mk] || 0), 0);
+            const months = Math.max(monthKeys.length, 1);
+            const cashFlowTotal = income + credits - spending - investment;
+
+            const incomeSeries = monthKeys.map(mk => (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0));
+            const spendingSeries = monthKeys.map(mk => agg.spendingByMonth[mk] || 0);
+            const cashFlowSeries = monthKeys.map(mk =>
+                (agg.incomeByMonth[mk] || 0) + (agg.creditsByMonth[mk] || 0) - (agg.spendingByMonth[mk] || 0) - (agg.investmentByMonth[mk] || 0)
+            );
+
+            grid.textContent = '';
+
+            function createCard(className, title, headline, details, spark, subtitle) {
+                const card = document.createElement('div');
+                card.className = `kpi-card ${className}`;
+                const h = document.createElement('h4');
+                h.textContent = title;
+                const value = document.createElement('div');
+                value.className = 'kpi-value';
+                value.textContent = headline;
+                card.append(h, value);
+
+                if (subtitle) {
+                    const sub = document.createElement('div');
+                    sub.className = 'kpi-sub';
+                    sub.textContent = subtitle;
+                    card.appendChild(sub);
+                }
+
+                if (spark) {
+                    const sparkWrap = document.createElement('div');
+                    sparkWrap.className = 'kpi-spark';
+                    sparkWrap.appendChild(sparklineSVG(spark.values, spark.dotColor));
+                    card.appendChild(sparkWrap);
+
+                    if (spark.trend) {
+                        const trend = document.createElement('div');
+                        trend.className = 'kpi-trend';
+                        const val = document.createElement('span');
+                        val.className = `val ${spark.trend.cls}`;
+                        val.textContent = `${spark.trend.arrow} ${spark.trend.value}`;
+                        trend.append(val, document.createTextNode(spark.trend.sentence));
+                        card.appendChild(trend);
+                    }
+                }
+
+                const detailWrap = document.createElement('div');
+                detailWrap.className = 'kpi-details';
+                for (const detail of details) {
+                    const row = document.createElement('div');
+                    row.className = 'kpi-detail';
+                    const name = document.createElement('span');
+                    name.className = 'name';
+                    name.textContent = detail.name;
+                    const val = document.createElement('span');
+                    val.className = 'value';
+                    val.textContent = detail.value;
+                    if (detail.perMonth) {
+                        const perMo = document.createElement('span');
+                        perMo.className = 'permo';
+                        perMo.textContent = `· ${detail.perMonth}`;
+                        val.appendChild(perMo);
+                    }
+                    row.append(name, val);
+                    detailWrap.appendChild(row);
+                }
+                card.appendChild(detailWrap);
+                grid.appendChild(card);
+            }
+
+            function spark(series, upIsGood) {
+                const trend = trendStatement(series, upIsGood);
+                const good = trend && trend.cls === 'pos';
+                return {
+                    values: series,
+                    trend,
+                    dotColor: good ? (cssVar('--accent-green') || '#4ade80') : (cssVar('--accent-red') || '#ff6b6b'),
+                };
+            }
+
+            createCard('income', 'Income', formatCurrency(income + credits), [
+                { name: 'Income', value: formatCurrency(income), perMonth: `${formatCurrency(income / months)}/mo` },
+                { name: 'Credits', value: formatCurrency(credits), perMonth: `${formatCurrency(credits / months)}/mo` },
+            ], spark(incomeSeries, true));
+
+            createCard('spending', 'Spending', formatCurrency(spending), [
+                { name: 'Avg / month', value: formatCurrency(spending / months) },
+                { name: 'Fixed / month', value: formatCurrency(fixedMonthlyBaseline) },
+            ], spark(spendingSeries, false));
+
+            createCard(`cashflow ${cashFlowTotal >= 0 ? 'positive' : 'negative'}`, 'Cash Flow', formatCurrency(cashFlowTotal), [
+                { name: 'Avg / month', value: formatCurrency(cashFlowTotal / months) },
+            ], spark(cashFlowSeries, true));
+
+            createCard('details', 'Details', txCount.toLocaleString('en-US'), [
+                { name: 'Transfers', value: formatCurrency(transfers) },
+                { name: 'Investments', value: formatCurrency(investment) },
+            ], null, 'transactions');
+        }
+
+        function buildCategoryBreakdown(agg) {
             const ranked = Object.entries(agg.byCategory)
-                .filter(([_, v]) => v > 0)
+                .filter(([, total]) => total > 0)
                 .sort((a, b) => b[1] - a[1])
                 .map(([name]) => name);
             const topCategories = ranked.slice(0, TOP_CATEGORY_COUNT);
             const otherCategories = ranked.slice(TOP_CATEGORY_COUNT);
-            const categoryColor = i => CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+            return { ranked, topCategories, otherCategories };
+        }
 
-            // Update category pie (top N + "Other")
-            if (pieChartInstance) {
-                const labels = topCategories.slice();
-                const data = topCategories.map(cat => agg.byCategory[cat]);
-                const colors = topCategories.map((_, i) => categoryColor(i));
+        function renderBucketPager(elId, allBuckets, state, grouping, onChange) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.textContent = '';
 
-                if (otherCategories.length > 0) {
-                    labels.push(OTHER_CATEGORY_LABEL);
-                    data.push(otherCategories.reduce((sum, cat) => sum + agg.byCategory[cat], 0));
-                    colors.push(OTHER_CATEGORY_COLOR);
+            if (allBuckets.length <= CHART_PAGE_SIZE || grouping === 'none') return;
+
+            const noun = grouping === 'year' ? 'years' : grouping === 'quarter' ? 'quarters' : 'months';
+            const windowed = pagedBuckets(allBuckets, state, CHART_PAGE_SIZE);
+
+            const prev = document.createElement('button');
+            prev.textContent = `‹ Prev ${CHART_PAGE_SIZE} ${noun}`;
+            prev.disabled = windowed.start === 0;
+            prev.addEventListener('click', () => {
+                state.page += 1;
+                onChange();
+            });
+
+            const range = document.createElement('span');
+            range.className = 'pager-range';
+            const startLabel = windowed.page[0]?.label || '';
+            const endLabel = windowed.page[windowed.page.length - 1]?.label || '';
+            range.textContent = `${startLabel} - ${endLabel} · showing ${windowed.page.length} of ${windowed.total} ${noun}`;
+
+            const next = document.createElement('button');
+            next.textContent = `Next ${CHART_PAGE_SIZE} ${noun} ›`;
+            next.disabled = state.page === 0;
+            next.addEventListener('click', () => {
+                state.page -= 1;
+                onChange();
+            });
+
+            el.append(prev, range, next);
+        }
+
+        function renderCompareYearPager(elId, comparePageInfo, onChange) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.textContent = '';
+
+            if (!comparePageInfo || comparePageInfo.total <= COMPARE_YEARS_MAX) return;
+
+            const prev = document.createElement('button');
+            prev.textContent = `‹ Prev ${COMPARE_YEARS_MAX} years`;
+            prev.disabled = comparePageInfo.page >= comparePageInfo.maxPage;
+            prev.addEventListener('click', () => onChange('older'));
+
+            const range = document.createElement('span');
+            range.className = 'pager-range';
+            const firstYear = comparePageInfo.years[0] || '';
+            const lastYear = comparePageInfo.years[comparePageInfo.years.length - 1] || '';
+            range.textContent = `${firstYear} - ${lastYear} · showing ${comparePageInfo.years.length} of ${comparePageInfo.total} years`;
+
+            const next = document.createElement('button');
+            next.textContent = `Next ${COMPARE_YEARS_MAX} years ›`;
+            next.disabled = comparePageInfo.page === 0;
+            next.addEventListener('click', () => onChange('newer'));
+
+            el.append(prev, range, next);
+        }
+
+        function renderHeatmap(matrix, keys, categories) {
+            const el = document.getElementById('seasonality-heatmap');
+            if (!el) return;
+
+            const red = cssVar('--accent-red') || '#ff6b6b';
+            el.textContent = '';
+            el.style.gridTemplateColumns = `140px repeat(${keys.length}, 1fr)`;
+            el.appendChild(document.createElement('div'));
+
+            keys.forEach((mk, idx) => {
+                const label = document.createElement('div');
+                label.className = 'hm-collabel';
+                const [year, month] = mk.split('-');
+                label.textContent = MONTH_NAMES_SHORT[parseInt(month, 10) - 1];
+                if (idx === 0 || month === '01') {
+                    const yearEl = document.createElement('span');
+                    yearEl.className = 'yy';
+                    yearEl.textContent = `'${year.slice(2)}`;
+                    label.appendChild(yearEl);
                 }
+                el.appendChild(label);
+            });
 
-                pieChartInstance.data.labels = labels;
-                pieChartInstance.data.datasets[0].data = data;
-                pieChartInstance.data.datasets[0].backgroundColor = colors;
-                pieChartInstance.update();
+            for (const category of categories) {
+                const rowLabel = document.createElement('div');
+                rowLabel.className = 'hm-rowlabel';
+                rowLabel.textContent = category;
+                el.appendChild(rowLabel);
+
+                const values = keys.map(mk => matrix[category]?.[mk] || 0);
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+
+                keys.forEach((mk, idx) => {
+                    const value = values[idx];
+                    const t = max > min ? (value - min) / (max - min) : 0.5;
+                    const colorIdx = Math.round(t * (HEATMAP_ALPHAS.length - 1));
+                    const cell = document.createElement('div');
+                    cell.className = 'hm-cell';
+                    cell.style.background = withAlpha(red, HEATMAP_ALPHAS[colorIdx]);
+                    cell.addEventListener('mouseenter', () => showHeatmapTooltip(cell, category, mk, value, min, max));
+                    cell.addEventListener('mouseleave', () => {
+                        const tip = ensureTooltip();
+                        if (tip) tip.style.opacity = 0;
+                        tooltipAnchorKey = null;
+                    });
+                    el.appendChild(cell);
+                });
+            }
+        }
+
+        function renderPagedHeatmap(agg, monthKeys, categories) {
+            const pager = document.getElementById('seasonality-heatmap-pager');
+            const caption = document.getElementById('seasonality-heatmap-caption');
+            if (pager) pager.textContent = '';
+            if (caption) {
+                caption.textContent = '';
+                const red = cssVar('--accent-red') || '#ff6b6b';
+                caption.appendChild(document.createTextNode('Low'));
+                const ramp = document.createElement('span');
+                ramp.className = 'hm-ramp';
+                for (const alpha of HEATMAP_ALPHAS) {
+                    const cell = document.createElement('span');
+                    cell.className = 'hm-ramp-cell';
+                    cell.style.background = withAlpha(red, alpha);
+                    ramp.appendChild(cell);
+                }
+                caption.appendChild(ramp);
+                caption.appendChild(document.createTextNode('High'));
+                const detail = document.createElement('div');
+                detail.className = 'chart-caption-break';
+                detail.textContent = 'Each row relative to its own range.';
+                caption.appendChild(detail);
             }
 
-            // Update category by month (top N + "Other"). Months without spending
-            // are dropped so the axis doesn't carry empty columns.
-            if (categoryMonthChartInstance) {
-                const spendingMonths = monthsToShow.filter(m => (agg.spendingByMonth[m.key] || 0) > 0);
-                const labels = spendingMonths.map(m => m.label);
-                const datasets = topCategories.map((cat, i) => ({
-                    label: cat,
-                    data: spendingMonths.map(m => agg.byCategoryByMonth[cat]?.[m.key] || 0),
-                    backgroundColor: categoryColor(i)
-                }));
+            const total = monthKeys.length;
+            const maxPage = Math.max(0, Math.ceil(total / HEATMAP_PAGE_SIZE) - 1);
+            if (heatmapState.page > maxPage) heatmapState.page = maxPage;
+            const end = total - heatmapState.page * HEATMAP_PAGE_SIZE;
+            const start = Math.max(0, end - HEATMAP_PAGE_SIZE);
+            const pageKeys = monthKeys.slice(start, end);
 
-                if (otherCategories.length > 0) {
+            renderHeatmap(agg.byCategoryByMonth, pageKeys, categories);
+
+            if (!pager || total <= HEATMAP_PAGE_SIZE) return;
+            const prev = document.createElement('button');
+            prev.textContent = `‹ Prev ${HEATMAP_PAGE_SIZE} months`;
+            prev.disabled = start === 0;
+            prev.addEventListener('click', () => {
+                heatmapState.page += 1;
+                renderAllCharts();
+            });
+
+            const range = document.createElement('span');
+            range.className = 'pager-range';
+            range.textContent = `${monthLabel(pageKeys[0])} - ${monthLabel(pageKeys[pageKeys.length - 1])} · showing ${pageKeys.length} of ${total} months`;
+
+            const next = document.createElement('button');
+            next.textContent = `Next ${HEATMAP_PAGE_SIZE} months ›`;
+            next.disabled = heatmapState.page === 0;
+            next.addEventListener('click', () => {
+                heatmapState.page -= 1;
+                renderAllCharts();
+            });
+
+            pager.append(prev, range, next);
+        }
+
+        function renderShareView(agg, topCategories, otherCategories) {
+            const container = document.getElementById('cat-share-view');
+            if (!container) return;
+
+            const allBucket = { months: getMonthKeys() };
+            const rows = topCategories.map(name => ({
+                name,
+                total: sumFor(agg.byCategoryByMonth[name], allBucket),
+                color: categoryColorMap.value[name],
+            }));
+            if (otherCategories.length) {
+                rows.push({
+                    name: OTHER_CATEGORY_LABEL,
+                    total: otherCategories.reduce((sum, name) => sum + sumFor(agg.byCategoryByMonth[name], allBucket), 0),
+                    color: OTHER_CATEGORY_COLOR,
+                });
+            }
+
+            const grand = rows.reduce((sum, row) => sum + row.total, 0) || 1;
+            const maxTotal = Math.max(...rows.map(r => r.total), 1);
+
+            container.textContent = '';
+            const strip = document.createElement('div');
+            strip.className = 'share-strip';
+            const list = document.createElement('div');
+            list.className = 'share-rows';
+
+            for (const rowData of rows) {
+                const seg = document.createElement('div');
+                seg.className = 'share-seg';
+                seg.style.width = `${(rowData.total / grand) * 100}%`;
+                seg.style.background = rowData.color;
+
+                const row = document.createElement('div');
+                row.className = 'share-row';
+                const sw = document.createElement('span');
+                sw.className = 'swatch';
+                sw.style.background = rowData.color;
+                const name = document.createElement('span');
+                name.className = 'share-name';
+                name.textContent = rowData.name;
+                const track = document.createElement('div');
+                track.className = 'share-bar-track';
+                const fill = document.createElement('div');
+                fill.className = 'share-bar-fill';
+                fill.style.width = `${(rowData.total / maxTotal) * 100}%`;
+                fill.style.background = withAlpha(rowData.color, 0.55);
+                track.appendChild(fill);
+                const amt = document.createElement('span');
+                amt.className = 'share-amt';
+                amt.textContent = formatCurrency(rowData.total);
+                const pct = document.createElement('span');
+                pct.className = 'share-pct';
+                pct.textContent = `${((rowData.total / grand) * 100).toFixed(1)}%`;
+                row.append(sw, name, track, amt, pct);
+
+                const toggleHighlight = on => {
+                    seg.classList.toggle('hl', on);
+                    row.classList.toggle('hl', on);
+                    strip.classList.toggle('emph', on);
+                    list.classList.toggle('emph', on);
+                };
+
+                seg.addEventListener('mouseenter', () => toggleHighlight(true));
+                seg.addEventListener('mouseleave', () => toggleHighlight(false));
+                row.addEventListener('mouseenter', () => toggleHighlight(true));
+                row.addEventListener('mouseleave', () => toggleHighlight(false));
+
+                strip.appendChild(seg);
+                list.appendChild(row);
+            }
+
+            container.append(strip, list);
+        }
+
+        function renderCategoryTrend(agg, monthKeys, topCategories, otherCategories) {
+            const groupingOptions = getGroupingOptions(monthKeys);
+            ensureGroupingState(categoryState, groupingOptions);
+            const groupEl = document.getElementById('cat-group-pills');
+            pillGroup(groupEl, groupingOptions, categoryState.grouping, value => {
+                categoryState.grouping = value;
+                categoryState.page = 0;
+                categoryState.comparePage = 0;
+                saveUiState();
+                renderAllCharts();
+            });
+
+            const compareWrap = document.getElementById('cat-compare-wrap');
+            const compareBox = document.getElementById('cat-compare-checkbox');
+            const unstackWrap = document.getElementById('cat-unstack-wrap');
+            const unstackBox = document.getElementById('cat-unstack-checkbox');
+            const caption = document.getElementById('cat-chart-caption');
+            const shareView = document.getElementById('cat-share-view');
+            const legend = document.getElementById('cat-legend-chips');
+            const canvasWrap = categoryTrendChart.value?.closest('.chart-wrapper');
+
+            const grouped = categoryState.grouping !== 'none';
+            const spanYears = getSpanYears(monthKeys);
+            const comparePageInfo = pagedCompareYears(spanYears, categoryState);
+            const compareYears = comparePageInfo.years;
+            const compareAllowed = spanYears.length > 1 && (categoryState.grouping === 'month' || categoryState.grouping === 'quarter');
+            const compareActive = compareAllowed && categoryState.compare;
+
+            if (compareWrap) compareWrap.classList.toggle('hidden', !compareAllowed);
+            if (compareBox) compareBox.checked = compareActive;
+            if (unstackWrap) unstackWrap.classList.toggle('hidden', !grouped);
+            if (unstackBox) {
+                unstackBox.checked = grouped && categoryState.unstack;
+                unstackBox.disabled = compareActive;
+            }
+            if (compareBox) compareBox.disabled = !!categoryState.unstack;
+            if (caption) caption.textContent = '';
+
+            if (!grouped) {
+                destroyChart('category');
+                if (canvasWrap) canvasWrap.hidden = true;
+                if (shareView) shareView.hidden = false;
+                if (legend) legend.textContent = '';
+                renderShareView(agg, topCategories, otherCategories);
+                renderBucketPager('cat-chart-pager', [], categoryState, 'none', renderAllCharts);
+                return;
+            }
+
+            if (canvasWrap) canvasWrap.hidden = false;
+            if (shareView) shareView.hidden = true;
+
+            const allBuckets = buildBuckets(categoryState.grouping, monthKeys);
+            const pageInfo = pagedBuckets(allBuckets, categoryState, CHART_PAGE_SIZE);
+            if (compareActive) {
+                renderCompareYearPager('cat-chart-pager', comparePageInfo, direction => {
+                    categoryState.comparePage += direction === 'older' ? 1 : -1;
+                    renderAllCharts();
+                });
+            } else {
+                renderBucketPager('cat-chart-pager', allBuckets, categoryState, categoryState.grouping, renderAllCharts);
+            }
+
+            if (categoryState.unstack) {
+                const labels = pageInfo.page.map(b => b.label);
+                const categories = topCategories.concat(otherCategories.length ? [OTHER_CATEGORY_LABEL] : []);
+                if (!categoryState.focused || !categories.includes(categoryState.focused)) {
+                    categoryState.focused = categories[0] || null;
+                }
+                const focused = categoryState.focused;
+                const animateFocused = !categoryFocusedHasAnimated;
+                const dimColor = 'rgba(128,134,150,0.35)';
+                const datasets = categories.map(name => {
+                    const isOther = name === OTHER_CATEGORY_LABEL;
+                    const baseColor = isOther ? OTHER_CATEGORY_COLOR : categoryColorMap.value[name];
+                    const isFocused = focused === name;
+                    return {
+                        label: name,
+                        data: pageInfo.page.map(bucket => {
+                            if (isOther) {
+                                return otherCategories.reduce((sum, cat) => sum + sumFor(agg.byCategoryByMonth[cat], bucket), 0);
+                            }
+                            return sumFor(agg.byCategoryByMonth[name], bucket);
+                        }),
+                        borderColor: isFocused ? baseColor : dimColor,
+                        backgroundColor: isFocused ? baseColor : dimColor,
+                        borderWidth: isFocused ? 3 : 1.5,
+                        pointRadius: isFocused ? 2.5 : 0,
+                        pointHoverRadius: 4,
+                        tension: 0.25,
+                        order: isFocused ? 0 : 1,
+                        baseColor,
+                    };
+                });
+
+                renderChart('category', categoryTrendChart, {
+                    type: 'line',
+                    data: { labels, datasets },
+                    options: {
+                        animation: animateFocused ? undefined : false,
+                        ttSortByValueDesc: true,
+                        ttHideZero: true,
+                        crosshair: true,
+                        ttBoldLabel: focused,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: externalTooltipConfig(),
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: { beginAtZero: true, ticks: { callback: v => formatCurrencyShort(v) } },
+                        },
+                    },
+                });
+                categoryFocusedHasAnimated = true;
+
+                chipLegend(legend, categories.map(name => ({
+                    label: name,
+                    color: name === OTHER_CATEGORY_LABEL ? OTHER_CATEGORY_COLOR : categoryColorMap.value[name],
+                    active: focused === name,
+                    onClick: () => {
+                        categoryState.focused = name;
+                        saveUiState();
+                        renderAllCharts();
+                    },
+                })));
+                return;
+            }
+            categoryFocusedHasAnimated = false;
+
+            const gap = surfaceColor();
+            let labels = [];
+            let datasets = [];
+
+            if (compareActive) {
+                const periods = comparePeriods(categoryState.grouping);
+                const monthSet = new Set(monthKeys);
+                labels = periods.map(p => p.label);
+                const categories = topCategories.concat(otherCategories.length ? [OTHER_CATEGORY_LABEL] : []);
+
+                for (const year of compareYears) {
+                    const alpha = yearAlpha(compareYears, year);
+                    for (const name of categories) {
+                        const color = name === OTHER_CATEGORY_LABEL ? OTHER_CATEGORY_COLOR : categoryColorMap.value[name];
+                        datasets.push({
+                            label: name,
+                            data: periods.map(period => {
+                                if (name === OTHER_CATEGORY_LABEL) {
+                                    return otherCategories.reduce((sum, cat) =>
+                                        sum + sumForPeriod(agg.byCategoryByMonth[cat], year, period, monthSet), 0);
+                                }
+                                return sumForPeriod(agg.byCategoryByMonth[name], year, period, monthSet);
+                            }),
+                            backgroundColor: withAlpha(color, alpha),
+                            borderColor: gap,
+                            borderWidth: 1,
+                            stack: `y${year}`,
+                            ttYear: year,
+                            baseColor: color,
+                            hidden: categoryHidden.has(name),
+                        });
+                    }
+                }
+            } else {
+                labels = pageInfo.page.map(b => b.label);
+                datasets = topCategories.map(name => ({
+                    label: name,
+                    data: pageInfo.page.map(bucket => sumFor(agg.byCategoryByMonth[name], bucket)),
+                    backgroundColor: categoryColorMap.value[name],
+                    borderColor: gap,
+                    borderWidth: 1,
+                    stack: 'spend',
+                    hidden: categoryHidden.has(name),
+                }));
+                if (otherCategories.length) {
                     datasets.push({
                         label: OTHER_CATEGORY_LABEL,
-                        data: spendingMonths.map(m => otherCategories.reduce(
-                            (sum, cat) => sum + (agg.byCategoryByMonth[cat]?.[m.key] || 0), 0
-                        )),
-                        backgroundColor: OTHER_CATEGORY_COLOR
+                        data: pageInfo.page.map(bucket => otherCategories.reduce((sum, cat) => sum + sumFor(agg.byCategoryByMonth[cat], bucket), 0)),
+                        backgroundColor: OTHER_CATEGORY_COLOR,
+                        borderColor: gap,
+                        borderWidth: 1,
+                        stack: 'spend',
+                        hidden: categoryHidden.has(OTHER_CATEGORY_LABEL),
                     });
                 }
-
-                // Calculate max for stacked bar (sum of all categories per month)
-                const monthTotals = spendingMonths.map((m, idx) =>
-                    datasets.reduce((sum, ds) => sum + (ds.data[idx] || 0), 0)
-                );
-                const maxVal = Math.max(...monthTotals, 1); // At least 1 to avoid 0
-
-                categoryMonthChartInstance.data.labels = labels;
-                categoryMonthChartInstance.data.datasets = datasets;
-                categoryMonthChartInstance.options.scales.y.suggestedMax = maxVal * 1.1;
-                categoryMonthChartInstance.update();
             }
+
+            ({ labels, datasets } = stripEmptyAxisSlots(labels, datasets));
+
+            renderChart('category', categoryTrendChart, {
+                type: 'bar',
+                data: { labels, datasets },
+                options: {
+                    ttSortByValueDesc: true,
+                    ttHideZero: true,
+                    yearSubLabels: compareActive,
+                    interaction: { mode: 'nearest', intersect: true },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: externalTooltipConfig(),
+                    },
+                    scales: {
+                        x: compareActive
+                            ? {
+                                stacked: true,
+                                grid: { offset: true },
+                                ticks: xTickOptions(labels, categoryTrendChart, true),
+                                afterFit: scale => { scale.height += 8; },
+                            }
+                            : {
+                                stacked: true,
+                                grid: { display: false },
+                                ticks: xTickOptions(labels, categoryTrendChart, false),
+                            },
+                        y: { stacked: true, ticks: { callback: v => formatCurrencyShort(v) } },
+                    },
+                },
+            });
+
+            const legendCategories = topCategories.concat(otherCategories.length ? [OTHER_CATEGORY_LABEL] : []);
+            chipLegend(legend, legendCategories.map(name => ({
+                label: name,
+                color: name === OTHER_CATEGORY_LABEL ? OTHER_CATEGORY_COLOR : categoryColorMap.value[name],
+                active: !categoryHidden.has(name),
+                onClick: () => {
+                    if (categoryHidden.has(name)) categoryHidden.delete(name);
+                    else categoryHidden.add(name);
+                    renderAllCharts();
+                },
+            })));
+
+            if (caption) {
+                caption.textContent = spanYears.length > compareYears.length && compareActive ? `showing last ${COMPARE_YEARS_MAX} years` : '';
+            }
+        }
+
+        function renderCashFlow(agg, monthKeys) {
+            const groupingOptions = getGroupingOptions(monthKeys);
+            ensureGroupingState(cashState, groupingOptions);
+            const groupEl = document.getElementById('cash-group-pills');
+            pillGroup(groupEl, groupingOptions, cashState.grouping, value => {
+                cashState.grouping = value;
+                cashState.page = 0;
+                cashState.comparePage = 0;
+                saveUiState();
+                renderAllCharts();
+            });
+
+            const compareWrap = document.getElementById('cash-compare-wrap');
+            const compareBox = document.getElementById('cash-compare-checkbox');
+            const caption = document.getElementById('cash-chart-caption');
+            const legend = document.getElementById('cash-legend-chips');
+            const spanYears = getSpanYears(monthKeys);
+            const comparePageInfo = pagedCompareYears(spanYears, cashState);
+            const compareYears = comparePageInfo.years;
+            const compareAllowed = spanYears.length > 1 && (cashState.grouping === 'month' || cashState.grouping === 'quarter');
+            const compareActive = compareAllowed && cashState.compare;
+            if (compareWrap) compareWrap.classList.toggle('hidden', !compareAllowed);
+            if (compareBox) compareBox.checked = compareActive;
+            if (caption) caption.textContent = '';
+
+            if (cashState.grouping === 'none') {
+                const allBucket = { months: monthKeys };
+                renderChart('cashFlow', cashFlowTrendChart, {
+                    type: 'bar',
+                    data: {
+                        labels: CASH_FLOW_SERIES.map(s => s.label),
+                        datasets: [{
+                            data: CASH_FLOW_SERIES.map(s => sumFor(agg[s.byMonthKey], allBucket)),
+                            backgroundColor: CASH_FLOW_SERIES.map(s => s.color),
+                            borderRadius: 4,
+                        }],
+                    },
+                    options: {
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: ctx => formatCurrency(ctx.parsed.y) } },
+                        },
+                        scales: { y: { ticks: { callback: v => formatCurrencyShort(v) } } },
+                    },
+                });
+                if (legend) legend.textContent = '';
+                renderBucketPager('cash-chart-pager', [], cashState, 'none', renderAllCharts);
+                return;
+            }
+
+            const allBuckets = buildBuckets(cashState.grouping, monthKeys);
+            const pageInfo = pagedBuckets(allBuckets, cashState, CHART_PAGE_SIZE);
+            if (compareActive) {
+                renderCompareYearPager('cash-chart-pager', comparePageInfo, direction => {
+                    cashState.comparePage += direction === 'older' ? 1 : -1;
+                    renderAllCharts();
+                });
+            } else {
+                renderBucketPager('cash-chart-pager', allBuckets, cashState, cashState.grouping, renderAllCharts);
+            }
+
+            let labels = [];
+            let datasets = [];
+            if (compareActive) {
+                const periods = comparePeriods(cashState.grouping);
+                const monthSet = new Set(monthKeys);
+                labels = periods.map(p => p.label);
+                for (const year of compareYears) {
+                    const alpha = yearAlpha(compareYears, year);
+                    for (const series of CASH_FLOW_SERIES) {
+                        const data = periods.map(period => sumForPeriod(agg[series.byMonthKey], year, period, monthSet));
+                        if (!data.some(v => v > 0)) continue;
+                        datasets.push({
+                            label: series.label,
+                            data,
+                            backgroundColor: withAlpha(series.color, alpha),
+                            borderRadius: 3,
+                            ttYear: year,
+                            hidden: cashHidden.has(series.label),
+                        });
+                    }
+                }
+            } else {
+                labels = pageInfo.page.map(b => b.label);
+                datasets = CASH_FLOW_SERIES
+                    .map(series => ({
+                        label: series.label,
+                        data: pageInfo.page.map(bucket => sumFor(agg[series.byMonthKey], bucket)),
+                        backgroundColor: series.color,
+                        borderRadius: 4,
+                        hidden: cashHidden.has(series.label),
+                    }))
+                    .filter(ds => ds.data.some(v => v > 0));
+            }
+
+                    ({ labels, datasets } = stripEmptyAxisSlots(labels, datasets));
+
+            renderChart('cashFlow', cashFlowTrendChart, {
+                type: 'bar',
+                data: { labels, datasets },
+                options: {
+                    ttNet: true,
+                    yearSubLabels: compareActive,
+                    interaction: { mode: 'nearest', intersect: true },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: externalTooltipConfig(),
+                    },
+                    scales: {
+                        x: compareActive
+                            ? {
+                                grid: { offset: true },
+                                ticks: xTickOptions(labels, cashFlowTrendChart, true),
+                                afterFit: scale => { scale.height += 8; },
+                            }
+                            : {
+                                grid: { display: false },
+                                ticks: xTickOptions(labels, cashFlowTrendChart, false),
+                            },
+                        y: { ticks: { callback: v => formatCurrencyShort(v) } },
+                    },
+                },
+            });
+
+            chipLegend(legend, CASH_FLOW_SERIES.map(series => ({
+                label: series.label,
+                color: series.color,
+                active: !cashHidden.has(series.label),
+                onClick: () => {
+                    if (cashHidden.has(series.label)) cashHidden.delete(series.label);
+                    else cashHidden.add(series.label);
+                    renderAllCharts();
+                },
+            })));
+
+            if (caption) {
+                caption.textContent = spanYears.length > compareYears.length && compareActive ? `showing last ${COMPARE_YEARS_MAX} years` : '';
+            }
+        }
+
+        function buildFixedVariableSeries(agg, monthKeys) {
+            let fixedTotal = 0;
+            const fixedByMonth = {};
+            const variableByMonth = {};
+            for (const mk of monthKeys) {
+                const fixed = agg.recurringSpendingByMonth?.[mk] || 0;
+                fixedByMonth[mk] = fixed;
+                fixedTotal += fixed;
+                variableByMonth[mk] = Math.max((agg.spendingByMonth[mk] || 0) - fixed, 0);
+            }
+            const fixedMonthly = monthKeys.length ? fixedTotal / monthKeys.length : 0;
+            return {
+                fixedByMonth,
+                variableByMonth,
+                fixedMonthly,
+                recurringMerchants: agg.recurringMerchants,
+            };
+        }
+
+        function renderFixedVariable(agg, monthKeys, fvModel) {
+            const series = [
+                { label: 'Fixed', byMonth: fvModel.fixedByMonth, color: '#4facfe' },
+                { label: 'Variable', byMonth: fvModel.variableByMonth, color: '#ffa94d' },
+            ];
+
+            const groupingOptions = getGroupingOptions(monthKeys);
+            ensureGroupingState(fixedState, groupingOptions);
+            const groupEl = document.getElementById('fixed-group-pills');
+            pillGroup(groupEl, groupingOptions, fixedState.grouping, value => {
+                fixedState.grouping = value;
+                fixedState.page = 0;
+                fixedState.comparePage = 0;
+                saveUiState();
+                renderAllCharts();
+            });
+
+            const compareWrap = document.getElementById('fixed-compare-wrap');
+            const compareBox = document.getElementById('fixed-compare-checkbox');
+            const caption = document.getElementById('fixed-chart-caption');
+            const legend = document.getElementById('fixed-legend-chips');
+            const spanYears = getSpanYears(monthKeys);
+            const comparePageInfo = pagedCompareYears(spanYears, fixedState);
+            const compareYears = comparePageInfo.years;
+            const compareAllowed = spanYears.length > 1 && (fixedState.grouping === 'month' || fixedState.grouping === 'quarter');
+            const compareActive = compareAllowed && fixedState.compare;
+            if (compareWrap) compareWrap.classList.toggle('hidden', !compareAllowed);
+            if (compareBox) compareBox.checked = compareActive;
+
+            const fixedNames = fvModel.recurringMerchants
+                .map(row => row.merchant)
+                .sort((a, b) => a.localeCompare(b));
+
+            if (fixedState.grouping === 'none') {
+                const allBucket = { months: monthKeys };
+                renderChart('fixedVariable', fixedVariableChart, {
+                    type: 'bar',
+                    data: {
+                        labels: series.map(s => s.label),
+                        datasets: [{
+                            data: series.map(s => sumFor(s.byMonth, allBucket)),
+                            backgroundColor: series.map(s => s.color),
+                            borderRadius: 4,
+                        }],
+                    },
+                    options: {
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: ctx => formatCurrency(ctx.parsed.y) } },
+                        },
+                        scales: { y: { ticks: { callback: v => formatCurrencyShort(v) } } },
+                    },
+                });
+                if (legend) legend.textContent = '';
+                renderBucketPager('fixed-chart-pager', [], fixedState, 'none', renderAllCharts);
+            } else {
+                const allBuckets = buildBuckets(fixedState.grouping, monthKeys);
+                const pageInfo = pagedBuckets(allBuckets, fixedState, CHART_PAGE_SIZE);
+                if (compareActive) {
+                    renderCompareYearPager('fixed-chart-pager', comparePageInfo, direction => {
+                        fixedState.comparePage += direction === 'older' ? 1 : -1;
+                        renderAllCharts();
+                    });
+                } else {
+                    renderBucketPager('fixed-chart-pager', allBuckets, fixedState, fixedState.grouping, renderAllCharts);
+                }
+
+                const gap = surfaceColor();
+                let labels = [];
+                let datasets = [];
+                if (compareActive) {
+                    const periods = comparePeriods(fixedState.grouping);
+                    const monthSet = new Set(monthKeys);
+                    labels = periods.map(p => p.label);
+                    for (const year of compareYears) {
+                        const alpha = yearAlpha(compareYears, year);
+                        for (const s of series) {
+                            datasets.push({
+                                label: s.label,
+                                data: periods.map(period => sumForPeriod(s.byMonth, year, period, monthSet)),
+                                backgroundColor: withAlpha(s.color, alpha),
+                                borderColor: gap,
+                                borderWidth: 1,
+                                stack: `y${year}`,
+                                ttYear: year,
+                                hidden: fixedHidden.has(s.label),
+                            });
+                        }
+                    }
+                } else {
+                    labels = pageInfo.page.map(bucket => bucket.label);
+                    datasets = series.map(s => ({
+                        label: s.label,
+                        data: pageInfo.page.map(bucket => sumFor(s.byMonth, bucket)),
+                        backgroundColor: s.color,
+                        borderColor: gap,
+                        borderWidth: 1,
+                        stack: 'fv',
+                        hidden: fixedHidden.has(s.label),
+                    }));
+                }
+
+                ({ labels, datasets } = stripEmptyAxisSlots(labels, datasets));
+
+                renderChart('fixedVariable', fixedVariableChart, {
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: {
+                        yearSubLabels: compareActive,
+                        interaction: { mode: 'nearest', intersect: true },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: externalTooltipConfig(),
+                        },
+                        scales: {
+                            x: compareActive
+                                ? {
+                                    stacked: true,
+                                    grid: { offset: true },
+                                    ticks: xTickOptions(labels, fixedVariableChart, true),
+                                    afterFit: scale => { scale.height += 8; },
+                                }
+                                : {
+                                    stacked: true,
+                                    grid: { display: false },
+                                    ticks: xTickOptions(labels, fixedVariableChart, false),
+                                },
+                            y: { stacked: true, ticks: { callback: v => formatCurrencyShort(v) } },
+                        },
+                    },
+                });
+
+                chipLegend(legend, series.map(s => ({
+                    label: s.label,
+                    color: s.color,
+                    active: !fixedHidden.has(s.label),
+                    onClick: () => {
+                        if (fixedHidden.has(s.label)) fixedHidden.delete(s.label);
+                        else fixedHidden.add(s.label);
+                        renderAllCharts();
+                    },
+                })));
+            }
+
+            if (caption) {
+                const names = fixedNames.length ? fixedNames.join(', ') : 'none in current filter';
+                const truncation = compareActive && spanYears.length > compareYears.length ? ` · showing last ${COMPARE_YEARS_MAX} years` : '';
+                caption.textContent = `Fixed (${fixedNames.length}): ${names}${truncation}`;
+            }
+        }
+
+        function renderVolatility(agg, monthKeys) {
+            const rows = Object.keys(agg.byCategoryByMonth)
+                .map(name => {
+                    const values = monthKeys.map(mk => agg.byCategoryByMonth[name]?.[mk] || 0);
+                    const min = Math.min(...values);
+                    const max = Math.max(...values);
+                    const avg = values.reduce((sum, v) => sum + v, 0) / Math.max(values.length, 1);
+                    return { name, min, max, avg, range: max - min };
+                })
+                .filter(row => row.max > 0)
+                .sort((a, b) => b.range - a.range)
+                .slice(0, 10);
+
+            renderChart('volatility', volatilityChart, {
+                type: 'bar',
+                data: {
+                    labels: rows.map(row => row.name),
+                    datasets: [
+                        {
+                            label: 'Monthly range',
+                            data: rows.map(row => [row.min, row.max]),
+                            backgroundColor: rows.map(row => withAlpha(categoryColorMap.value[row.name] || '#4facfe', 0.45)),
+                            borderColor: rows.map(row => categoryColorMap.value[row.name] || '#4facfe'),
+                            borderWidth: 1.5,
+                            borderRadius: 4,
+                            borderSkipped: false,
+                            barThickness: 26,
+                            maxBarThickness: 26,
+                            barPercentage: 0.55,
+                        },
+                        {
+                            label: 'Average',
+                            type: 'scatter',
+                            data: rows.map(row => ({ x: row.avg, y: row.name })),
+                            pointStyle: 'line',
+                            rotation: 90,
+                            radius: 14,
+                            hoverRadius: 14,
+                            borderWidth: 2.5,
+                            borderColor: cssVar('--text-primary') || '#e8e8e8',
+                        },
+                    ],
+                },
+                options: {
+                    indexAxis: 'y',
+                    layout: {
+                        padding: {
+                            top: 10,
+                            bottom: 10,
+                        },
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            boxPadding: 6,
+                            callbacks: {
+                                label: ctx => {
+                                    const row = rows[ctx.dataIndex];
+                                    return `Min ${formatCurrency(row.min)} · Avg ${formatCurrency(row.avg)} · Max ${formatCurrency(row.max)}`;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { ticks: { callback: v => formatCurrencyShort(v) } },
+                        y: {
+                            offset: true,
+                            grid: { display: false },
+                        },
+                    },
+                },
+            });
+        }
+
+        function renderAuditTable(recurringMerchants) {
+            const container = document.getElementById('recurring-audit');
+            if (!container) return;
+
+            container.classList.add('audit-scroll');
+            const rows = recurringMerchants
+                .map(row => ({
+                    merchant: row.merchant,
+                    category: row.category,
+                    cadence: row.cadence === 'annual' ? 'Annual' : 'Monthly',
+                    monthly: row.recurringMonthlyCost,
+                    annualized: row.recurringMonthlyCost * 12,
+                }))
+                .sort((a, b) => b.annualized - a.annualized);
+
+            const visible = rows.slice(0, 10);
+            const hidden = rows.slice(10);
+            const maxAnnual = Math.max(...rows.map(r => r.annualized), 1);
+            const totalAnnual = rows.reduce((sum, row) => sum + row.annualized, 0);
+            const totalMonthly = rows.reduce((sum, row) => sum + row.monthly, 0);
+
+            container.textContent = '';
+            const table = document.createElement('table');
+            table.className = 'audit-table';
+            const thead = document.createElement('thead');
+            const hr = document.createElement('tr');
+            [['Merchant'], ['Category'], ['Cadence'], ['Monthly', 'num'], ['Annualized', 'num']].forEach(([title, cls]) => {
+                const th = document.createElement('th');
+                th.textContent = title;
+                if (cls) th.className = cls;
+                hr.appendChild(th);
+            });
+            thead.appendChild(hr);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            for (const rowData of visible) {
+                const tr = document.createElement('tr');
+                const tdMerchant = document.createElement('td');
+                tdMerchant.textContent = rowData.merchant;
+                const tdCategory = document.createElement('td');
+                tdCategory.className = 'cat';
+                tdCategory.textContent = rowData.category;
+                const tdCadence = document.createElement('td');
+                const badge = document.createElement('span');
+                badge.className = 'cadence';
+                badge.textContent = rowData.cadence;
+                tdCadence.appendChild(badge);
+                const tdMonthly = document.createElement('td');
+                tdMonthly.className = 'num';
+                tdMonthly.textContent = formatCurrencyDecimalValue(rowData.monthly);
+                const tdAnnual = document.createElement('td');
+                tdAnnual.className = 'num annual';
+                const track = document.createElement('div');
+                track.className = 'bar-track';
+                const fill = document.createElement('div');
+                fill.className = 'bar-fill';
+                fill.style.width = `${Math.round((rowData.annualized / maxAnnual) * 100)}%`;
+                const label = document.createElement('span');
+                label.textContent = formatCurrency(rowData.annualized);
+                track.append(fill, label);
+                tdAnnual.appendChild(track);
+                tr.append(tdMerchant, tdCategory, tdCadence, tdMonthly, tdAnnual);
+                tbody.appendChild(tr);
+            }
+
+            if (hidden.length) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 3;
+                td.className = 'cat';
+                td.textContent = `+ ${hidden.length} more`;
+                const tdMonthly = document.createElement('td');
+                tdMonthly.className = 'num cat';
+                tdMonthly.textContent = '';
+                const tdAnnual = document.createElement('td');
+                tdAnnual.className = 'num cat';
+                tdAnnual.textContent = `${formatCurrency(hidden.reduce((sum, row) => sum + row.annualized, 0))} / yr`;
+                tr.append(td, tdMonthly, tdAnnual);
+                tbody.appendChild(tr);
+            }
+
+            const totalRow = document.createElement('tr');
+            totalRow.className = 'audit-total-row';
+            const label = document.createElement('td');
+            label.colSpan = 3;
+            label.textContent = `${rows.length} recurring merchants`;
+            label.style.whiteSpace = 'nowrap';
+            totalRow.appendChild(label);
+            const monthly = document.createElement('td');
+            monthly.className = 'num';
+            monthly.textContent = formatCurrencyDecimalValue(totalMonthly);
+            const annual = document.createElement('td');
+            annual.className = 'num';
+            annual.textContent = `${formatCurrency(totalAnnual)} / yr`;
+            totalRow.append(monthly, annual);
+            tbody.appendChild(totalRow);
+
+            table.appendChild(tbody);
+            container.appendChild(table);
+        }
+
+        function renderAllCharts() {
+            if (!chartsInitialized) return;
+
+            const monthKeys = getMonthKeys();
+            const agg = chartAggregations.value;
+            const { topCategories, otherCategories } = buildCategoryBreakdown(agg);
+            const fvModel = buildFixedVariableSeries(agg, monthKeys);
+
+            renderKpis(monthKeys, agg, fvModel.fixedMonthly);
+            renderCategoryTrend(agg, monthKeys, topCategories, otherCategories);
+            renderPagedHeatmap(agg, monthKeys, topCategories);
+            renderVolatility(agg, monthKeys);
+            renderAuditTable(agg.recurringMerchants);
+            renderCashFlow(agg, monthKeys);
+            renderFixedVariable(agg, monthKeys, fvModel);
+        }
+
+        function wireChartControls() {
+            if (chartsInitialized) return;
+
+            const catCompare = document.getElementById('cat-compare-checkbox');
+            if (catCompare) {
+                catCompare.addEventListener('change', () => {
+                    categoryState.compare = catCompare.checked;
+                    categoryState.page = 0;
+                    categoryState.comparePage = 0;
+                    saveUiState();
+                    renderAllCharts();
+                });
+            }
+
+            const catUnstack = document.getElementById('cat-unstack-checkbox');
+            if (catUnstack) {
+                catUnstack.addEventListener('change', () => {
+                    categoryState.unstack = catUnstack.checked;
+                    if (categoryState.unstack) categoryState.compare = false;
+                    categoryState.page = 0;
+                    categoryState.comparePage = 0;
+                    saveUiState();
+                    renderAllCharts();
+                });
+            }
+
+            const cashCompare = document.getElementById('cash-compare-checkbox');
+            if (cashCompare) {
+                cashCompare.addEventListener('change', () => {
+                    cashState.compare = cashCompare.checked;
+                    cashState.page = 0;
+                    cashState.comparePage = 0;
+                    saveUiState();
+                    renderAllCharts();
+                });
+            }
+
+            const fixedCompare = document.getElementById('fixed-compare-checkbox');
+            if (fixedCompare) {
+                fixedCompare.addEventListener('change', () => {
+                    fixedState.compare = fixedCompare.checked;
+                    fixedState.page = 0;
+                    fixedState.comparePage = 0;
+                    saveUiState();
+                    renderAllCharts();
+                });
+            }
+
+            chartsInitialized = true;
+        }
+
+        function initCharts() {
+            ensureChartPlugins();
+            applyChartDefaults();
+            wireChartControls();
+            renderAllCharts();
         }
 
         // ========== SCROLL HANDLING ==========
@@ -2882,7 +4640,16 @@ createApp({
         // ========== WATCHERS ==========
 
         watch(activeFilters, filtersToHash, { deep: true });
-        watch(chartAggregations, updateCharts);
+        watch(chartAggregations, () => {
+            renderAllCharts();
+        });
+        watch(
+            () => filteredMonthsForCharts.value.map(m => m.key).join('|'),
+            () => {
+                resetChartPages();
+                renderAllCharts();
+            }
+        );
         watch([currentView, groupByMode, hasSections], () => {
             nextTick(() => applyTxnColumnProfile());
         });
@@ -2898,6 +4665,10 @@ createApp({
         );
         watch(
             () => JSON.stringify(sortConfig),
+            saveUiState
+        );
+        watch(
+            () => JSON.stringify(chartPanels),
             saveUiState
         );
         watch(allPersistableSectionKeys, () => {
@@ -2947,6 +4718,7 @@ createApp({
                 hashToFilters();
                 recomputeTxnColumnProfiles();
                 initCharts();
+                initChartLayoutObserver();
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
                         setAppReadyState();
@@ -2957,6 +4729,7 @@ createApp({
             // Scroll handling
             window.addEventListener('scroll', handleScroll);
             window.addEventListener('resize', recomputeTxnColumnsDebounced);
+            window.addEventListener('resize', rerenderChartsDebounced);
 
             // Close autocomplete on outside click
             document.addEventListener('click', e => {
@@ -2983,6 +4756,21 @@ createApp({
             });
         });
 
+        onUnmounted(() => {
+            if (chartLayoutObserver) {
+                chartLayoutObserver.disconnect();
+                chartLayoutObserver = null;
+            }
+            if (txResizeDebounceHandle) {
+                clearTimeout(txResizeDebounceHandle);
+                txResizeDebounceHandle = null;
+            }
+            if (chartResizeDebounceHandle) {
+                clearTimeout(chartResizeDebounceHandle);
+                chartResizeDebounceHandle = null;
+            }
+        });
+
         // ========== RETURN ==========
 
         return {
@@ -2990,8 +4778,9 @@ createApp({
             activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
             showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed,
             currentView, groupByMode, sortConfig, includeNegativeTotals, detailsCollapsed, allCollapsed, detailsSummary,
+            chartPanels,
             // Refs
-            monthlyChart, categoryPieChart, categoryByMonthChart,
+            kpiGrid, categoryTrendChart, cashFlowTrendChart, fixedVariableChart, volatilityChart,
             // Computed
             spendingData, title, subtitle,
             visibleSections, filteredCategoryView, positiveCategoryView, subcategoryGroupedView, creditMerchants, filteredSectionView, positiveSectionView, hasSections, negativeTotalsCount,
@@ -3019,7 +4808,7 @@ createApp({
             formatCurrency, formatDate, formatMonthLabel, formatPct, filterTypeChar,
             highlightDescription,
             onSearchInput, onSearchKeydown, selectAutocompleteItem,
-            toggleTheme, resetUiSettings
+            toggleTheme, toggleChartPanel, resetUiSettings
         };
     }
 })
