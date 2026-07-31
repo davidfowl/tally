@@ -13,6 +13,7 @@ from tally.analyzer import parse_generic_csv as _parse_generic_csv
 from tally.parsers import SkippedRow, ParseResult, _detect_date_format
 from tally.format_parser import parse_format_string
 from tally.merchant_utils import get_all_rules
+from tally.report import write_summary_file_vue
 from tally.section_engine import parse_sections
 
 
@@ -476,6 +477,50 @@ class TestExportCsv:
         assert 'paypal_txn_id' in reader.fieldnames
         assert rows[0]['paypal_merchant'] == 'Acme Corp'
         assert rows[0]['paypal_txn_id'] == '123ABC'
+
+
+class TestHtmlReportTupleKeyFallback:
+    """Tests for HTML report generation with tuple by_merchant keys."""
+
+    def test_write_summary_file_vue_falls_back_to_tuple_merchant_name(self, tmp_path):
+        """HTML report should use tuple merchant names when data['name'] is unavailable."""
+        txns = [
+            {
+                'date': date(2025, 1, 5),
+                'description': 'ROCHESTER PUBLIC SCHOOLS CAFE',
+                'raw_description': 'ROCHESTER PUBLIC SCHOOLS CAFE',
+                'merchant': 'Rochester Public Schools',
+                'amount': 42.50,
+                'category': 'Food',
+                'subcategory': 'School Meals',
+                'source': 'test.csv',
+                'tags': [],
+                'excluded': None,
+            },
+            {
+                'date': date(2025, 1, 12),
+                'description': 'ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE',
+                'raw_description': 'ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE',
+                'merchant': 'Rochester Public Schools',
+                'amount': 75.00,
+                'category': 'Education',
+                'subcategory': 'Fees',
+                'source': 'test.csv',
+                'tags': [],
+                'excluded': None,
+            },
+        ]
+
+        stats = analyze_transactions(txns)
+        for data in stats['by_merchant'].values():
+            data.pop('name', None)
+
+        output_path = tmp_path / 'report.html'
+        write_summary_file_vue(stats, output_path, title='Tuple Key Report')
+
+        report_html = output_path.read_text(encoding='utf-8')
+        assert 'Rochester Public Schools' in report_html
+        assert "('Rochester Public Schools', 'Food', 'School Meals')" not in report_html
 
 
 class TestParseAmount:
@@ -3328,6 +3373,18 @@ field: fee = 0
 class TestRecurrenceClassification:
     """Tests for recurrence inference and tag overrides in analyze_transactions."""
 
+    def _merchant(self, stats, name):
+        by_merchant = stats['by_merchant']
+        if name in by_merchant:
+            return by_merchant[name]
+        for key, data in by_merchant.items():
+            if isinstance(key, tuple):
+                if key and key[0] == name:
+                    return data
+            elif data.get('name') == name:
+                return data
+        raise KeyError(name)
+
     def _txn(self, merchant, amount, year, month, day, tags=None):
         return {
             'date': date(year, month, day),
@@ -3355,7 +3412,7 @@ class TestRecurrenceClassification:
             txns.append(self._txn('Borderline Monthly', 50.0, 2025, m, 5))
 
         stats = analyze_transactions(txns)
-        merchant = stats['by_merchant']['Borderline Monthly']
+        merchant = self._merchant(stats, 'Borderline Monthly')
 
         assert merchant['months_active'] == 3
         assert merchant['recurrence'] is None
@@ -3372,7 +3429,7 @@ class TestRecurrenceClassification:
             txns.append(self._txn('Lumpy Utility', amount, 2025, m, 7))
 
         stats = analyze_transactions(txns)
-        merchant = stats['by_merchant']['Lumpy Utility']
+        merchant = self._merchant(stats, 'Lumpy Utility')
 
         assert merchant['months_active'] == 4
         assert merchant['cv'] >= 0.3
@@ -3385,7 +3442,7 @@ class TestRecurrenceClassification:
         ]
 
         stats = analyze_transactions(txns)
-        merchant = stats['by_merchant']['Manual Fixed']
+        merchant = self._merchant(stats, 'Manual Fixed')
 
         assert merchant['recurrence'] == 'monthly'
         assert merchant['recurring_monthly_cost'] > 0
@@ -3397,7 +3454,7 @@ class TestRecurrenceClassification:
             txns.append(self._txn('Variable Override', 40.0, 2025, m, 8, tags=['variable']))
 
         stats = analyze_transactions(txns)
-        merchant = stats['by_merchant']['Variable Override']
+        merchant = self._merchant(stats, 'Variable Override')
 
         assert merchant['months_active'] == 6
         assert merchant['cv'] < 0.3
@@ -3419,7 +3476,7 @@ class TestRecurrenceClassification:
         ]
 
         stats = analyze_transactions(txns)
-        merchant = stats['by_merchant']['Annual Insurance']
+        merchant = self._merchant(stats, 'Annual Insurance')
 
         assert merchant['months_active'] == 3
         assert merchant['recurrence'] == 'annual'
@@ -3430,7 +3487,7 @@ class TestRecurrenceClassification:
         txns = [self._txn('Streaming', 15.0, 2025, m, 3) for m in range(1, 7)]
 
         stats = analyze_transactions(txns)
-        merchant = stats['by_merchant']['Streaming']
+        merchant = self._merchant(stats, 'Streaming')
 
         assert merchant['months_active'] == 6
         assert merchant['recurrence'] == 'monthly'
@@ -3448,7 +3505,7 @@ class TestRecurrenceClassification:
         txns.append(self._txn('Annual License', 1180.0, 2026, 2, 14))
 
         stats = analyze_transactions(txns)
-        merchant = stats['by_merchant']['Annual License']
+        merchant = self._merchant(stats, 'Annual License')
 
         assert merchant['recurrence'] == 'annual'
         assert merchant['recurring_monthly_cost'] == pytest.approx(((1200.0 + 1180.0) / 2) / 12, rel=1e-3)
