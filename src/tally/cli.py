@@ -47,7 +47,7 @@ def main():
         description='Parse transactions, categorize them, and generate an HTML spending report. '
                     'When a merchants file is configured and unknown merchants remain, also writes '
                     'config/categorization.yaml (+ schema) for review. '
-                    "Set 'categorization: false' in settings.yaml to disable this."
+                    "Set 'generate_categorization_file: false' in settings.yaml to disable this."
     )
     up_parser.add_argument(
         'config',

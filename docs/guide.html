@@ -359,14 +359,74 @@ field.description = regex_replace(field.description, "^APLPAY\\s+", "")</code></
         <p>Theory11 has exactly one rule, so tally hands over the answer: paste <code>[Theory11] Shopping / Christmas</code> straight into that row's <code>useRule:</code> field in <code>categorization.yaml</code> and you're done. (<code>refund: true</code> just flags that this particular amount is a credit, not a charge.)</p>
 
         <h3 id="annotate"><a href="#annotate" class="anchor-link">#</a>Getting help on a row</h3>
-        <p><code>additionalInfo</code> stays blank until you ask for it — tally never writes or overwrites this field. Say "annotate" (or "annotate 5-12", or "annotate the Amazons") and your agent fills it in with its best guess and reasoning, then you answer from there. <code>id</code> is just a display label for talking about rows in chat ("process 7, 9, 13") — it's renumbered every run, so it always matches what's on screen right now.</p>
+        <p><code>aiNotes</code> stays blank until you ask for it — tally never writes or overwrites this field. Say "annotate" (or "annotate 5-12", or "annotate the Amazons") and your agent fills it in with its best guess and reasoning, then you answer from there. <code>id</code> is just a display label for talking about rows in chat ("process 7, 9, 13") — it's renumbered every run, so it always matches what's on screen right now.</p>
 
         <div class="callout">
             <div class="callout-title">Regenerating the file</div>
             <p>Every <code>tally up</code> merges your previous answers back in: rows whose transaction now matches a rule drop out of the file entirely, and rows still unknown carry forward whatever you typed. Answers reattach by the stable <code>key</code> field, never by <code>id</code>.</p>
         </div>
 
-        <p>See the <a href="formats.html#categorization-files">Formats reference</a> for the full field list, malformed-YAML behavior, and how to turn this off with <code>categorization: false</code>.</p>
+        <h3 id="flagging-a-rule-for-review"><a href="#flagging-a-rule-for-review" class="anchor-link">#</a>Flagging a Rule for Review</h3>
+        <p>Sometimes a rule is right most of the time but you still want a second look before it's final — a merchant that's occasionally a gift instead of a personal purchase, a category you're not fully sure of yet. Add <code>review: true</code> to that rule and every transaction it matches keeps surfacing for confirmation, even though it's already categorized.</p>
+        <p><code>review: true</code> takes no conditions of its own — granularity belongs in the rule's own <code>match:</code>. Split out the specific case and flag only that rule:</p>
+        <pre><code><span class="highlight">[Theory11]</span>
+match: contains(<span class="string">"THEORY11"</span>) and contains(field.tagging, <span class="string">"CATEGORY: Shopping / Christmas"</span>)
+category: Shopping
+subcategory: Christmas
+
+<span class="highlight">[Theory11]</span>
+match: contains(<span class="string">"THEORY11"</span>)
+category: Shopping
+subcategory: Christmas
+<span class="highlight">review: true</span></code></pre>
+        <p>The first rule only fires once a purchase has already been explicitly tagged as a Christmas gift — nothing to confirm there. The second, broader rule catches every other Theory11 charge, and those keep coming back for review until they're confirmed. Setting <code>review:</code> to anything other than <code>true</code> or <code>false</code> is a parse error that points you back at <code>match:</code> — that's the mechanism for narrowing what gets reviewed, not a condition on <code>review:</code> itself.</p>
+
+        <div class="callout">
+            <div class="callout-title">Compatibility warning</div>
+            <p>A <code>merchants.rules</code> file containing <code>review:</code> will not load on tally builds older than this release. The parser hard-fails on unknown properties — by design, and unchanged here — so it stops with <code>Unknown property: review</code> until the build is upgraded. If you share your rules file with someone else, or roll back your own install, keep this in mind.</p>
+        </div>
+
+        <h3 id="confirming-a-review-row"><a href="#confirming-a-review-row" class="anchor-link">#</a>Confirming a Reviewed Transaction</h3>
+        <p>Transactions matched by a <code>review: true</code> rule show up in a separate <code>reviews:</code> list in <code>categorization.yaml</code>, below the unknowns. Each row carries <code>currently</code> — how it's categorized right now, i.e. what stands if you do nothing — and <code>file</code>, the data file it came from. Leave the row alone and the rule that matched it keeps applying.</p>
+        <p>Row ids continue the same sequence as the unknowns above them, so "process 7, 9, 13" is never ambiguous about which list a number belongs to. Unlike unknown rows, review rows don't drop out of the file on their own — they persist indefinitely, across months and files, until the file named in <code>file</code> is marked <code>reviewComplete: true</code> in <code>config/inventory.yaml</code> (below). You answer a review row with the same fields as an unknown one: <code>useRule</code> to point at a different rule, <code>newRule</code> to describe a new one, or <code>edits</code> for a one-off override on just that transaction.</p>
+
+        <h3 id="inventory-yaml"><a href="#inventory-yaml" class="anchor-link">#</a>The Data File Inventory</h3>
+        <p>Alongside the categorization files, tally maintains <code>config/inventory.yaml</code> — a register of every data file it has parsed, and whether you've confirmed its categorizations:</p>
+        <pre><code><span class="comment"># Data files tally has seen, and whether you have confirmed their
+# categorizations. Tally only ever appends entries.
+#
+# Set reviewComplete: true to confirm a file and stop its rows
+# appearing for review. Set it back to false to review a file again after
+# appending new rows to the CSV.
+#
+# reviewComplete never affects parsing or analysis — every transaction is
+# always included in your report totals.
+#
+# Note: comments you add below are lost when tally rewrites this file.</span>
+
+files:
+  - path: <span class="string">"data/amazon-chase-visa-2026-Q2.CSV"</span>
+    source: <span class="string">"Amazon Chase Visa"</span>
+    registered: <span class="string">"2026-07-31"</span>
+    reviewComplete: true
+  - path: <span class="string">"data/amazon-chase-visa-2026-Q3.CSV"</span>
+    source: <span class="string">"Amazon Chase Visa"</span>
+    registered: <span class="string">"2026-08-15"</span>
+    reviewComplete: false</code></pre>
+        <p>Tally registers a file the first time it parses it and only ever appends — it never modifies or removes an existing entry, so a hand-set <code>reviewComplete</code> always survives a run.</p>
+        <p>Marking a file reviewed is entirely manual: set <code>reviewComplete</code> to <code>true</code> yourself, or ask your agent to do it for you, once you're satisfied with a file's categorizations. There's no <code>tally</code> command for it. Set it back to <code>false</code> to force that file's rows back into review — the documented recovery after appending new rows to an existing CSV.</p>
+        <div class="callout">
+            <div class="callout-title"><code>reviewComplete</code> is review-scoped only</div>
+            <p>It never gates parsing or analysis. Every transaction always feeds your report's totals and monthly averages, and <code>tally discover</code> always sees everything, regardless of any file's review state. Marking a file reviewed changes only whether its <code>review: true</code> rows appear in the <code>reviews:</code> list above.</p>
+        </div>
+        <p>The file is hand-editable by design, but PyYAML doesn't preserve comments — anything you add here is lost the next time tally rewrites it (<code>ruamel.yaml</code>, which would preserve them, is deliberately not a dependency). Malformed YAML hard-fails the same way <code>categorization.yaml</code> does: the report is still written, the categorization step reports the parse error, and the file is left untouched.</p>
+
+        <p>When a run has review rows waiting, <code>tally up</code> reports it alongside the unknown count:</p>
+        <pre><code><span class="cmd">tally up</span>
+<span class="output">
+Categorization: 36 unknown (0 new, 36 carried forward), 2 awaiting review — confirm to close</span></code></pre>
+
+        <p>See the <a href="formats.html#categorization-files">Formats reference</a> for the full field list, malformed-YAML behavior, and how to turn this off with <code>generate_categorization_file: false</code>.</p>
 
         <h2 id="customizing-categories"><a href="#customizing-categories" class="anchor-link">#</a>Customizing Categories</h2>
         <p>Tally doesn't have predefined categories. You define them in your rules:</p>

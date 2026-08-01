@@ -34,6 +34,7 @@ def cmd_reference(args):
   {C.CYAN}category:{C.RESET} <Category>     {C.DIM}# Required: primary grouping{C.RESET}
   {C.CYAN}subcategory:{C.RESET} <Sub>       {C.DIM}# Optional: secondary grouping{C.RESET}
   {C.CYAN}tags:{C.RESET} tag1, tag2         {C.DIM}# Optional: labels for filtering{C.RESET}
+  {C.CYAN}review:{C.RESET} true            {C.DIM}# Optional: surface matches for confirmation{C.RESET}
 """)
 
         section("Match Functions")

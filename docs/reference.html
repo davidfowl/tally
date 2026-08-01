@@ -242,7 +242,8 @@
 <span class="keyword">match:</span> &lt;expression&gt;      <span class="comment"># Required: when to apply this rule</span>
 <span class="keyword">category:</span> &lt;Category&gt;     <span class="comment"># Required: primary grouping</span>
 <span class="keyword">subcategory:</span> &lt;Sub&gt;       <span class="comment"># Optional: secondary grouping</span>
-<span class="keyword">tags:</span> tag1, tag2         <span class="comment"># Optional: labels for filtering</span></code></pre>
+<span class="keyword">tags:</span> tag1, tag2         <span class="comment"># Optional: labels for filtering</span>
+<span class="keyword">review:</span> true            <span class="comment"># Optional: surface matches for confirmation</span></code></pre>
 
         <h3 id="transforms"><a href="#transforms" class="anchor-link">#</a>Transforms</h3>
         <p>Transforms are defined by top-level assignments whose left side starts with <code>field.</code>. The parser does <em>not</em> require a block marker; an <code>@transforms</code> line is just a human-readable separator you can include in the file if you like.</p>

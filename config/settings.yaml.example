@@ -74,9 +74,12 @@ report_fields:
 
 # Categorization review file (default: true)
 # When merchants_file is set and unknown merchants remain after `tally up`,
-# tally writes config/categorization.yaml (+ schema) listing them for review.
-# Set to false to disable this generation entirely.
-# categorization: false
+# tally writes config/categorization.yaml (+ hints and schema) listing them
+# for review. Set to false to disable this generation entirely.
+#
+# Disabling never deletes files already generated — they hold answers you may
+# have typed. Tally warns that they are stale instead; delete them yourself.
+# generate_categorization_file: false
 
 # Output settings
 output_dir: output

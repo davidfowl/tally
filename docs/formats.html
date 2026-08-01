@@ -218,6 +218,7 @@
             <a href="#currency">Currency Format</a>
             <a href="#travel">Travel Detection</a>
             <a href="#categorization-files">Categorization Files</a>
+            <a href="#inventory-yaml">Data File Inventory</a>
             <a href="#commands">CLI Commands</a>
         </div>
 
@@ -520,9 +521,9 @@ UBER -> <span class="string">"Uber"</span>, Travel, Transport</code></pre>
                 <td>Display-only copy of the transaction, exactly as parsed from the source CSV. Rewritten every run; edits are discarded.</td>
             </tr>
             <tr>
-                <td><code>additionalInfo</code></td>
+                <td><code>aiNotes</code></td>
                 <td>Agent</td>
-                <td>Blank until you ask your agent to "annotate" a row. Tally never writes or overwrites this field, and preserves it verbatim while the row is unresolved.</td>
+                <td>Blank until you ask your agent to "annotate" a row. Tally never writes or overwrites this field, and preserves it verbatim while the row is unresolved. A blank value means the agent hasn't written anything here — not that you owe an answer.</td>
             </tr>
             <tr>
                 <td><code>useRule</code></td>
@@ -538,6 +539,36 @@ UBER -> <span class="string">"Uber"</span>, Travel, Transport</code></pre>
                 <td><code>edits.category</code> / <code>edits.tags</code> / <code>edits.memo</code></td>
                 <td>You</td>
                 <td>One-off overrides for just this transaction, for when no existing or new rule is worth creating.</td>
+            </tr>
+        </table>
+
+        <h3>reviews: fields</h3>
+        <p>Rows appear here only when a rule in <code>merchants.rules</code> carries <code>review: true</code> (see the <a href="guide.html#flagging-a-rule-for-review">Guide</a>) and its source file isn't marked <code>reviewComplete: true</code> in <code>inventory.yaml</code> (below). Unlike unknown rows, review rows don't drop out when regenerated — they persist indefinitely, across months and files, until the file is marked complete. Leave a row untouched and the rule that matched it keeps applying. Ids continue the same sequence as the unknowns list above, so a row number is never ambiguous.</p>
+        <table>
+            <tr>
+                <th>Field</th>
+                <th>Owner</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td><code>id</code>, <code>key</code>, <code>source</code>, <code>date</code>, <code>merchant</code>, <code>amount</code></td>
+                <td>Machine</td>
+                <td>Same as the unknowns table above — the <code>id</code> sequence continues rather than restarting.</td>
+            </tr>
+            <tr>
+                <td><code>currently</code></td>
+                <td>Machine</td>
+                <td>How this transaction is categorized right now, by the rule that matched it. This is what stands if you leave the row alone.</td>
+            </tr>
+            <tr>
+                <td><code>file</code></td>
+                <td>Machine</td>
+                <td>Data file this transaction came from. Set this path's <code>reviewComplete</code> to <code>true</code> in <code>inventory.yaml</code> to stop its rows appearing here.</td>
+            </tr>
+            <tr>
+                <td><code>aiNotes</code>, <code>useRule</code>, <code>newRule</code>, <code>edits.*</code></td>
+                <td>Agent / You</td>
+                <td>Same as the unknowns table above.</td>
             </tr>
         </table>
 
@@ -583,15 +614,52 @@ UBER -> <span class="string">"Uber"</span>, Travel, Transport</code></pre>
         </table>
 
         <h3>Regeneration and merging</h3>
-        <p>Every <code>tally up</code> re-merges the file: rows whose transaction now matches a rule are dropped, and rows still unknown keep whatever you filled in (<code>useRule</code>, <code>newRule</code>, <code>edits</code>, <code>additionalInfo</code>) even though <code>id</code> gets renumbered. Your previous answer is matched to the right row by the stable <code>key</code> field, never by <code>id</code>.</p>
+        <p>Every <code>tally up</code> re-merges the file: rows whose transaction now matches a rule are dropped, and rows still unknown keep whatever you filled in (<code>useRule</code>, <code>newRule</code>, <code>edits</code>, <code>aiNotes</code>) even though <code>id</code> gets renumbered. Your previous answer is matched to the right row by the stable <code>key</code> field, never by <code>id</code>.</p>
 
         <h3>Malformed YAML</h3>
         <p>If <code>categorization.yaml</code> doesn't parse, <code>tally up</code> still writes the HTML report — the categorization step fails on its own, with a message pointing at the line and column, and the file is left completely untouched. Fix the syntax error and re-run; nothing is lost. The most common cause is an unquoted value containing a <code>:</code> — wrap it in quotes, e.g. <code>newRule: "Amazon: books only"</code>.</p>
 
         <h3>Disabling it</h3>
         <pre><code><span class="comment"># In settings.yaml:</span>
-<span class="highlight">categorization:</span> false</code></pre>
-        <p>Set to <code>false</code> to stop tally from writing these files at all. Categorizing by talking to your agent in prose still works exactly the same either way.</p>
+<span class="highlight">generate_categorization_file:</span> false</code></pre>
+        <p>Set to <code>false</code> to stop tally from writing these files at all. Categorizing by talking to your agent in prose still works exactly the same either way. The setting is named <code>generate_categorization_file</code> rather than the shorter <code>categorization</code> for two reasons: the old name read as "stop categorizing my transactions" — tally's entire purpose — and the <code>_file</code> suffix matches <code>merchants_file</code> / <code>views_file</code>, with the <code>generate_</code> prefix making clear this is a boolean toggle, not a path.</p>
+        <p>Turning generation off never deletes files already on disk — <code>categorization.yaml</code> may hold answers you typed, and a config toggle must not destroy that. Instead, if a <code>categorization.yaml</code> is still present, <code>tally up</code> prints a warning that it is stale and leaves it alone:</p>
+        <pre><code><span class="output">Categorization: generation is off (generate_categorization_file: false)
+  config/categorization.yaml is STALE — written 2026-08-01T10:34:27, not updated since.
+  Ignore its contents, or delete it. Re-enable to refresh.</span></code></pre>
+        <p>The warning only appears when a file is actually present, and it never fails the run — even a malformed or unreadable <code>categorization.yaml</code> just yields a notice without a date. Delete the file yourself if you want it gone. <code>config/inventory.yaml</code> keeps registering data files while generation is off, so <code>registered</code> still records when tally first saw each file. Anything registered in the meantime carries <code>reviewComplete: false</code> and surfaces for review once you re-enable.</p>
+
+        <h2 id="inventory-yaml"><a href="#inventory-yaml" class="anchor-link">#</a>Data File Inventory</h2>
+        <p><code>config/inventory.yaml</code> is tally's own register of every data file it has parsed, and whether you've confirmed the categorizations in it. See the <a href="guide.html#inventory-yaml">Guide</a> for the walkthrough; this section is the field reference.</p>
+
+        <table>
+            <tr>
+                <th>Field</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td><code>path</code></td>
+                <td>Data file path, relative to the budget directory when possible (absolute otherwise). This is the match key tally uses to find this entry again on the next run.</td>
+            </tr>
+            <tr>
+                <td><code>source</code></td>
+                <td>Name of the data source (as configured in <code>settings.yaml</code>) this file was parsed as.</td>
+            </tr>
+            <tr>
+                <td><code>registered</code></td>
+                <td>Date tally first saw this file.</td>
+            </tr>
+            <tr>
+                <td><code>reviewComplete</code></td>
+                <td>Boolean, written <code>false</code> for every new entry. Set to <code>true</code> to confirm the file and stop its <code>review: true</code> rows from appearing in <code>categorization.yaml</code>; set it back to <code>false</code> to force them back into review — e.g. after appending new rows to an existing CSV.</td>
+            </tr>
+        </table>
+
+        <p>This is the whole schema — any other key is rejected outright (a typo like <code>reviewComplte</code> would otherwise silently lose the flag). Tally auto-registers every file it parses and only ever appends: it never modifies or removes an existing entry, so a hand-set <code>reviewComplete</code> always survives a run. A <code>reviewComplete</code> value that isn't <code>true</code> or <code>false</code> is a hard error.</p>
+
+        <p><code>reviewComplete</code> is review-scoped only. It never gates parsing or analysis — every transaction always feeds the report's totals and monthly averages, and <code>tally discover</code> always sees everything regardless of any file's review state.</p>
+
+        <p>There is no <code>tally</code> command that sets <code>reviewComplete</code> — you or your agent edit it directly in the file. Malformed YAML hard-fails the same way as <code>categorization.yaml</code>: the report is still written, the error names the line and column, and the file is left untouched. PyYAML doesn't preserve comments, so anything you add to this file is lost the next time tally rewrites it (<code>ruamel.yaml</code>, which would preserve them, is deliberately not a dependency).</p>
 
         <h2 id="commands"><a href="#commands" class="anchor-link">#</a>CLI Commands</h2>
         <table>

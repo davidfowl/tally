@@ -119,6 +119,11 @@ class TestUseRuleDef:
         assert format_rule_label('Savings', '', '', ['transfer']) in enum_values
 
     def test_no_empty_string_in_any_enum(self):
+        """An unanswered useRule is written bare (null), never as "".
+
+        Ctrl+Space completes better from an empty value than from inside a quote
+        pair, and an "" entry would show up as a blank row in the completion list.
+        """
         schema = build_schema(make_rules())
         for node in iter_schemas(schema):
             enum = node.get('enum')
@@ -127,7 +132,9 @@ class TestUseRuleDef:
 
     def test_null_covers_empty_use_rule(self):
         schema = build_schema(make_rules())
-        assert schema['definitions']['useRuleValue']['enum'][0] is None
+        definition = schema['definitions']['useRuleValue']
+        assert definition['enum'][0] is None
+        assert 'null' in definition['type']
 
 
 class TestDescriptions:

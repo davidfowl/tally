@@ -28,6 +28,7 @@ from .categorization_common import (
     YAML_FILENAME,
     format_rule_label,
 )
+from .inventory import INVENTORY_FILENAME, to_relative
 from .parsers import assign_transaction_keys
 from .report import format_currency_decimal
 
@@ -70,19 +71,21 @@ HEADER = """\
 #
 # Machine-owned fields are rewritten on every run; edits to them are discarded:
 #   id, key, source, date, merchant, amount
-# Your fields are carried forward until the row is categorized:
-#   useRule, newRule, edits, additionalInfo
+# Your fields, carried forward until the row is categorized:
+#   useRule, newRule, edits
+# Your agent's field, never written by tally:
+#   aiNotes
 #
 # ─── Navigation ───
 # 1. Copy "useRule: " to the clipboard.
-# 2. Ctrl+F "useRule: ", then F3 to jump between items.
+# 2. Ctrl+F "useRule:", then F3 to jump between items.
 # 3. Paste (replacing the same text) and press Ctrl+Space for autocomplete.
 #
 # ─── Getting help on a row ───
-# "additionalInfo" is blank until you ask for it. Say "annotate" to have your
-# agent fill it in with its best guess and reasoning, then answer from there.
-# Tally never writes this field and never overwrites what your agent put there.
-# Scope it however you like: "annotate", "annotate 5-12", "annotate the Amazons".
+# "aiNotes" is your agent's to fill, not yours — a blank one is not a question
+# waiting on you. Say "annotate" to have your agent write its best guess and
+# reasoning there, then answer from that. Tally never writes it and never
+# overwrites it. Scope it: "annotate", "annotate 5-12", "annotate the Amazons".
 #
 # "id" is a display label only — it is renumbered every run, so "process 7, 9, 13"
 # always means this file as it looks right now.
@@ -163,17 +166,22 @@ def _load_existing(yaml_path):
 
     if not data:
         return {}
-    if not isinstance(data, dict) or not isinstance(data.get('unknowns'), list):
+    if not isinstance(data, dict) or not (
+            isinstance(data.get('unknowns'), list)
+            or isinstance(data.get('reviews'), list)):
         raise CategorizationError(
             f"{yaml_path} does not look like a categorization file — expected a\n"
-            f"top-level 'unknowns:' list. Delete the file to regenerate it, or\n"
-            f"restore the version you meant to edit."
+            f"top-level 'unknowns:' or 'reviews:' list. Delete the file to\n"
+            f"regenerate it, or restore the version you meant to edit."
         )
 
+    # Both lists share one key space, so answers reattach regardless of which
+    # section a transaction moved to between runs.
     existing = {}
-    for row in data['unknowns']:
-        if isinstance(row, dict) and row.get('key'):
-            existing[str(row['key'])] = row
+    for section in ('unknowns', 'reviews'):
+        for row in data.get(section) or []:
+            if isinstance(row, dict) and row.get('key'):
+                existing[str(row['key'])] = row
     return existing
 
 
@@ -285,6 +293,24 @@ def _nearest_rules(description, rule_lookup, cache):
     return nearest
 
 
+def _review_transactions(all_txns, config_dir):
+    """Transactions matched by a review: rule whose file is not yet confirmed.
+
+    Resolution is file-level and indefinite: a review row keeps reappearing —
+    months and files later — until someone sets reviewComplete in inventory.yaml.
+    Leaving the row untouched means the existing rule stands.
+    """
+    from .inventory import is_reviewed, load_inventory
+
+    flagged = [t for t in all_txns if (t.get('match_info') or {}).get('review')]
+    if not flagged:
+        return []
+
+    entries = load_inventory(config_dir)
+    return [t for t in flagged
+            if not is_reviewed(entries, config_dir, t.get('filepath', ''))]
+
+
 def _build_rule_lookup(rules):
     """Map lowercased merchant name -> (display name, sorted labels).
 
@@ -334,7 +360,26 @@ def _render_state(state):
     ]
 
 
-def _render(rows, state):
+def _render_answer_fields(out, row, include_edits=True):
+    """Emit the block of fields the user or agent owns."""
+    out.append(_field_line('aiNotes', row.get('aiNotes'), indent=4))
+    # useRule is left bare rather than `""`. It is the one enum-backed field, and
+    # Ctrl+Space completes better from an empty value than from inside a quote
+    # pair — the quotes would have to be added to the enum and would then show up
+    # as an entry in the completion list.
+    out.append(_field_line('useRule', row.get('useRule'), indent=4, empty=None))
+    out.append(_field_line('newRule', row.get('newRule'), indent=4))
+    if not include_edits:
+        return
+    edits = row.get('edits') if isinstance(row.get('edits'), dict) else {}
+    out.append("    edits:")
+    out.append(_field_line('category', edits.get('category'), indent=6))
+    # tags is an array in the schema, so its empty form is [] rather than "".
+    out.append(_field_line('tags', edits.get('tags'), indent=6, empty='[]'))
+    out.append(_field_line('memo', edits.get('memo'), indent=6))
+
+
+def _render(rows, review_rows, state):
     """Render the file the user answers in.
 
     Emitted by hand rather than via yaml.safe_dump so that unanswered fields stay
@@ -353,17 +398,24 @@ def _render(rows, state):
         out.append(f"    date: {_q(row['date'])}")
         out.append(f"    merchant: {_q(row['merchant'])}")
         out.append(f"    amount: {_q(row['amount'])}")
-        out.append(_field_line('additionalInfo', row.get('additionalInfo'), indent=4))
-        out.append(_field_line('useRule', row.get('useRule'), indent=4))
-        out.append(_field_line('newRule', row.get('newRule'), indent=4))
+        _render_answer_fields(out, row)
 
-        edits = row.get('edits') if isinstance(row.get('edits'), dict) else {}
-        out.append("    edits:")
-        out.append(_field_line('category', edits.get('category'), indent=6))
-        # tags is typed as an array in the schema, so an omitted value must be []
-        # and not null — otherwise the editor flags every untouched row.
-        out.append(_field_line('tags', edits.get('tags'), indent=6, empty='[]'))
-        out.append(_field_line('memo', edits.get('memo'), indent=6))
+    if review_rows:
+        out.append("")
+        out.append("# Already categorized, awaiting your confirmation. Leave a row")
+        out.append("# untouched and its current rule stands. These persist until the")
+        out.append(f"# file is marked reviewComplete in {INVENTORY_FILENAME}.")
+        out.append("reviews:")
+        for row in review_rows:
+            out.append(f"  - id: {row['id']}")
+            out.append(f"    key: {_q(row['key'])}")
+            out.append(f"    source: {_q(row['source'])}")
+            out.append(f"    date: {_q(row['date'])}")
+            out.append(f"    merchant: {_q(row['merchant'])}")
+            out.append(f"    amount: {_q(row['amount'])}")
+            out.append(f"    currently: {_q(row['currently'])}")
+            out.append(f"    file: {_q(row['file'])}")
+            _render_answer_fields(out, row)
 
     return '\n'.join(out) + '\n'
 
@@ -398,11 +450,17 @@ def _render_hints(rows, state):
     return '\n'.join(out) + '\n'
 
 
-def _field_line(name, value, indent, empty=''):
-    """Emit 'name: value', or 'name:' (or a typed empty) when nothing to carry."""
+def _field_line(name, value, indent, empty='""'):
+    """Emit 'name: value', or the field's typed empty form when there is nothing.
+
+    Free-text fields are written as `""` rather than left blank, so it is obvious
+    at a glance which fields are the user's to fill and the cursor lands inside
+    the quotes. Arrays pass `[]`; pass ``empty=None`` for a bare `name:`, which
+    parses as null.
+    """
     pad = ' ' * indent
     if value is None or value == '' or value == []:
-        return f"{pad}{name}:{' ' + empty if empty else ''}"
+        return f"{pad}{name}:" if empty is None else f"{pad}{name}: {empty}"
     return f"{pad}{name}: {_q(value)}"
 
 
@@ -413,7 +471,7 @@ def generate_categorization(config, config_dir, all_txns, rules):
     failing fast buys nothing when the report is written regardless.
 
     Rows whose transactions now match a rule are dropped. Rows still unknown carry
-    their answers and additionalInfo forward verbatim. New unknowns append.
+    their answers and aiNotes forward verbatim. New unknowns append.
 
     Args:
         config: loaded config dict (needs 'currency_format', '_merchants_file')
@@ -442,7 +500,10 @@ def generate_categorization(config, config_dir, all_txns, rules):
     assign_transaction_keys(all_txns)
 
     unknown_txns = [t for t in all_txns if t.get('category') == 'Unknown']
-    if not unknown_txns:
+    review_txns = _review_transactions(all_txns, config_dir)
+    status.awaiting_review = len(review_txns)
+
+    if not unknown_txns and not review_txns:
         return status
 
     existing = _load_existing(yaml_path)
@@ -491,22 +552,94 @@ def generate_categorization(config, config_dir, all_txns, rules):
 
         rows.append(row)
 
+    # Review rows continue the same id sequence so "process 7, 9, 13" stays
+    # unambiguous across both lists.
+    review_txns.sort(key=lambda t: (str(t.get('source', '')), _negated_date(t)))
+    review_rows = []
+    for index, txn in enumerate(review_txns, start=len(rows) + 1):
+        key = txn['key']
+        current_keys.add(key)
+        prior = existing.get(key)
+
+        row = {
+            'id': index,
+            'key': key,
+            'source': str(txn.get('source', '')),
+            'date': _format_date(txn.get('date')),
+            'merchant': txn.get('raw_description', txn.get('description', '')),
+            'amount': _format_amount(txn.get('amount', 0), currency_format),
+            'currently': format_rule_label(
+                txn.get('merchant', ''), txn.get('category', ''),
+                txn.get('subcategory', ''), txn.get('tags') or [],
+            ),
+            'file': to_relative(config_dir, txn.get('filepath', '')),
+        }
+        if prior:
+            for field in PRESERVED_FIELDS:
+                if field in prior:
+                    row[field] = prior[field]
+        review_rows.append(row)
+
     status.dropped_count = len(set(existing) - current_keys)
     status.unknown_count = len(rows)
 
     state = {
         'generated': datetime.now().replace(microsecond=0).isoformat(),
-        'totalSources': len({row['source'] for row in rows}),
+        'totalSources': len({r['source'] for r in rows + review_rows}),
         'totalUnknowns': len(rows),
-        'totalReviews': status.awaiting_review,  # Phase 2; always 0 for now
+        'totalReviews': len(review_rows),
     }
 
-    _write(yaml_path, _render(rows, state))
+    _write(yaml_path, _render(rows, review_rows, state))
     _write(hints_path, _render_hints(rows, state))
     _write(schema_path, _build_schema_json(rules))
 
     status.written = True
     return status
+
+
+def stale_file_notice(config_dir):
+    """Describe a leftover review file when generation is switched off.
+
+    Turning generation off must never delete the file — it holds answers the user
+    typed, and a config toggle eating data is exactly the surprise this feature
+    is built to avoid. But leaving it silently is worse than either extreme: an
+    agent reading a months-old file would act on dead data. So say it is stale
+    and let the reader decide.
+
+    Never raises. A disabled feature must not be able to fail the run, so a
+    malformed or unreadable file just yields a notice without a date.
+
+    Returns:
+        A multi-line string, or None when there is nothing left behind.
+    """
+    yaml_path = os.path.join(config_dir, YAML_FILENAME)
+    if not os.path.exists(yaml_path):
+        return None
+
+    generated = None
+    try:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+        if isinstance(data, dict):
+            state = data.get('state')
+            if isinstance(state, dict):
+                generated = state.get('generated')
+    except Exception:
+        pass  # A stale-file notice must never be the thing that breaks a run.
+
+    if not generated:
+        try:
+            generated = datetime.fromtimestamp(
+                os.path.getmtime(yaml_path)).replace(microsecond=0).isoformat()
+        except OSError:
+            generated = 'unknown'
+
+    return (
+        f"Categorization: generation is off (generate_categorization_file: false)\n"
+        f"  {yaml_path} is STALE — written {generated}, not updated since.\n"
+        f"  Ignore its contents, or delete it. Re-enable to refresh."
+    )
 
 
 def _build_schema_json(rules):

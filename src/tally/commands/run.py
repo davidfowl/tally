@@ -110,6 +110,7 @@ def cmd_run(args):
     # Parse transactions from configured data sources (skip supplemental)
     all_txns = []
     all_skipped = []  # Track all skipped rows across sources
+    parsed_files = []  # (filepath, source_name) for the review inventory
     verbose = args.verbose if hasattr(args, 'verbose') else 0
 
     for source in data_sources:
@@ -166,6 +167,7 @@ def cmd_run(args):
 
             source_txns.extend(txns)
             source_skipped.extend(skipped)
+            parsed_files.append((filepath, source.get('name', 'CSV')))
 
         if unknown_parser:
             continue
@@ -371,12 +373,33 @@ def cmd_run(args):
                 # User asked for --diff but there are no changes
                 print("\nNo changes since last run.")
 
-        # Categorization review file (config/categorization.yaml) - HTML path
-        # only, after the report has been written. Defaults on when a merchants
-        # file is configured; the report above stays written even on failure.
-        if config.get('categorization', True) and config.get('_merchants_file'):
+        # Data file inventory (config/inventory.yaml) - HTML path only, after the
+        # report is written. Registration is deliberately independent of whether
+        # the review file is generated: `registered` records when tally first saw
+        # a file, so it must keep advancing even while review is switched off.
+        # Otherwise re-enabling would backdate every file to that day.
+        from ..categorization_common import CategorizationError
+        from ..inventory import register_files
+
+        try:
+            register_files(config_dir, parsed_files)
+        except CategorizationError as e:
+            print(f"\nError: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # Categorization review file (config/categorization.yaml). Defaults on
+        # when a merchants file is configured; the report above stays written
+        # even on failure.
+        if not config.get('generate_categorization_file', True):
+            # Never delete what the user may have typed into — but a silently
+            # stale file can mislead an agent that reads it later, so say so.
+            from ..categorization import stale_file_notice
+
+            notice = stale_file_notice(config_dir)
+            if notice and not args.quiet:
+                print(f"\n{C.YELLOW}{notice}{C.RESET}")
+        elif config.get('_merchants_file'):
             from ..categorization import generate_categorization
-            from ..categorization_common import CategorizationError
 
             try:
                 cat_status = generate_categorization(config, config_dir, all_txns, rules)
@@ -385,11 +408,17 @@ def cmd_run(args):
                 sys.exit(1)
 
             if cat_status.written and not args.quiet:
-                breakdown = f"{cat_status.new_count} new, {cat_status.carried_forward} carried forward"
+                parts = [f"{cat_status.unknown_count} unknown"]
+                if cat_status.unknown_count:
+                    parts[0] += (f" ({cat_status.new_count} new, "
+                                 f"{cat_status.carried_forward} carried forward)")
+                if cat_status.awaiting_review:
+                    parts.append(f"{cat_status.awaiting_review} awaiting review "
+                                 f"— confirm to close")
                 warn = ""
                 if cat_status.answered_still_unknown:
                     warn = f"  {C.YELLOW}⚠ {cat_status.answered_still_unknown} still unknown after apply{C.RESET}"
-                print(f"\nCategorization: {cat_status.unknown_count} unknown ({breakdown}){warn}")
+                print(f"\nCategorization: {', '.join(parts)}{warn}")
                 abs_yaml = os.path.abspath(cat_status.yaml_path)
                 yaml_url = f"file://{abs_yaml}"
                 clickable_yaml = f"\033]8;;{yaml_url}\033\\{cat_status.yaml_path}\033]8;;\033\\"

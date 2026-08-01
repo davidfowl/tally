@@ -22,6 +22,9 @@ def build_schema(rules):
         A JSON-serializable dict — the full schema document.
     """
     categories, _subcategories, tags = rule_facets(rules)
+    # No "" entry: an unanswered useRule is written bare, which parses as null,
+    # and Ctrl+Space completes better from there than from inside a quote pair.
+    # Adding "" would also put a blank row in the completion list.
     use_rule_values = [None] + rule_labels(rules)
 
     return {
@@ -97,6 +100,138 @@ def build_schema(rules):
                     },
                 },
             },
+            "reviews": {
+                "type": "array",
+                "description": (
+                    "Transactions already categorized by a rule flagged "
+                    "'review: true', awaiting your confirmation. Leave a row "
+                    "untouched and its current rule stands. These persist "
+                    "indefinitely — across months and files — until the file "
+                    "named in 'file' is marked reviewComplete in inventory.yaml. "
+                    "Ids continue the same sequence as unknowns, so referring "
+                    "to a row by number is never ambiguous."
+                ),
+                "items": {
+                    "type": "object",
+                    "description": (
+                        "One categorized transaction awaiting confirmation."
+                    ),
+                    "properties": {
+                        "id": {
+                            "type": "integer",
+                            "description": (
+                                "Sequential number continuing on from the "
+                                "unknowns list. Machine-owned — renumbered "
+                                "every run."
+                            ),
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": (
+                                "Machine-owned stable identity for this "
+                                "transaction. Do not edit."
+                            ),
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": (
+                                "Data source this transaction came from. "
+                                "Machine-owned, display-only — do not edit."
+                            ),
+                        },
+                        "date": {
+                            "type": "string",
+                            "description": (
+                                "Transaction date from the source CSV. "
+                                "Machine-owned, display-only — do not edit."
+                            ),
+                        },
+                        "merchant": {
+                            "type": "string",
+                            "description": (
+                                "Raw merchant text from the source CSV. "
+                                "Machine-owned, display-only — do not edit."
+                            ),
+                        },
+                        "amount": {
+                            "type": "string",
+                            "description": (
+                                "Signed amount with currency prefix. "
+                                "Machine-owned, display-only — do not edit."
+                            ),
+                        },
+                        "currently": {
+                            "type": "string",
+                            "description": (
+                                "How this transaction is categorized right now, "
+                                "by the rule that matched it. This is what "
+                                "stands if you leave the row alone. "
+                                "Machine-owned — do not edit."
+                            ),
+                        },
+                        "file": {
+                            "type": "string",
+                            "description": (
+                                "Data file this transaction came from. Set this "
+                                "path's reviewComplete to true in inventory.yaml "
+                                "to stop its rows appearing here. Machine-owned "
+                                "— do not edit."
+                            ),
+                        },
+                        "aiNotes": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "Your agent's notes. Agent-owned, not yours — "
+                                "tally never writes or overwrites this field."
+                            ),
+                        },
+                        "useRule": {"$ref": "#/definitions/useRuleValue"},
+                        "newRule": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "Free-form prose describing a correction. "
+                                "Tally does not parse or validate this field."
+                            ),
+                        },
+                        "edits": {
+                            "type": "object",
+                            "description": (
+                                "Direct overrides for just this transaction, "
+                                "if the existing rule got it wrong."
+                            ),
+                            "properties": {
+                                "category": {
+                                    "type": ["string", "null"],
+                                    "examples": categories,
+                                    "description": (
+                                        "Corrected Category / Subcategory. Any "
+                                        "value is accepted."
+                                    ),
+                                },
+                                "tags": {
+                                    "type": "array",
+                                    "description": "Corrected tags.",
+                                    "items": {
+                                        "type": "string",
+                                        "enum": tags,
+                                        "description": (
+                                            "Ctrl+Space to pick from every tag "
+                                            "in merchants.rules."
+                                        ),
+                                    },
+                                },
+                                "memo": {
+                                    "type": ["string", "null"],
+                                    "description": (
+                                        "Optional memo text for this "
+                                        "transaction."
+                                    ),
+                                },
+                            },
+                        },
+                    },
+                },
+            },
             "unknowns": {
                 "type": "array",
                 "description": (
@@ -104,7 +239,7 @@ def build_schema(rules):
                     "rule, sorted by source ascending then date descending. Rows "
                     "whose transaction matches a rule by the next run are dropped; "
                     "rows still unmatched carry forward whatever you filled in here "
-                    "(useRule, newRule, edits, additionalInfo) even though `id` is "
+                    "(useRule, newRule, edits, aiNotes) even though `id` is "
                     "renumbered."
                 ),
                 "items": {
@@ -169,15 +304,16 @@ def build_schema(rules):
                                 "Machine-owned, display-only — do not edit."
                             ),
                         },
-                        "additionalInfo": {
+                        "aiNotes": {
                             "type": ["string", "null"],
                             "description": (
-                                "Free-form notes filled in by the agent on "
-                                "request (e.g. when you say \"annotate\") — "
-                                "never generated automatically. Agent-owned: "
-                                "tally never writes or overwrites this field, "
-                                "and preserves it verbatim across regenerations "
-                                "while this row remains unresolved."
+                                "Your agent's notes on this row — its best guess "
+                                "and reasoning. Agent-owned, not yours: a blank "
+                                "value is not a question waiting on you. Say "
+                                "\"annotate\" to have it filled in. Tally never "
+                                "writes or overwrites this field, and preserves "
+                                "it verbatim across regenerations while the row "
+                                "remains unresolved."
                             ),
                         },
                         "useRule": {

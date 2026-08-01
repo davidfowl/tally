@@ -18,7 +18,9 @@ SCHEMA_FILENAME = 'categorization-schema.json'
 MACHINE_FIELDS = ('id', 'key', 'source', 'date', 'merchant', 'amount')
 
 # Fields preserved across regeneration for a row that is still unknown.
-PRESERVED_FIELDS = ('additionalInfo', 'useRule', 'newRule', 'edits')
+# aiNotes is named for its owner: a blank then reads as "the agent wrote nothing
+# here", not as an unanswered question the user still owes.
+PRESERVED_FIELDS = ('aiNotes', 'useRule', 'newRule', 'edits')
 
 
 class CategorizationError(Exception):

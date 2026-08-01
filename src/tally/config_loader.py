@@ -287,16 +287,18 @@ def load_config(config_dir, settings_file='settings.yaml'):
 
     # Categorization review file generation: on by default when merchants_file
     # is set and there are unknown merchants; set to false to disable.
-    categorization = config.get('categorization', True)
-    if not isinstance(categorization, bool):
+    # Named with a verb because it is a boolean — the '_file' suffix in this
+    # file (merchants_file, views_file) means "path to a file".
+    generate = config.get('generate_categorization_file', True)
+    if not isinstance(generate, bool):
         warnings.append({
             'type': 'warning',
             'source': 'settings.yaml',
-            'message': f"Invalid categorization: '{categorization}'. Using 'true'.",
+            'message': f"Invalid generate_categorization_file: '{generate}'. Using 'true'.",
             'suggestion': "Use 'true' or 'false'.",
         })
-        categorization = True
-    config['categorization'] = categorization
+        generate = True
+    config['generate_categorization_file'] = generate
 
     # Load view definitions (optional - views_file in settings.yaml)
     views_file = config.get('views_file')

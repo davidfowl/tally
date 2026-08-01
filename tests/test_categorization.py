@@ -135,9 +135,26 @@ class TestGeneration:
         assert row['id'] == 1
         assert row['amount'] == '+$112.45'
         assert row['merchant'] == 'AMAZON MKTPL*NB2Q31V40'
-        assert row['useRule'] is None
         assert 'hints' not in row, "hints belong in the companion file"
-        assert row['edits'] == {'category': None, 'tags': [], 'memo': None}
+        # Free-text fields carry a quote pair so it is obvious they are yours to
+        # fill; useRule stays null because Ctrl+Space completes better from there.
+        assert row['useRule'] is None
+        assert row['aiNotes'] == ''
+        assert row['newRule'] == ''
+        assert row['edits'] == {'category': '', 'tags': [], 'memo': ''}
+
+    def test_unanswered_fields_use_their_typed_empty_form(self, tmp_path):
+        """The literal text matters, not just the parsed value."""
+        generate_categorization(CONFIG, str(tmp_path), [make_txn()], RULES)
+        text = (tmp_path / 'categorization.yaml').read_text(encoding='utf-8')
+
+        assert '    aiNotes: ""' in text
+        assert '    newRule: ""' in text
+        assert '      category: ""' in text
+        assert '      memo: ""' in text
+        assert '      tags: []' in text, "tags is an array; its empty form is []"
+        assert '    useRule:\n' in text, "useRule is bare so Ctrl+Space works"
+        assert '    useRule: ""' not in text
 
     def test_empty_tags_is_an_array_not_null(self, tmp_path):
         """tags is typed as an array; null makes the editor flag every row."""
@@ -294,7 +311,7 @@ class TestMerge:
         self.answer(path, key,
                     useRule='[Amazon] Shopping / Books | tags: gift',
                     newRule='also tag it as a gift',
-                    additionalInfo='Amazon order; pick the purchased-item category.',
+                    aiNotes='Amazon order; pick the purchased-item category.',
                     edits={'category': 'Shopping / Books', 'tags': ['gift'], 'memo': 'bday'})
 
         # Row is still unknown on the next run — the apply step has not happened.
@@ -305,7 +322,7 @@ class TestMerge:
         assert status.new_count == 0
         assert row['useRule'] == '[Amazon] Shopping / Books | tags: gift'
         assert row['newRule'] == 'also tag it as a gift'
-        assert row['additionalInfo'].startswith('Amazon order')
+        assert row['aiNotes'].startswith('Amazon order')
         assert row['edits'] == {'category': 'Shopping / Books',
                                 'tags': ['gift'], 'memo': 'bday'}
 
@@ -374,6 +391,48 @@ class TestMerge:
         assert row['id'] == 1
         assert row['key'] == b_key
         assert row['useRule'] == '[Valvoline] Auto / Maintenance'
+
+
+class TestDisabledGeneration:
+    """Turning generation off must not delete answers, or leave them silently stale."""
+
+    def test_no_notice_when_nothing_was_ever_generated(self, tmp_path):
+        from tally.categorization import stale_file_notice
+        assert stale_file_notice(str(tmp_path)) is None
+
+    def test_notice_names_the_file_the_date_and_what_to_do(self, tmp_path):
+        from tally.categorization import stale_file_notice
+        generate_categorization(CONFIG, str(tmp_path), [make_txn()], RULES)
+
+        notice = stale_file_notice(str(tmp_path))
+
+        assert 'categorization.yaml' in notice
+        assert 'STALE' in notice
+        assert 'generate_categorization_file: false' in notice
+        # Enough for an agent reading this to conclude it should not act on the file.
+        assert 'Ignore its contents' in notice
+        assert load(tmp_path / 'categorization.yaml')['state']['generated'] in notice
+
+    def test_notice_never_raises_on_a_broken_file(self, tmp_path):
+        """A disabled feature must not be able to fail the run."""
+        from tally.categorization import stale_file_notice
+        path = tmp_path / 'categorization.yaml'
+        path.write_text('unknowns:\n  - useRule: "unterminated\n', encoding='utf-8')
+
+        notice = stale_file_notice(str(tmp_path))
+
+        assert notice and 'STALE' in notice
+        assert path.read_text(encoding='utf-8').startswith('unknowns:')
+
+    def test_notice_does_not_touch_the_file(self, tmp_path):
+        from tally.categorization import stale_file_notice
+        generate_categorization(CONFIG, str(tmp_path), [make_txn()], RULES)
+        path = tmp_path / 'categorization.yaml'
+        before = path.read_text(encoding='utf-8')
+
+        stale_file_notice(str(tmp_path))
+
+        assert path.read_text(encoding='utf-8') == before, "reporting must be read-only"
 
 
 class TestMalformedYaml:

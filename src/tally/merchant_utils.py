@@ -564,6 +564,9 @@ def normalize_merchant(
                 'rule_name': result.matched_rule.name if result.matched_rule else None,
                 'source': 'user',
                 'tags': list(result.tags),
+                # True when any matching rule is flagged review:, so the
+                # transaction surfaces for confirmation until its file is stamped.
+                'review': any(r.review for r in result.all_matching_rules),
             }
             if result.tag_sources:
                 match_info['tag_sources'] = result.tag_sources
@@ -586,6 +589,7 @@ def normalize_merchant(
                 'rule_name': first_tag_rule.name if first_tag_rule else None,
                 'source': 'user' if first_tag_rule else 'auto',
                 'tags': list(result.tags),
+                'review': any(r.review for r in result.all_matching_rules),
             }
             if result.tag_sources:
                 match_info['tag_sources'] = result.tag_sources
