@@ -217,6 +217,7 @@
             <a href="#date-formats">Date Formats</a>
             <a href="#currency">Currency Format</a>
             <a href="#travel">Travel Detection</a>
+            <a href="#categorization-files">Categorization Files</a>
             <a href="#commands">CLI Commands</a>
         </div>
 
@@ -468,6 +469,129 @@
 AIRBNB -> <span class="string">"Airbnb"</span>, Travel, Lodging
 SOUTHWEST -> <span class="string">"Southwest"</span>, Travel, Flights
 UBER -> <span class="string">"Uber"</span>, Travel, Transport</code></pre>
+
+        <h2 id="categorization-files"><a href="#categorization-files" class="anchor-link">#</a>Categorization Review Files</h2>
+        <p>An alternate way to answer unknown merchants, in an editor instead of chat — see the <a href="guide.html#reviewing-in-a-file">Guide</a> for the walkthrough and worked example. This section is the field-by-field reference.</p>
+
+        <p>When <code>merchants_file</code> is set and unknown merchants remain after <code>tally up</code>, three files are written to the config directory:</p>
+        <table>
+            <tr>
+                <th>File</th>
+                <th>You edit it?</th>
+                <th>Purpose</th>
+            </tr>
+            <tr>
+                <td><code>categorization.yaml</code></td>
+                <td>Yes</td>
+                <td>One row per uncategorized transaction. Fill in <code>useRule</code>, <code>newRule</code>, or <code>edits</code>, then tell your agent to process it.</td>
+            </tr>
+            <tr>
+                <td><code>categorization.hints.yaml</code></td>
+                <td>No</td>
+                <td>Deterministic match data, correlated by <code>key</code>/<code>id</code>. Computed with Python's <code>difflib</code> against your own <code>merchants.rules</code> — no AI, no network. Regenerated every run; safe to delete.</td>
+            </tr>
+            <tr>
+                <td><code>categorization-schema.json</code></td>
+                <td>No</td>
+                <td>JSON Schema that drives editor autocomplete (Ctrl+Space) and hover text on <code>categorization.yaml</code>.</td>
+            </tr>
+        </table>
+
+        <h3>categorization.yaml fields</h3>
+        <table>
+            <tr>
+                <th>Field</th>
+                <th>Owner</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td><code>id</code></td>
+                <td>Machine</td>
+                <td>Display label only, for referring to a row in chat (e.g. "process 7, 9, 13"). Renumbered from 1 on every run — not stable.</td>
+            </tr>
+            <tr>
+                <td><code>key</code></td>
+                <td>Machine</td>
+                <td>Stable identity for this row across runs. Do not edit — changing it orphans whatever you filled in.</td>
+            </tr>
+            <tr>
+                <td><code>source</code>, <code>date</code>, <code>merchant</code>, <code>amount</code></td>
+                <td>Machine</td>
+                <td>Display-only copy of the transaction, exactly as parsed from the source CSV. Rewritten every run; edits are discarded.</td>
+            </tr>
+            <tr>
+                <td><code>additionalInfo</code></td>
+                <td>Agent</td>
+                <td>Blank until you ask your agent to "annotate" a row. Tally never writes or overwrites this field, and preserves it verbatim while the row is unresolved.</td>
+            </tr>
+            <tr>
+                <td><code>useRule</code></td>
+                <td>You</td>
+                <td>Label of an existing rule to widen so it also covers this transaction, e.g. <code>"[Theory11] Shopping / Christmas"</code>. Ctrl+Space autocompletes from every rule currently defined.</td>
+            </tr>
+            <tr>
+                <td><code>newRule</code></td>
+                <td>You</td>
+                <td>Free-form prose describing a brand-new rule, e.g. <code>"new rule: Category Shopping / Books, tag gift"</code>. Tally does not parse or validate this at all — your agent reads it back and creates the rule.</td>
+            </tr>
+            <tr>
+                <td><code>edits.category</code> / <code>edits.tags</code> / <code>edits.memo</code></td>
+                <td>You</td>
+                <td>One-off overrides for just this transaction, for when no existing or new rule is worth creating.</td>
+            </tr>
+        </table>
+
+        <h3>categorization.hints.yaml fields</h3>
+        <p>Everything here comes from comparing the transaction's raw description against your own <code>merchants.rules</code> with <code>difflib</code> — literal character similarity, not an AI opinion.</p>
+        <table>
+            <tr>
+                <th>Field</th>
+                <th>Meaning</th>
+            </tr>
+            <tr>
+                <td><code>nearest[].merchant</code></td>
+                <td>A merchant already in <code>merchants.rules</code>.</td>
+            </tr>
+            <tr>
+                <td><code>nearest[].score</code></td>
+                <td>Character similarity, 0-1. <code>1.0</code> means the merchant name appears verbatim in the transaction text — not a confidence score.</td>
+            </tr>
+            <tr>
+                <td><code>nearest[].rules</code></td>
+                <td>How many rule variants that merchant has. Greater than 1 means the category depends on what was bought, so there's no single answer to hand you.</td>
+            </tr>
+            <tr>
+                <td><code>nearest[].useRule</code></td>
+                <td>Present only when <code>rules == 1</code> — an unambiguous answer, ready to paste into that row's <code>useRule</code> in <code>categorization.yaml</code>.</td>
+            </tr>
+            <tr>
+                <td><code>occurrences</code></td>
+                <td>How many unresolved transactions share this exact description.</td>
+            </tr>
+            <tr>
+                <td><code>priorPeriod</code></td>
+                <td>The rule label this exact description matched in an earlier period, if any.</td>
+            </tr>
+            <tr>
+                <td><code>amountSpread</code></td>
+                <td>Min-max amount across those occurrences, shown when they differ.</td>
+            </tr>
+            <tr>
+                <td><code>refund</code></td>
+                <td><code>true</code> when the amount is a credit rather than a charge.</td>
+            </tr>
+        </table>
+
+        <h3>Regeneration and merging</h3>
+        <p>Every <code>tally up</code> re-merges the file: rows whose transaction now matches a rule are dropped, and rows still unknown keep whatever you filled in (<code>useRule</code>, <code>newRule</code>, <code>edits</code>, <code>additionalInfo</code>) even though <code>id</code> gets renumbered. Your previous answer is matched to the right row by the stable <code>key</code> field, never by <code>id</code>.</p>
+
+        <h3>Malformed YAML</h3>
+        <p>If <code>categorization.yaml</code> doesn't parse, <code>tally up</code> still writes the HTML report — the categorization step fails on its own, with a message pointing at the line and column, and the file is left completely untouched. Fix the syntax error and re-run; nothing is lost. The most common cause is an unquoted value containing a <code>:</code> — wrap it in quotes, e.g. <code>newRule: "Amazon: books only"</code>.</p>
+
+        <h3>Disabling it</h3>
+        <pre><code><span class="comment"># In settings.yaml:</span>
+<span class="highlight">categorization:</span> false</code></pre>
+        <p>Set to <code>false</code> to stop tally from writing these files at all. Categorizing by talking to your agent in prose still works exactly the same either way.</p>
 
         <h2 id="commands"><a href="#commands" class="anchor-link">#</a>CLI Commands</h2>
         <table>

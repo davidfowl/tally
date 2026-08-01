@@ -371,4 +371,28 @@ def cmd_run(args):
                 # User asked for --diff but there are no changes
                 print("\nNo changes since last run.")
 
+        # Categorization review file (config/categorization.yaml) - HTML path
+        # only, after the report has been written. Defaults on when a merchants
+        # file is configured; the report above stays written even on failure.
+        if config.get('categorization', True) and config.get('_merchants_file'):
+            from ..categorization import generate_categorization
+            from ..categorization_common import CategorizationError
+
+            try:
+                cat_status = generate_categorization(config, config_dir, all_txns, rules)
+            except CategorizationError as e:
+                print(f"\nError: {e}", file=sys.stderr)
+                sys.exit(1)
+
+            if cat_status.written and not args.quiet:
+                breakdown = f"{cat_status.new_count} new, {cat_status.carried_forward} carried forward"
+                warn = ""
+                if cat_status.answered_still_unknown:
+                    warn = f"  {C.YELLOW}⚠ {cat_status.answered_still_unknown} still unknown after apply{C.RESET}"
+                print(f"\nCategorization: {cat_status.unknown_count} unknown ({breakdown}){warn}")
+                abs_yaml = os.path.abspath(cat_status.yaml_path)
+                yaml_url = f"file://{abs_yaml}"
+                clickable_yaml = f"\033]8;;{yaml_url}\033\\{cat_status.yaml_path}\033]8;;\033\\"
+                print(f"  {clickable_yaml}")
+
     print_deprecation_warnings(config)

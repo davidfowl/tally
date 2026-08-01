@@ -132,6 +132,23 @@ def cmd_workflow(args):
         print(f"    {C.YELLOW}{C.BOLD}KEEP GOING UNTIL ALL UNKNOWNS ARE RESOLVED!{C.RESET}")
         print(f"    {C.DIM}Your report is only as good as your rules. Don't stop at 80%.{C.RESET}")
 
+        section("Categorization Review File")
+        print(f"    {C.DIM}Prefer answering in an editor over the terminal?{C.RESET}")
+        print(f"    {C.GREEN}tally up{C.RESET} {C.DIM}also writes:{C.RESET}")
+        print()
+        print(f"    {C.CYAN}config/categorization.yaml{C.RESET}        {C.DIM}one row per unknown transaction{C.RESET}")
+        print(f"    {C.CYAN}config/categorization-schema.json{C.RESET} {C.DIM}drives editor autocomplete{C.RESET}")
+        print()
+        print(f"    {C.DIM}Open the YAML and fill in {C.RESET}{C.CYAN}useRule{C.RESET}{C.DIM}, {C.RESET}{C.CYAN}newRule{C.RESET}{C.DIM}, or {C.RESET}{C.CYAN}edits{C.RESET}{C.DIM} per row.")
+        print(f"    Ctrl+Space autocompletes from your existing rules.{C.RESET}")
+        print()
+        print(f"    {C.DIM}Re-run {C.RESET}{C.GREEN}tally up{C.RESET}{C.DIM} to refresh it. Rows you have categorized drop")
+        print(f"    out; rows still unknown keep whatever you typed. Machine-owned")
+        print(f"    fields (id, key, source, date, merchant, amount, hints) are")
+        print(f"    rewritten each run — everything else is yours.{C.RESET}")
+        print()
+        print(f"    {C.DIM}Disable with {C.RESET}{C.CYAN}categorization: false{C.RESET}{C.DIM} in settings.yaml.{C.RESET}")
+
     section("Commands")
     cmds = [
         ("tally up", "Generate HTML spending report"),

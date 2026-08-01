@@ -72,6 +72,12 @@ report_fields:
 #   fixed    -> force merchant into fixed/recurring spend
 #   variable -> force merchant out of fixed/recurring spend
 
+# Categorization review file (default: true)
+# When merchants_file is set and unknown merchants remain after `tally up`,
+# tally writes config/categorization.yaml (+ schema) listing them for review.
+# Set to false to disable this generation entirely.
+# categorization: false
+
 # Output settings
 output_dir: output
 html_filename: spending_summary.html

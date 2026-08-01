@@ -322,6 +322,52 @@ field.description = regex_replace(field.description, "^APLPAY\\s+", "")</code></
             <p>Tell the AI your preferences: "Coffee shops should be Food > Coffee, not Food > Restaurant" or "Tag all Uber rides as business, reimbursable".</p>
         </div>
 
+        <h2 id="reviewing-in-a-file"><a href="#reviewing-in-a-file" class="anchor-link">#</a>Reviewing Unknowns in a File</h2>
+        <p>Everything above works by talking to your agent in prose — "all VIOC is oil change", "these three are groceries" — and that's still the whole feature; nothing below changes it. If you'd rather answer at your own pace in an editor instead of a chat transcript that scrolls away, <code>tally up</code> gives you that option too. Both work, and you can mix them freely in the same session.</p>
+
+        <p>When unknown merchants remain after a run, three files land in your config directory:</p>
+        <ul>
+            <li><code>categorization.yaml</code> — one row per uncategorized transaction. This is the only file you edit.</li>
+            <li><code>categorization.hints.yaml</code> — deterministic match data tally computed by comparing each transaction against your own <code>merchants.rules</code>. No AI, no network; safe to delete, regenerated every run.</li>
+            <li><code>categorization-schema.json</code> — drives autocomplete and hover text while you edit <code>categorization.yaml</code>. You never open this one directly.</li>
+        </ul>
+        <p>Fill in <code>useRule</code>, <code>newRule</code>, or <code>edits</code> for whichever rows you want to answer, save, then tell your agent to process the file.</p>
+
+        <h3>A worked example</h3>
+        <p>Suppose a run leaves 37 unknown transactions. Rows 1-28 are all Amazon orders, e.g. <code>Amazon.com*SR9ZH2VE3</code>. The hints file shows why tally didn't just guess:</p>
+        <pre><code>  - id: 1
+    key: "a6c27da1"
+    merchant: "Amazon.com*SR9ZH2VE3"
+    nearest:
+      - merchant: "Amazon"
+        score: 1.0
+        rules: 25
+    occurrences: 1</code></pre>
+        <p><code>score: 1.0</code> means "Amazon" appears verbatim in the description — literal string containment, not an AI confidence value. <code>rules: 25</code> is why there's no answer handed to you: this user's Amazon merchant already has 25 different category variants (books, electronics, gifts...), so which one applies depends on what was actually bought. A <code>useRule</code> is only ever suggested when a merchant has exactly one rule to offer.</p>
+
+        <p>Compare that to row 31, a one-off charge from Theory11:</p>
+        <pre><code>  - id: 31
+    key: "d6b0d02d"
+    merchant: "THEORY11.COM CHARLESTON SC"
+    nearest:
+      - merchant: "Theory11"
+        score: 1.0
+        rules: 1
+        useRule: "[Theory11] Shopping / Christmas"
+    occurrences: 1
+    refund: true</code></pre>
+        <p>Theory11 has exactly one rule, so tally hands over the answer: paste <code>[Theory11] Shopping / Christmas</code> straight into that row's <code>useRule:</code> field in <code>categorization.yaml</code> and you're done. (<code>refund: true</code> just flags that this particular amount is a credit, not a charge.)</p>
+
+        <h3 id="annotate"><a href="#annotate" class="anchor-link">#</a>Getting help on a row</h3>
+        <p><code>additionalInfo</code> stays blank until you ask for it — tally never writes or overwrites this field. Say "annotate" (or "annotate 5-12", or "annotate the Amazons") and your agent fills it in with its best guess and reasoning, then you answer from there. <code>id</code> is just a display label for talking about rows in chat ("process 7, 9, 13") — it's renumbered every run, so it always matches what's on screen right now.</p>
+
+        <div class="callout">
+            <div class="callout-title">Regenerating the file</div>
+            <p>Every <code>tally up</code> merges your previous answers back in: rows whose transaction now matches a rule drop out of the file entirely, and rows still unknown carry forward whatever you typed. Answers reattach by the stable <code>key</code> field, never by <code>id</code>.</p>
+        </div>
+
+        <p>See the <a href="formats.html#categorization-files">Formats reference</a> for the full field list, malformed-YAML behavior, and how to turn this off with <code>categorization: false</code>.</p>
+
         <h2 id="customizing-categories"><a href="#customizing-categories" class="anchor-link">#</a>Customizing Categories</h2>
         <p>Tally doesn't have predefined categories. You define them in your rules:</p>
         <ul>
