@@ -88,6 +88,11 @@ class BudgetResult:
     actual_by_month: Dict[str, float] = field(default_factory=dict)
     num_months: int = 0
     matched_merchants: int = 0
+    # The latest month when it is only partially covered by the data. It is
+    # kept in ``actual_by_month`` and ``actual_total`` for display, but excluded
+    # from the monthly average so a mid-month review is not flattered by the few
+    # days of spend that have landed so far.
+    excluded_month: str = ''
 
     @property
     def key(self) -> str:
@@ -115,7 +120,27 @@ class BudgetResult:
 
     @property
     def actual_monthly_avg(self) -> float:
-        return self.actual_total / self.num_months if self.num_months else 0.0
+        months = self._avg_month_count
+        return self._avg_total / months if months else 0.0
+
+    @property
+    def _avg_month_count(self) -> int:
+        """Months the monthly average is spread over.
+
+        A partial latest month is dropped so it does not drag the average down,
+        unless it is the only month we have (in which case a partial figure is
+        better than nothing).
+        """
+        if self.excluded_month and self.num_months > 1:
+            return self.num_months - 1
+        return self.num_months
+
+    @property
+    def _avg_total(self) -> float:
+        """Spend the monthly average is computed from (partial month removed)."""
+        if self.excluded_month and self.num_months > 1:
+            return self.actual_total - self.actual_by_month.get(self.excluded_month, 0.0)
+        return self.actual_total
 
     @property
     def comparison_actual(self) -> float:
@@ -292,14 +317,20 @@ def _merchant_spend_by_month(data) -> Dict[str, float]:
     return by_month
 
 
-def evaluate_budgets(budgets: List[Budget], stats) -> List[BudgetResult]:
-    """Evaluate parsed budgets against analysis results."""
+def evaluate_budgets(budgets: List[Budget], stats, latest_month_complete: bool = True) -> List[BudgetResult]:
+    """Evaluate parsed budgets against analysis results.
+
+    When ``latest_month_complete`` is False the most recent month is treated as
+    partial and excluded from each budget's monthly average, so a review run
+    mid-month is not misled into thinking spending is under target.
+    """
     if not budgets:
         return []
 
     by_merchant = stats.get('by_merchant', {})
     all_months = sorted(stats.get('by_month', {}).keys())
     num_months = len(all_months) or stats.get('num_months', 0)
+    excluded_month = all_months[-1] if (all_months and not latest_month_complete) else ''
 
     # Pre-compute each merchant's monthly spend once, then fan out to budgets.
     merchant_spend = []
@@ -329,6 +360,7 @@ def evaluate_budgets(budgets: List[Budget], stats) -> List[BudgetResult]:
             actual_by_month=actual_by_month,
             num_months=num_months,
             matched_merchants=matched,
+            excluded_month=excluded_month,
         ))
 
     # Worst overspend first so a review starts with the problems.
@@ -381,13 +413,17 @@ def find_unmatched_budgets(results: List[BudgetResult], stats) -> List[Dict[str,
     return problems
 
 
-def build_budget_report(config, stats) -> Dict[str, Any]:
-    """Parse and evaluate budgets, returning everything the outputs need."""
+def build_budget_report(config, stats, latest_month_complete: bool = True) -> Dict[str, Any]:
+    """Parse and evaluate budgets, returning everything the outputs need.
+
+    ``latest_month_complete`` is forwarded to :func:`evaluate_budgets` so a
+    partial final month does not deflate the monthly averages.
+    """
     budgets = parse_budgets(config)
     if not budgets:
         return {'enabled': False, 'results': [], 'problems': []}
 
-    results = evaluate_budgets(budgets, stats)
+    results = evaluate_budgets(budgets, stats, latest_month_complete=latest_month_complete)
     return {
         'enabled': True,
         'results': results,

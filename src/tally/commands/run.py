@@ -276,9 +276,14 @@ def cmd_run(args):
     if not args.quiet:
         print_duplicate_warning(duplicate_report, currency_format, verbose)
 
-    # Budgets and anomalies
-    budget_report = build_budget_report(config, stats)
+    # Budgets and anomalies. Anomaly detection works out whether the newest
+    # month is only partially covered; the budget report needs that so a
+    # mid-month review is not flattered by the partial month's low spend.
     anomaly_report = detect_anomalies(stats, fmt=fmt_money)
+    budget_report = build_budget_report(
+        config, stats,
+        latest_month_complete=anomaly_report.get('latest_month_complete', True),
+    )
 
     # Classify by user-defined views
     views_config = config.get('sections')

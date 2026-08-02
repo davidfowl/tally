@@ -152,6 +152,26 @@ class TestBudgetEvaluation:
         assert result.status == 'over'
         assert result.variance == 50
 
+    def test_partial_latest_month_is_excluded_from_the_average(self, two_month_stats):
+        # Run mid-month, the newest month (Feb, 300) is only a few days in. It
+        # must not drag the monthly average down and flatter the budget.
+        budgets = parse_budgets({'budgets': {'Food': 200}})
+        result, = evaluate_budgets(budgets, two_month_stats, latest_month_complete=False)
+        # Feb still shows in the total/breakdown, but the average is Jan alone.
+        assert result.actual_total == 500
+        assert result.actual_by_month == {'2025-01': 200, '2025-02': 300}
+        assert result.actual_monthly_avg == 200
+        assert result.variance == 0
+
+    def test_a_single_partial_month_still_averages_over_that_month(self):
+        # With nothing to fall back on, a partial figure beats no figure.
+        stats = stats_for([
+            txn('2025-01-05', 'WHOLEFDS', 120, merchant='Whole Foods'),
+        ])
+        budgets = parse_budgets({'budgets': {'Food': 200}})
+        result, = evaluate_budgets(budgets, stats, latest_month_complete=False)
+        assert result.actual_monthly_avg == 120
+
     def test_months_over_counts_individual_months(self, two_month_stats):
         budgets = parse_budgets({'budgets': {'Food': 250}})
         result, = evaluate_budgets(budgets, two_month_stats)
