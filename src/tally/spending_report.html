@@ -129,6 +129,113 @@
                 </div>
             </div>
 
+            <!-- Duplicate transaction warning: data quality comes before any
+                 conclusion drawn from the numbers below it. -->
+            <div class="duplicate-banner" data-testid="duplicate-banner"
+                 v-if="duplicateReport && duplicateGroups.length && !duplicatesDismissed">
+                <div class="duplicate-banner-head">
+                    <span class="duplicate-icon">⚠</span>
+                    <div class="duplicate-headline">
+                        <strong>{{ duplicateGroups.length }} transaction{{ duplicateGroups.length === 1 ? '' : 's' }}
+                            appear in more than one file</strong>
+                        <span class="duplicate-sub">
+                            {{ formatCurrency(duplicateReport.cross_file_impact) }} is counted twice in the totals below.
+                        </span>
+                    </div>
+                    <button class="duplicate-dismiss" data-testid="duplicate-dismiss"
+                            @click="duplicatesDismissed = true" title="Dismiss">&times;</button>
+                </div>
+                <table class="duplicate-table">
+                    <tr v-for="(dup, i) in visibleDuplicates" :key="i">
+                        <td class="dup-date">{{ dup.date }}</td>
+                        <td class="dup-amount">{{ formatCurrencySigned(dup.amount) }}</td>
+                        <td class="dup-desc">{{ dup.description }}</td>
+                        <td class="dup-files">{{ dup.files.join(', ') }}</td>
+                    </tr>
+                </table>
+                <button class="duplicate-more" v-if="duplicateGroups.length > 5"
+                        @click="duplicatesExpanded = !duplicatesExpanded">
+                    {{ duplicatesExpanded ? 'Show less' : 'Show all ' + duplicateGroups.length }}
+                </button>
+                <p class="duplicate-hint">
+                    Remove the overlapping export, narrow the glob in settings.yaml, or set
+                    <code>duplicate_check: off</code> if the repeats are real.
+                </p>
+            </div>
+
+            <!-- Budgets -->
+            <div class="budget-section" data-testid="budget-section" v-if="budgetTargets.length">
+                <div class="section-header" @click="budgetsCollapsed = !budgetsCollapsed">
+                    <h2>
+                        <span class="toggle">{{ budgetsCollapsed ? '▶' : '▼' }}</span>
+                        Budgets
+                        <span class="budget-headline" :class="budgetsOverCount ? 'over' : 'ok'">
+                            {{ budgetsOverCount ? budgetsOverCount + ' of ' + budgetTargets.length + ' over budget'
+                                                : 'all ' + budgetTargets.length + ' within budget' }}
+                        </span>
+                    </h2>
+                </div>
+                <div class="section-content" :class="{ collapsed: budgetsCollapsed }">
+                    <div class="budget-list">
+                        <div class="budget-row" v-for="target in budgetTargets" :key="target.key"
+                             :class="target.status" data-testid="budget-row">
+                            <div class="budget-row-head">
+                                <span class="budget-label">{{ target.label }}</span>
+                                <span class="budget-numbers">
+                                    <strong>{{ formatCurrency(target.period === 'yearly' ? target.actual_total : target.actual_monthly_avg) }}</strong>
+                                    <span class="budget-of">of {{ formatCurrency(target.target) }}{{ budgetPeriodSuffix(target) }}</span>
+                                </span>
+                            </div>
+                            <div class="budget-bar">
+                                <div class="budget-bar-fill" :style="{ width: budgetBarWidth(target) }"></div>
+                            </div>
+                            <div class="budget-row-foot">
+                                <span class="budget-status">{{ budgetStatusLabel(target) }} · {{ Math.round(target.pct_used) }}%</span>
+                                <span class="budget-variance">{{ formatCurrencySigned(target.variance) }}{{ budgetPeriodSuffix(target) }}</span>
+                            </div>
+                            <div class="budget-note" v-if="target.months_over">
+                                Over target in {{ target.months_over }} of {{ target.num_months }} months
+                            </div>
+                        </div>
+                    </div>
+                    <div class="budget-problem" v-for="problem in budgetProblems" :key="problem.key">
+                        <strong>Budget "{{ problem.key }}" matched no transactions.</strong>
+                        <span v-if="problem.suggestions.length"> Did you mean: {{ problem.suggestions.join(', ') }}?</span>
+                    </div>
+                    <p class="budget-partial" v-if="anomalyReport && !anomalyReport.latest_month_complete">
+                        The most recent month is partial, so its spend is lower than a full month.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Worth a Look -->
+            <div class="anomaly-section" data-testid="anomaly-section" v-if="anomalyItems.length">
+                <div class="section-header" @click="anomaliesCollapsed = !anomaliesCollapsed">
+                    <h2>
+                        <span class="toggle">{{ anomaliesCollapsed ? '▶' : '▼' }}</span>
+                        Worth a Look
+                        <span class="anomaly-headline">{{ anomalyReport.latest_month }}</span>
+                    </h2>
+                </div>
+                <div class="section-content" :class="{ collapsed: anomaliesCollapsed }">
+                    <div class="anomaly-list">
+                        <div class="anomaly-row" v-for="(item, i) in anomalyItems" :key="i"
+                             :class="item.severity" data-testid="anomaly-row"
+                             @click="item.subject && addFilter(item.subject, anomalyFilterType(item))">
+                            <span class="anomaly-icon">{{ item.severity === 'warn' ? '⚠' : '·' }}</span>
+                            <div class="anomaly-body">
+                                <div class="anomaly-title">{{ item.title }}</div>
+                                <div class="anomaly-detail">{{ item.detail }}</div>
+                            </div>
+                            <span class="anomaly-impact" v-if="item.impact">{{ formatCurrency(item.impact) }}</span>
+                        </div>
+                    </div>
+                    <p class="anomaly-more" v-if="anomalyReport.total_found > anomalyItems.length">
+                        ... and {{ anomalyReport.total_found - anomalyItems.length }} more
+                    </p>
+                </div>
+            </div>
+
             <!-- Charts Section -->
             <div class="chart-section">
                 <div class="section-header" @click="chartsCollapsed = !chartsCollapsed">

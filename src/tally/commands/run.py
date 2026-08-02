@@ -23,6 +23,9 @@ from ..analyzer import (
     analyze_transactions,
     print_summary,
     print_sections_summary,
+    print_budget_summary,
+    print_anomaly_summary,
+    print_duplicate_warning,
     write_summary_file_vue,
     export_json,
     export_csv,
@@ -31,6 +34,10 @@ from ..analyzer import (
     format_diff_summary,
     format_diff_detailed,
 )
+from ..budgets import build_budget_report
+from ..anomalies import detect_anomalies
+from ..duplicates import build_duplicate_report
+from ..report import format_currency_decimal
 from ..parsers import ParseResult, SkippedRow
 from collections import Counter
 
@@ -53,6 +60,14 @@ def cmd_run(args):
 
     # Check for deprecated settings
     check_deprecated_description_cleaning(config)
+
+    # A malformed budgets block is a config error, not something to skip past:
+    # silently dropping targets during a budget review would be misleading.
+    if config.get('_budget_error'):
+        print(f"Error: Invalid 'budgets' in {args.settings}:", file=sys.stderr)
+        print(config['_budget_error'], file=sys.stderr)
+        print(f"\nRun 'tally diag --config {config_dir}' for more details.", file=sys.stderr)
+        sys.exit(1)
 
     # Get report title (new) or year (deprecated)
     title = config.get('title')
@@ -154,6 +169,11 @@ def cmd_run(args):
                     print(f"  {source['name']}: Error parsing {filepath} - {e}")
                 continue
 
+            # Remember the originating file so duplicate detection can tell
+            # an overlapping export from a genuine repeat charge.
+            for txn in txns:
+                txn.setdefault('source_file', filepath)
+
             source_txns.extend(txns)
             source_skipped.extend(skipped)
 
@@ -245,6 +265,26 @@ def cmd_run(args):
     # Analyze
     stats = analyze_transactions(all_txns)
 
+    currency_format = config.get('currency_format', '${amount}')
+
+    def fmt_money(amount):
+        return format_currency_decimal(amount, currency_format)
+
+    # Data quality first: if two exports overlap, every number below is
+    # inflated, so the warning belongs before the report rather than after it.
+    duplicate_report = build_duplicate_report(all_txns, enabled=config.get('duplicate_check', True))
+    if not args.quiet:
+        print_duplicate_warning(duplicate_report, currency_format, verbose)
+
+    # Budgets and anomalies. Anomaly detection works out whether the newest
+    # month is only partially covered; the budget report needs that so a
+    # mid-month review is not flattered by the partial month's low spend.
+    anomaly_report = detect_anomalies(stats, fmt=fmt_money)
+    budget_report = build_budget_report(
+        config, stats,
+        latest_month_complete=anomaly_report.get('latest_month_complete', True),
+    )
+
     # Classify by user-defined views
     views_config = config.get('sections')
     if views_config:
@@ -278,18 +318,27 @@ def cmd_run(args):
             if not only_filter:
                 only_filter = None
     category_filter = args.category if hasattr(args, 'category') and args.category else None
-    currency_format = config.get('currency_format', '${amount}')
+
+    def print_review_sections():
+        """Budgets and anomalies, shown after the main spending summary."""
+        print_budget_summary(budget_report, currency_format,
+                             anomaly_report.get('latest_month_complete', True))
+        print_anomaly_summary(anomaly_report, currency_format)
 
     if output_format == 'json':
         # JSON output with reasoning
-        print(export_json(stats, verbose=verbose, category_filter=category_filter))
+        print(export_json(stats, verbose=verbose, category_filter=category_filter,
+                          budgets=budget_report, anomalies=anomaly_report,
+                          duplicates=duplicate_report))
     elif output_format == 'csv':
         # CSV output (transaction-level)
         print(export_csv(stats, category_filter=category_filter))
     elif output_format == 'markdown':
         # Markdown output with reasoning
         from ..analyzer import export_markdown
-        print(export_markdown(stats, verbose=verbose, category_filter=category_filter, currency_format=currency_format))
+        print(export_markdown(stats, verbose=verbose, category_filter=category_filter,
+                              currency_format=currency_format, budgets=budget_report,
+                              anomalies=anomaly_report, duplicates=duplicate_report))
     elif output_format == 'summary' or args.summary:
         # Text summary only (no HTML)
         group_by = getattr(args, 'group_by', 'merchant')
@@ -297,6 +346,7 @@ def cmd_run(args):
             print_sections_summary(stats, title=title, currency_format=currency_format, only_filter=only_filter)
         else:
             print_summary(stats, title=title, currency_format=currency_format, group_by=group_by)
+        print_review_sections()
     else:
         # HTML output (default)
         # Print summary first
@@ -306,6 +356,7 @@ def cmd_run(args):
                 print_sections_summary(stats, title=title, currency_format=currency_format, only_filter=only_filter)
             else:
                 print_summary(stats, title=title, currency_format=currency_format, group_by=group_by)
+            print_review_sections()
 
         # Determine output path
         if args.output:
@@ -315,11 +366,36 @@ def cmd_run(args):
             os.makedirs(output_dir, exist_ok=True)
             output_path = os.path.join(output_dir, config.get('html_filename', 'spending_summary.html'))
 
+        # Make sure the destination exists before writing. A missing --output
+        # directory used to surface as a raw FileNotFoundError traceback.
+        output_parent = os.path.dirname(os.path.abspath(output_path))
+        try:
+            os.makedirs(output_parent, exist_ok=True)
+        except OSError as e:
+            print(f"Error: Cannot create output directory: {output_parent}", file=sys.stderr)
+            print(f"  {e.strerror}", file=sys.stderr)
+            print(f"\nCheck the path passed to --output, or pick a writable location:", file=sys.stderr)
+            print(f"  tally up --config {config_dir} --output ./output/spending.html", file=sys.stderr)
+            sys.exit(1)
+
+        if os.path.isdir(output_path):
+            print(f"Error: --output points to a directory, not a file: {output_path}", file=sys.stderr)
+            print(f"\nInclude a filename:", file=sys.stderr)
+            print(f"  tally up --config {config_dir} --output {os.path.join(output_path, 'spending.html')}", file=sys.stderr)
+            sys.exit(1)
+
         # Collect source names for the report subtitle (exclude supplemental)
         source_names = [s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)]
-        write_summary_file_vue(stats, output_path, title=title,
-                               currency_format=currency_format, sources=source_names,
-                               embedded_html=args.embedded_html)
+        try:
+            write_summary_file_vue(stats, output_path, title=title,
+                                   currency_format=currency_format, sources=source_names,
+                                   embedded_html=args.embedded_html,
+                                   budgets=budget_report, anomalies=anomaly_report,
+                                   duplicates=duplicate_report)
+        except OSError as e:
+            print(f"Error: Could not write report to {output_path}", file=sys.stderr)
+            print(f"  {e.strerror}", file=sys.stderr)
+            sys.exit(1)
         if not args.quiet:
             # Make the path clickable using OSC 8 hyperlink escape sequence
             abs_path = os.path.abspath(output_path)
@@ -342,7 +418,8 @@ def cmd_run(args):
                 prev_data = None
 
         # Generate and save current JSON
-        curr_json = export_json(stats, verbose=verbose)
+        curr_json = export_json(stats, verbose=verbose, budgets=budget_report,
+                                anomalies=anomaly_report, duplicates=duplicate_report)
         curr_data = json.loads(curr_json)
 
         with open(json_path, 'w') as f:

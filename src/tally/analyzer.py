@@ -5,6 +5,7 @@ Analyzes transactions using merchant categorization rules.
 """
 
 import json
+import os
 from collections import defaultdict
 from datetime import datetime
 
@@ -34,6 +35,7 @@ from .report import (
     write_summary_file_vue,
     format_currency,
     format_currency_decimal,
+    format_currency_signed,
     EMBEDDINGS_AVAILABLE,
 )
 
@@ -56,6 +58,15 @@ def analyze_transactions(transactions):
         'transactions': [],  # Individual transactions for drill-down
         'tags': set(),  # Collect all tags from matching rules
         'raw_descriptions': defaultdict(int),  # Track raw description variations
+        # Per-merchant money-flow buckets, using the same rules as the report
+        # totals so merchant-level output always reconciles with the headline
+        # numbers (a transfer with a negative amount is not a refund).
+        'spending': 0.0,
+        'credits': 0.0,
+        'income': 0.0,
+        'investment': 0.0,
+        'transfer_in': 0.0,
+        'transfer_out': 0.0,
     })
     by_month = defaultdict(float)
 
@@ -91,6 +102,12 @@ def analyze_transactions(transactions):
         # Track by merchant
         by_merchant[txn['merchant']]['count'] += 1
         by_merchant[txn['merchant']]['total'] += effective_amount
+        by_merchant[txn['merchant']]['spending'] += cat['spending']
+        by_merchant[txn['merchant']]['credits'] += cat['credits']
+        by_merchant[txn['merchant']]['income'] += cat['income']
+        by_merchant[txn['merchant']]['investment'] += cat['investment']
+        by_merchant[txn['merchant']]['transfer_in'] += cat['transfer_in']
+        by_merchant[txn['merchant']]['transfer_out'] += cat['transfer_out']
         by_merchant[txn['merchant']]['category'] = txn['category']
         by_merchant[txn['merchant']]['subcategory'] = txn['subcategory']
         by_merchant[txn['merchant']]['months'].add(month_key)
@@ -375,7 +392,8 @@ def build_merchant_json(merchant_name, data, verbose=0):
     return result
 
 
-def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
+def export_json(stats, verbose=0, category_filter=None, merchant_filter=None,
+                budgets=None, anomalies=None, duplicates=None):
     """Export analysis results as JSON with reasoning.
 
     Args:
@@ -383,6 +401,9 @@ def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
         verbose: Verbosity level (0=basic, 1=trace, 2=full)
         category_filter: Only include merchants in this category
         merchant_filter: Only include these merchants (list of names)
+        budgets: Optional budget report from budgets.build_budget_report()
+        anomalies: Optional report from anomalies.detect_anomalies()
+        duplicates: Optional report from duplicates.build_duplicate_report()
 
     Returns: JSON string
     """
@@ -430,8 +451,9 @@ def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
             if data['total'] > 0
         ],
         'credits': [
-            {'merchant': name, 'category': data.get('category', ''), 'amount': round(abs(data['total']), 2)}
-            for name, data in by_merchant.items() if data['total'] < 0
+            {'merchant': name, 'category': data.get('category', ''), 'amount': round(data['credits'], 2)}
+            for name, data in sorted(by_merchant.items(), key=lambda x: x[1].get('credits', 0), reverse=True)
+            if data.get('credits', 0) > 0
         ],
         'merchants': []
     }
@@ -450,10 +472,23 @@ def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
     merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
     output['merchants'] = merchants
 
+    # Review data. Only emitted when present so existing consumers of the JSON
+    # (including the run-over-run diff) see no change unless the feature is used.
+    if budgets and budgets.get('enabled'):
+        from .budgets import budget_report_to_dict
+        output['budgets'] = budget_report_to_dict(budgets)
+    if anomalies and anomalies.get('enabled'):
+        from .anomalies import anomaly_report_to_dict
+        output['anomalies'] = anomaly_report_to_dict(anomalies)
+    if duplicates and duplicates.get('enabled') and duplicates.get('total_count'):
+        from .duplicates import duplicate_report_to_dict
+        output['duplicates'] = duplicate_report_to_dict(duplicates)
+
     return json.dumps(output, indent=2)
 
 
-def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None, currency_format="${amount}"):
+def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None,
+                    currency_format="${amount}", budgets=None, anomalies=None, duplicates=None):
     """Export analysis results as Markdown with reasoning.
 
     Args:
@@ -462,6 +497,9 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
         category_filter: Only include merchants in this category
         merchant_filter: Only include these merchants (list of names)
         currency_format: Format string for currency (e.g. "${amount}" or "£{amount}")
+        budgets: Optional budget report from budgets.build_budget_report()
+        anomalies: Optional report from anomalies.detect_anomalies()
+        duplicates: Optional report from duplicates.build_duplicate_report()
 
     Returns: Markdown string
     """
@@ -490,6 +528,46 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
     transfers_net = stats.get('transfers_net', 0)
 
     lines = ['# Financial Report\n']
+
+    # Budgets lead the report: during a review the targets matter more than
+    # the raw totals underneath them.
+    if budgets and budgets.get('enabled') and budgets.get('results'):
+        lines.append('## Budgets\n')
+        lines.append('| Target | Period | Budget | Actual | Used | Variance | Status |')
+        lines.append('|--------|--------|--------|--------|------|----------|--------|')
+        for result in budgets['results']:
+            lines.append(
+                f"| {result.label} | {result.period} | {fmt(result.target)} | "
+                f"{fmt(result.comparison_actual)} | {result.pct_used:.0f}% | "
+                f"{fmt(result.variance, show_sign=True)} | {result.status} |"
+            )
+        lines.append('')
+        for problem in budgets.get('problems', []):
+            suggestions = ', '.join(problem['suggestions']) or 'none found'
+            lines.append(f"> Budget `{problem['key']}` matched no transactions. Did you mean: {suggestions}")
+        if budgets.get('problems'):
+            lines.append('')
+
+    # Anomalies
+    if anomalies and anomalies.get('enabled') and anomalies.get('anomalies'):
+        lines.append(f"## Worth a Look ({anomalies.get('latest_month', '')})\n")
+        for anomaly in anomalies['anomalies']:
+            marker = '**!**' if anomaly.severity == 'warn' else '-'
+            lines.append(f"{marker} **{anomaly.title}** - {anomaly.detail}")
+        lines.append('')
+
+    # Duplicate warning
+    if duplicates and duplicates.get('enabled') and duplicates.get('cross_file'):
+        cross = duplicates['cross_file']
+        lines.append('## Possible Duplicates\n')
+        lines.append(f"{len(cross)} transaction(s) appear in more than one file, "
+                     f"double counting {fmt(duplicates.get('cross_file_impact', 0))}.\n")
+        lines.append('| Date | Amount | Description | Files |')
+        lines.append('|------|--------|-------------|-------|')
+        for group in cross[:20]:
+            files = ', '.join(os.path.basename(f) for f in group.files)
+            lines.append(f"| {group.date} | {fmt(group.amount)} | {group.description} | {files} |")
+        lines.append('')
 
     # Cash Flow Summary
     lines.append('## Cash Flow\n')
@@ -520,14 +598,14 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
             lines.append(f"| {month} | {fmt(total)} |")
         lines.append('')
 
-    # Credits/Refunds
-    credit_merchants = [(m, d) for m, d in by_merchant.items() if d['total'] < 0]
+    # Credits/Refunds (genuine refunds only - transfers/income have their own rows)
+    credit_merchants = [(m, d) for m, d in by_merchant.items() if d.get('credits', 0) > 0]
     if credit_merchants:
         lines.append('## Credits/Refunds\n')
         lines.append('| Merchant | Category | Amount |')
         lines.append('|----------|----------|--------|')
-        for name, data in sorted(credit_merchants, key=lambda x: x[1]['total']):
-            lines.append(f"| {name} | {data.get('category', '')} | {fmt(data['total'], show_sign=True)} |")
+        for name, data in sorted(credit_merchants, key=lambda x: x[1]['credits'], reverse=True):
+            lines.append(f"| {name} | {data.get('category', '')} | {fmt(data['credits'], show_sign=True)} |")
         lines.append(f"| **Total** | | **{fmt(credits_total, show_sign=True)}** |")
         lines.append('')
 
@@ -720,18 +798,21 @@ def print_summary(stats, title=None, filter_category=None, currency_format="${am
     print(f"\nMerchants:                   {len(by_merchant):>14}")
 
     # =========================================================================
-    # CREDITS/REFUNDS (if any negative totals)
+    # CREDITS/REFUNDS
     # =========================================================================
-    credit_merchants = [(m, d) for m, d in by_merchant.items() if d['total'] < 0]
+    # Only genuine refunds count here. A negative merchant total can also come
+    # from transfers or income (e.g. a stock sale), which are reported in their
+    # own sections - including them here made the rows disagree with the total.
+    credit_merchants = [(m, d) for m, d in by_merchant.items() if d.get('credits', 0) > 0]
     if credit_merchants:
         print("\n" + "=" * 80)
         print("CREDITS/REFUNDS")
         print("=" * 80)
         print(f"\n{'Merchant':<30} {'Category':<20} {'Amount':>14}")
         print("-" * 68)
-        for merchant, data in sorted(credit_merchants, key=lambda x: x[1]['total']):
+        for merchant, data in sorted(credit_merchants, key=lambda x: x[1]['credits'], reverse=True):
             category = data.get('category', 'Unknown')[:20]
-            print(f"{merchant:<30} {category:<20} +{fmt(abs(data['total'])):>14}")
+            print(f"{merchant:<30} {category:<20} +{fmt(data['credits']):>14}")
         print(f"\n{'TOTAL CREDITS':<30} {'':<20} +{fmt(credits_total):>14}")
 
     # =========================================================================
@@ -942,6 +1023,182 @@ def print_sections_summary(stats, title=None, currency_format="${amount}", only_
         print()
         print(f"  {C.DIM}Investments:{C.RESET} {C.CYAN}{fmt(investment_total)}{C.RESET} {C.DIM}(401K, IRA, etc.){C.RESET}")
     print("=" * 80)
+
+
+# =============================================================================
+# REVIEW OUTPUT - Budgets, anomalies and duplicate warnings
+# =============================================================================
+
+# Width of the inline progress bar drawn next to each budget.
+BUDGET_BAR_WIDTH = 14
+
+
+def _budget_bar(pct_used):
+    """Render a progress bar for a budget, capped at 100% of the bar width."""
+    filled = int(min(pct_used, 100) / 100 * BUDGET_BAR_WIDTH)
+    return '█' * filled + '░' * (BUDGET_BAR_WIDTH - filled)
+
+
+def _budget_color(status):
+    return {'over': C.RED, 'near': C.YELLOW}.get(status, C.GREEN)
+
+
+def print_budget_summary(budget_report, currency_format="${amount}", latest_month_complete=True):
+    """Print budget targets versus actual spending.
+
+    Args:
+        budget_report: Report from budgets.build_budget_report()
+        currency_format: Format string for currency
+        latest_month_complete: False when the newest month is only partially
+            covered by the data, which makes actuals look artificially low.
+    """
+    if not budget_report or not budget_report.get('enabled'):
+        return
+
+    results = budget_report.get('results', [])
+    if not results:
+        return
+
+    def fmt(amount):
+        return format_currency_decimal(amount, currency_format)
+
+    def fmt_signed(amount):
+        return format_currency_signed(amount, currency_format)
+
+    print("\n" + "=" * 80)
+    print("BUDGETS")
+    print("=" * 80)
+    print()
+
+    over = [r for r in results if r.status == 'over']
+    near = [r for r in results if r.status == 'near']
+    if over:
+        print(f"  {C.RED}{len(over)} of {len(results)} targets over budget{C.RESET}")
+    elif near:
+        print(f"  {C.YELLOW}{len(near)} of {len(results)} targets close to the limit{C.RESET}")
+    else:
+        print(f"  {C.GREEN}All {len(results)} targets within budget{C.RESET}")
+    print()
+
+    print(f"{'Target':<24} {'Budget':>11} {'Actual':>11}  {'Progress':<{BUDGET_BAR_WIDTH}} {'':>6} {'Variance':>12}")
+    print("-" * 80)
+
+    for result in results:
+        color = _budget_color(result.status)
+        period_note = '/yr' if result.period == 'yearly' else '/mo'
+        label = result.label[:23]
+        variance = f"{fmt_signed(result.variance)}{'/yr' if result.period == 'yearly' else '/mo'}"
+        print(
+            f"{label:<24} {fmt(result.target):>11} {fmt(result.comparison_actual):>11}  "
+            f"{color}{_budget_bar(result.pct_used)}{C.RESET} {color}{result.pct_used:>5.0f}%{C.RESET} "
+            f"{color}{variance:>15}{C.RESET}"
+        )
+
+        if result.months_over:
+            print(f"    {C.DIM}↳ over target in {result.months_over} of "
+                  f"{result.num_months} months{C.RESET}")
+
+    if not latest_month_complete:
+        print()
+        print(f"  {C.DIM}Note: the most recent month is partial, so actuals for it "
+              f"are lower than a full month.{C.RESET}")
+
+    # A budget that matches nothing silently reads as perfect discipline, so
+    # always call it out with something concrete to fix.
+    for problem in budget_report.get('problems', []):
+        print()
+        print(f"  {C.YELLOW}⚠{C.RESET} Budget '{problem['key']}' did not match any transactions.")
+        if problem['suggestions']:
+            print(f"    Did you mean: {', '.join(problem['suggestions'])}")
+        else:
+            print(f"    No {problem['scope']} values were found in your data.")
+        print(f"    Check the name against 'tally up --format summary' or 'tally explain'.")
+
+
+def print_anomaly_summary(anomaly_report, currency_format="${amount}"):
+    """Print the 'worth a look' list of changes since previous months."""
+    if not anomaly_report or not anomaly_report.get('enabled'):
+        return
+
+    anomalies = anomaly_report.get('anomalies', [])
+    if not anomalies:
+        return
+
+    latest_month = anomaly_report.get('latest_month', '')
+    print("\n" + "=" * 80)
+    print(f"WORTH A LOOK ({latest_month})")
+    print("=" * 80)
+    print()
+
+    for anomaly in anomalies:
+        if anomaly.severity == 'warn':
+            marker = f"{C.YELLOW}⚠{C.RESET}"
+        else:
+            marker = f"{C.DIM}·{C.RESET}"
+        print(f"  {marker} {C.BOLD}{anomaly.title}{C.RESET}")
+        print(f"    {C.DIM}{anomaly.detail}{C.RESET}")
+
+    total_found = anomaly_report.get('total_found', len(anomalies))
+    if total_found > len(anomalies):
+        print()
+        print(f"  {C.DIM}... and {total_found - len(anomalies)} more{C.RESET}")
+
+    if not anomaly_report.get('latest_month_complete', True):
+        print()
+        print(f"  {C.DIM}Note: {latest_month} is partial, so month-over-month "
+              f"comparisons will understate it.{C.RESET}")
+
+
+def print_duplicate_warning(duplicate_report, currency_format="${amount}", verbose=0):
+    """Warn about transactions that appear more than once.
+
+    Cross-file duplicates are shown by default because they almost always mean
+    two exports overlap and the totals are inflated. Repeats within a single
+    file are usually legitimate, so they need -v.
+    """
+    if not duplicate_report or not duplicate_report.get('enabled'):
+        return
+
+    def fmt(amount):
+        return format_currency_decimal(amount, currency_format)
+
+    def fmt_signed(amount):
+        return format_currency_signed(amount, currency_format)
+
+    cross = duplicate_report.get('cross_file', [])
+    same = duplicate_report.get('same_file', [])
+
+    if cross:
+        impact = duplicate_report.get('cross_file_impact', 0)
+        print()
+        print(f"{C.YELLOW}⚠ {len(cross)} transaction(s) appear in more than one file "
+              f"({fmt(impact)} counted twice){C.RESET}")
+
+        shown = cross if verbose >= 1 else cross[:3]
+        for group in shown:
+            files = ', '.join(os.path.basename(f) for f in group.files)
+            print(f"    {group.date}  {fmt_signed(group.amount):>12}  {group.description[:34]:<34} {C.DIM}{files}{C.RESET}")
+        if len(cross) > len(shown):
+            print(f"    {C.DIM}... and {len(cross) - len(shown)} more{C.RESET}")
+
+        print(f"  {C.DIM}Your totals include these twice. Remove the overlapping export, "
+              f"narrow the glob in settings.yaml,{C.RESET}")
+        print(f"  {C.DIM}or set 'duplicate_check: off' if the repeats are real.{C.RESET}")
+
+    if same and verbose >= 1:
+        impact = duplicate_report.get('same_file_impact', 0)
+        print()
+        print(f"{C.DIM}{len(same)} repeated transaction(s) within a single file "
+              f"({fmt(impact)}). These are often legitimate.{C.RESET}")
+        for group in same[:10]:
+            print(f"    {group.date}  {fmt_signed(group.amount):>12}  {group.description[:34]:<34} "
+                  f"{C.DIM}x{group.count}{C.RESET}")
+        if len(same) > 10:
+            print(f"    {C.DIM}... and {len(same) - 10} more{C.RESET}")
+    elif same:
+        print()
+        print(f"{C.DIM}{len(same)} repeated transaction(s) within a single file. "
+              f"Run with -v to list them.{C.RESET}")
 
 
 # =============================================================================

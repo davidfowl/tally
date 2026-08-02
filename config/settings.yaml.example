@@ -48,3 +48,43 @@ data_sources:
 # Output settings
 output_dir: output
 html_filename: spending_summary.html
+
+# Merchant rules file - expression-based categorization
+merchants_file: config/merchants.rules
+
+# Views file (optional) - custom spending views
+# views_file: config/views.rules
+
+# ---------------------------------------------------------------------------
+# Budgets (optional)
+# ---------------------------------------------------------------------------
+# Monthly spending targets, compared against actuals in every output format.
+# Keys can be:
+#   total              all spending
+#   <Category>         e.g. Food
+#   <Category>/<Sub>   e.g. Food/Groceries
+#   tag:<name>         e.g. tag:business
+#
+# Only real spending counts. Income, transfers and investment contributions
+# are excluded, and refunds reduce the month they land in.
+#
+# Run 'tally up --format summary' to see the exact category names in your data;
+# a budget that matches nothing is reported with a suggested spelling.
+#
+# budgets:
+#   total: 5000
+#   Food: 800
+#   Food/Groceries: 500
+#   tag:business: 400
+#   Travel:                # an annual pot rather than a monthly one
+#     amount: 6000
+#     period: yearly
+
+# ---------------------------------------------------------------------------
+# Duplicate detection (optional, on by default)
+# ---------------------------------------------------------------------------
+# Warns when the same date, amount and description appear in more than one
+# file. This normally means two statement exports overlap, which would double
+# count that spending. Set to false if the repeats in your data are real.
+#
+# duplicate_check: true

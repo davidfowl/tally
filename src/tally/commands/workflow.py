@@ -136,12 +136,29 @@ def cmd_workflow(args):
     cmds = [
         ("tally up", "Generate HTML spending report"),
         ("tally up --summary", "Quick text summary"),
+        ("tally up --diff", "Compare against the previous run"),
         ("tally discover", "Find unknown merchants"),
         ("tally explain <merchant>", "Show category and rules"),
         ("tally diag", "Diagnose config issues"),
     ]
     for cmd, desc in cmds:
         print(f"    {C.GREEN}{cmd:<24}{C.RESET} {C.DIM}{desc}{C.RESET}")
+
+    section("Budgets")
+    print(f"    {C.DIM}Set monthly targets to compare planned against actual spending.{C.RESET}")
+    print(f"    {C.DIM}Add to {C.RESET}{C.CYAN}{path_settings}{C.RESET}{C.DIM}:{C.RESET}")
+    print()
+    print(f"    {C.DIM}budgets:")
+    print(f"      total: 5000            # all spending, per month")
+    print(f"      Food: 800              # a category")
+    print(f"      Food/Groceries: 500    # a subcategory")
+    print(f"      tag:business: 400      # everything with a tag")
+    print(f"      Travel:                # an annual pot instead")
+    print(f"        amount: 6000")
+    print(f"        period: yearly{C.RESET}")
+    print()
+    print(f"    {C.DIM}Budgets show in every output format, and{C.RESET} {C.GREEN}tally up{C.RESET} {C.DIM}also flags")
+    print(f"    price rises, new merchants and missing recurring charges.{C.RESET}")
 
     section("Field Transforms")
     print(f"    {C.DIM}Strip payment processor prefixes before matching rules.{C.RESET}")

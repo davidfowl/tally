@@ -1109,10 +1109,19 @@ class TestCurrencyFormatting:
         assert format_currency_decimal(1234.56, "{amount} zł") == "1,234.56 zł"
 
     def test_format_currency_negative(self):
-        """Test negative amount formatting."""
-        from tally.analyzer import format_currency
-        assert format_currency(-1234) == "$-1,234"
+        """Negative amounts put the sign before the currency symbol.
+
+        This matches formatCurrency() in spending_report.js, so the terminal
+        summary and the HTML report render the same value the same way.
+        """
+        from tally.analyzer import format_currency, format_currency_decimal
+        assert format_currency(-1234) == "-$1,234"
         assert format_currency(-1234, "{amount} zł") == "-1,234 zł"
+        assert format_currency(-1234, "€{amount}") == "-€1,234"
+        assert format_currency_decimal(-1234.56) == "-$1,234.56"
+        # Values that round to zero must not pick up a stray minus sign.
+        assert format_currency(-0.4) == "$0"
+        assert format_currency_decimal(-0.001) == "$0.00"
 
 
 class TestRegexDelimiter:

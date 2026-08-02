@@ -31,6 +31,13 @@ class TestRuleSnapshots:
     FIXTURE_DIR = Path(__file__).parent / "fixtures" / "rule_snapshot"
     SNAPSHOT_FILE = FIXTURE_DIR / "expected_output.json"
 
+    # Review features (budgets, anomaly detection, duplicate warnings) sit on
+    # top of rule processing rather than inside it, and their thresholds are
+    # expected to be tuned over time. Keeping them out of the snapshot means
+    # this test keeps failing for the reason it exists: a change in how rules
+    # assign merchants, categories, tags or totals.
+    REVIEW_KEYS = ('budgets', 'anomalies', 'duplicates')
+
     def test_rule_processing_stability(self, tmp_path):
         """Verify rule processing produces identical results.
 
@@ -189,9 +196,13 @@ class TestRuleSnapshots:
         - Sort all tag arrays alphabetically
         - Sort by_category by category/subcategory
         - Sort credits by merchant name
+        - Drop review-only sections (see REVIEW_KEYS)
         """
         import copy
         normalized = copy.deepcopy(output)
+
+        for key in self.REVIEW_KEYS:
+            normalized.pop(key, None)
 
         # Sort merchants by name and normalize their internal arrays
         if 'merchants' in normalized:
