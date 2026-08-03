@@ -1,7 +1,13 @@
 name: PR Build
 
+# Builds PR code, including code from forks. Runs under `pull_request`, so it
+# gets a read-only token and no secrets - `actions/checkout` refuses to check
+# out fork code under `pull_request_target`, and rightly so. Posting the result
+# needs write access, which this workflow deliberately does not have; that half
+# lives in pr-build-comment.yml, triggered by `workflow_run`.
+
 on:
-  pull_request_target:
+  pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -9,6 +15,9 @@ on:
         description: 'PR number to build'
         required: true
         type: number
+
+permissions:
+  contents: read
 
 jobs:
   prepare:
@@ -40,6 +49,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      # Handed to pr-build-comment.yml, which cannot see this run's outputs.
+      # For a fork PR the workflow_run event's `pull_requests` array is empty,
+      # so the PR number has to travel as an artifact.
+      - name: Save PR metadata
+        run: |
+          mkdir -p pr-meta
+          echo "${{ steps.pr.outputs.number }}" > pr-meta/pr_number
+          echo "${{ steps.pr.outputs.short_sha }}" > pr-meta/short_sha
+
+      - name: Upload PR metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-meta
+          path: pr-meta/
+
   build:
     needs: prepare
     uses: ./.github/workflows/build.yml
@@ -47,68 +71,3 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
       git_sha: ${{ needs.prepare.outputs.head_sha }}
       ref: ${{ needs.prepare.outputs.head_sha }}
-
-  comment:
-    needs: [prepare, build]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-
-    steps:
-      - name: Build comment body
-        run: |
-          PR_NUMBER="${{ needs.prepare.outputs.pr_number }}"
-          RUN_ID="${{ github.run_id }}"
-          SHORT_SHA="${{ needs.prepare.outputs.short_sha }}"
-
-          cat > comment.md << 'EOF'
-          ## PR Build Available
-
-          Version: `0.0.PR_NUMBER-SHORT_SHA`
-
-          ### Install from this PR
-
-          **Linux / macOS:**
-          ```bash
-          curl -fsSL https://raw.githubusercontent.com/REPO/main/docs/install-pr.sh | bash -s -- PR_NUMBER
-          ```
-
-          **Windows PowerShell:**
-          ```powershell
-          iex "& { $(irm https://raw.githubusercontent.com/REPO/main/docs/install-pr.ps1) } PR_NUMBER"
-          ```
-
-          **Manual download:** [View workflow run](https://github.com/REPO/actions/runs/RUN_ID) and download artifacts.
-
-          <details>
-          <summary>Requirements</summary>
-
-          - GitHub CLI (`gh`) must be installed and authenticated
-          - Run `gh auth login` if not already authenticated
-
-          </details>
-          EOF
-
-          # Replace placeholders
-          sed -i "s/PR_NUMBER/${PR_NUMBER}/g" comment.md
-          sed -i "s/SHORT_SHA/${SHORT_SHA}/g" comment.md
-          sed -i "s|REPO|${{ github.repository }}|g" comment.md
-          sed -i "s/RUN_ID/${RUN_ID}/g" comment.md
-
-          cat comment.md
-
-      - name: Find existing comment
-        uses: peter-evans/find-comment@v3
-        id: find
-        with:
-          issue-number: ${{ needs.prepare.outputs.pr_number }}
-          comment-author: 'github-actions[bot]'
-          body-includes: '## PR Build Available'
-
-      - name: Create or update comment
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.find.outputs.comment-id }}
-          issue-number: ${{ needs.prepare.outputs.pr_number }}
-          body-path: comment.md
-          edit-mode: replace

@@ -1,0 +1,112 @@
+name: PR Build Comment
+
+# The privileged half of PR Build. Runs on `workflow_run`, so it has the base
+# repository's token and `pull-requests: write` - and therefore never checks
+# out, builds, or executes any PR code. Its only inputs are two small values
+# read out of an artifact, and both are validated before use.
+
+on:
+  workflow_run:
+    workflows: ["PR Build"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'pull_request' ||
+       github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download PR metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: pr-meta
+          path: pr-meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Read and validate PR metadata
+        id: meta
+        run: |
+          PR_NUMBER=$(cat pr-meta/pr_number)
+          SHORT_SHA=$(cat pr-meta/short_sha)
+
+          # This artifact was produced by a run over untrusted PR code, so treat
+          # its contents as untrusted input: accept only the exact shapes we
+          # expect, and never interpolate them into a shell or API call unchecked.
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Refusing malformed pr_number: $PR_NUMBER"
+            exit 1
+          fi
+          if ! [[ "$SHORT_SHA" =~ ^[0-9a-f]{7}$ ]]; then
+            echo "Refusing malformed short_sha: $SHORT_SHA"
+            exit 1
+          fi
+
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Build comment body
+        run: |
+          PR_NUMBER="${{ steps.meta.outputs.pr_number }}"
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          SHORT_SHA="${{ steps.meta.outputs.short_sha }}"
+
+          cat > comment.md << 'EOF'
+          ## PR Build Available
+
+          Version: `0.0.PR_NUMBER-SHORT_SHA`
+
+          ### Install from this PR
+
+          **Linux / macOS:**
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/REPO/main/docs/install-pr.sh | bash -s -- PR_NUMBER
+          ```
+
+          **Windows PowerShell:**
+          ```powershell
+          iex "& { $(irm https://raw.githubusercontent.com/REPO/main/docs/install-pr.ps1) } PR_NUMBER"
+          ```
+
+          **Manual download:** [View workflow run](https://github.com/REPO/actions/runs/RUN_ID) and download artifacts.
+
+          <details>
+          <summary>Requirements</summary>
+
+          - GitHub CLI (`gh`) must be installed and authenticated
+          - Run `gh auth login` if not already authenticated
+
+          </details>
+          EOF
+
+          # Replace placeholders
+          sed -i "s/PR_NUMBER/${PR_NUMBER}/g" comment.md
+          sed -i "s/SHORT_SHA/${SHORT_SHA}/g" comment.md
+          sed -i "s|REPO|${{ github.repository }}|g" comment.md
+          sed -i "s/RUN_ID/${RUN_ID}/g" comment.md
+
+          cat comment.md
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v3
+        id: find
+        with:
+          issue-number: ${{ steps.meta.outputs.pr_number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## PR Build Available'
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find.outputs.comment-id }}
+          issue-number: ${{ steps.meta.outputs.pr_number }}
+          body-path: comment.md
+          edit-mode: replace
