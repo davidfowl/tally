@@ -7,6 +7,8 @@ import os
 from datetime import date
 
 from tally.analyzer import parse_amount, analyze_transactions, export_json, export_csv, classify_by_sections
+from tally.analyzer import build_merchant_json
+from tally.commands.run import collect_source_names
 from tally.analyzer import parse_generic_csv as _parse_generic_csv
 from tally.parsers import SkippedRow, ParseResult, _detect_date_format
 from tally.format_parser import parse_format_string
@@ -273,6 +275,48 @@ class TestExportJson:
         assert 'total' in parsed['by_month']['2025-01']
         assert parsed['by_month']['2025-01']['total'] == 55.0
         assert parsed['by_month']['2025-02']['total'] == 25.0
+
+
+class TestReportJsonDeterminism:
+    """The report JSON is diffed against the previous run, so it must be reproducible."""
+
+    def test_pattern_tags_sorted_when_list(self):
+        """match_info['tags'] arrives as a list built from a set - sort it anyway."""
+        result = build_merchant_json('AMAZON', {
+            'match_info': {'pattern': 'AMAZON*', 'source': 'merchants.rules',
+                           'tags': ['zeta', 'alpha', 'mid']},
+        })
+
+        assert result['pattern']['tags'] == ['alpha', 'mid', 'zeta']
+
+    def test_pattern_tags_sorted_when_set(self):
+        """The path the dead isinstance guard used to cover."""
+        result = build_merchant_json('AMAZON', {
+            'match_info': {'pattern': 'AMAZON*', 'source': 'merchants.rules',
+                           'tags': {'zeta', 'alpha', 'mid'}},
+        })
+
+        assert result['pattern']['tags'] == ['alpha', 'mid', 'zeta']
+
+    def test_source_names_dedupe_preserves_declaration_order(self):
+        """Duplicate source names collapse without being reordered."""
+        data_sources = [
+            {'name': 'B', 'file': 'b1.csv'},
+            {'name': 'A', 'file': 'a.csv'},
+            {'name': 'B', 'file': 'b2.csv'},
+        ]
+
+        assert collect_source_names(data_sources) == ['B', 'A']
+
+    def test_source_names_excludes_supplemental(self):
+        """Supplemental sources produce no transactions, so they stay out of the subtitle."""
+        data_sources = [
+            {'name': 'B', 'file': 'b.csv'},
+            {'name': 'Orders', 'file': 'orders.csv', '_supplemental': True},
+            {'name': 'A', 'file': 'a.csv'},
+        ]
+
+        assert collect_source_names(data_sources) == ['B', 'A']
 
 
 class TestExportCsv:
