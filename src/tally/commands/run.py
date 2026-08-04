@@ -35,6 +35,16 @@ from ..parsers import ParseResult, SkippedRow
 from collections import Counter
 
 
+def collect_source_names(data_sources):
+    """Collect source names for the report subtitle (exclude supplemental).
+
+    Deduplicates while preserving the order sources are declared in settings.yaml.
+    """
+    return list(dict.fromkeys(
+        s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)
+    ))
+
+
 def cmd_run(args):
     """Handle the 'run' subcommand."""
     config_dir = resolve_config_dir(args)
@@ -316,7 +326,7 @@ def cmd_run(args):
             output_path = os.path.join(output_dir, config.get('html_filename', 'spending_summary.html'))
 
         # Collect source names for the report subtitle (exclude supplemental)
-        source_names = [s.get('name', 'Unknown') for s in data_sources if not s.get('_supplemental', False)]
+        source_names = collect_source_names(data_sources)
         write_summary_file_vue(stats, output_path, title=title,
                                currency_format=currency_format, sources=source_names,
                                embedded_html=args.embedded_html)

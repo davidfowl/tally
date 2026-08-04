@@ -4,6 +4,7 @@ HTML Report Generation - Generate spending analysis HTML reports.
 This module handles generation of interactive HTML reports from analyzed transaction data.
 """
 
+import html
 import json
 import sys
 from collections import defaultdict
@@ -154,6 +155,7 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
                 pattern = match_info.get('pattern', '')
                 match_info_json = {
                     'pattern': pattern,
+                    'ruleName': match_info.get('rule_name', ''),
                     'source': match_info.get('source', ''),
                     'explanation': explain_pattern(pattern),
                     'assignedMerchant': merchant_name,
@@ -172,6 +174,9 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
                 'calcType': data.get('calc_type', '/12'),
                 'monthsActive': data.get('months_active', 0),
                 'isConsistent': data.get('is_consistent', False),
+                'cv': data.get('cv', 0),
+                'recurrence': data.get('recurrence'),
+                'recurringMonthlyCost': data.get('recurring_monthly_cost', 0),
                 'ytd': data.get('total', 0),
                 'monthly': data.get('avg_when_active') or (data.get('total', 0) / num_months if num_months > 0 else 0),
                 'count': data.get('count', len(txns)),
@@ -331,8 +336,21 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         'investmentTotal': stats.get('investment_total', 0),
     }
 
-    # Assemble final HTML
-    data_script = f'window.spendingData = {json.dumps(spending_data)};'
+    # Assemble final HTML.
+    # Resolve the title once, here, and store it back so the static loading
+    # shell and the mounted Vue app cannot disagree about what the report is
+    # called. YAML hands us whatever the user typed - `title: 2025` arrives as
+    # an int - so coerce before it reaches str.replace().
+    resolved_title = str(title) if title not in (None, '') else 'Tally Spending Analysis'
+    spending_data['title'] = resolved_title
+    # The shell interpolates the title into markup, so it must be escaped;
+    # the Vue path gets the raw value and escapes it at render time.
+    shell_title = html.escape(resolved_title, quote=True)
+    # A '</' in any string value would close the <script> element this gets
+    # embedded in. '\/' is a valid JSON escape for '/', so the payload still
+    # parses to the identical value while being inert to the HTML tokenizer.
+    data_json = json.dumps(spending_data).replace('</', '<\\/')
+    data_script = f'window.spendingData = {data_json};'
 
     if not embedded_html:
         # Write separate files for easier development
@@ -353,6 +371,8 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
 
         # Create HTML with external references
         final_html = html_template.replace(
+            '__REPORT_TITLE__', shell_title
+        ).replace(
             '<style>/* CSS_PLACEHOLDER */</style>',
             '<link rel="stylesheet" href="spending_report.css">'
         ).replace(
@@ -365,6 +385,8 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     else:
         # Embed everything inline (default)
         final_html = html_template.replace(
+            '__REPORT_TITLE__', shell_title
+        ).replace(
             '/* CSS_PLACEHOLDER */', css_content
         ).replace(
             '/* DATA_PLACEHOLDER */', data_script

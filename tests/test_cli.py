@@ -7,6 +7,166 @@ import os
 from pathlib import Path
 
 
+class TestGlobPatternSupport:
+    """Tests for wildcard/glob pattern support in data source file paths."""
+
+    def test_glob_pattern_matches_multiple_files(self):
+        """Glob pattern should match multiple CSV files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            # Create settings with glob pattern
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/test*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            # Create multiple matching files
+            with open(os.path.join(data_dir, 'test-jan.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-15,NETFLIX,-15.99\n")
+
+            with open(os.path.join(data_dir, 'test-feb.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-02-15,SPOTIFY,-9.99\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'run', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            # Should report transactions from 2 files
+            assert '2 files' in result.stdout
+            assert '2 transactions' in result.stdout
+
+    def test_glob_pattern_single_file_fallback(self):
+        """Single file path (no wildcards) should still work."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/transactions.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            with open(os.path.join(data_dir, 'transactions.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-15,TEST,-10.00\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'run', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            assert 'TestBank: 1 transactions' in result.stdout
+            assert '1 transactions' in result.stdout
+
+    def test_glob_pattern_no_matches_shows_error(self):
+        """Glob pattern with no matches should show helpful message."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/nonexistent*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'run', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            # Should report that no files matched the glob pattern
+            assert result.returncode == 1
+            assert 'No files matched' in result.stdout
+            assert 'data/nonexistent*.csv' in result.stdout
+
+    def test_glob_diag_shows_matched_files(self):
+        """Diag command should show matched files for glob patterns."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/test*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            # Create multiple matching files
+            with open(os.path.join(data_dir, 'test-a.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+
+            with open(os.path.join(data_dir, 'test-b.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'diag', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            # Should show the configured glob and resolved file count
+            assert 'data/test*.csv' in result.stdout
+            assert '(2 files)' in result.stdout
+
+    def test_glob_files_processed_in_sorted_order(self):
+        """Files should be processed in sorted order for consistency."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            # Create files in non-alphabetical order
+            with open(os.path.join(data_dir, 'z-last.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-01,Z_FIRST,-1.00\n")
+
+            with open(os.path.join(data_dir, 'a-first.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-01,A_FIRST,-1.00\n")
+
+            # Resolver should return files in sorted order regardless of creation order
+            from tally.path_utils import resolve_data_source_paths
+
+            files, _ = resolve_data_source_paths(config_dir, 'data/*.csv')
+            basenames = [os.path.basename(f) for f in files]
+            assert basenames == ['a-first.csv', 'z-last.csv']
+
+
 class TestCLIErrorHandling:
     """Tests for helpful error messages when CLI is misused."""
 

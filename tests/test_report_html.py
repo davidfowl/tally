@@ -39,6 +39,27 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _expand_categories_after_navigation(page: Page):
+    """Category sections default to collapsed on a fresh load ("Save Layout
+    Settings to Local Storage": no saved state means everything starts
+    collapsed). This suite predates that feature and assumes the old
+    expanded-by-default state, so expand everything after each navigation
+    instead of adding an expand step to every test.
+    """
+    original_goto = page.goto
+
+    def goto_and_expand(url, **kwargs):
+        response = original_goto(url, **kwargs)
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        if toggle.get_attribute("title") == "Expand all categories":
+            toggle.click()
+        return response
+
+    page.goto = goto_and_expand
+    yield
+
+
 @pytest.fixture(scope="module")
 def report_path(tmp_path_factory):
     """Generate a test report with known fixture data.
@@ -183,8 +204,8 @@ class TestUINavigation:
         # Amazon has transactions on: Jan 5, Jan 10, Feb 1, Mar 1
         # Should be sorted descending: Mar 1, Feb 1, Jan 10, Jan 5
         assert len(dates) == 4, f"Expected 4 Amazon transactions, got {len(dates)}: {dates}"
-        # Verify descending order
-        assert dates == ["Mar 1", "Feb 1", "Jan 10", "Jan 5"], f"Expected descending order, got {dates}"
+        # Verify descending order (dates always include the year)
+        assert dates == ["Mar 1, 2024", "Feb 1, 2024", "Jan 10, 2024", "Jan 5, 2024"], f"Expected descending order, got {dates}"
 
     def test_tag_click_adds_filter(self, page: Page, report_path):
         """Clicking a tag adds it as a filter."""
@@ -254,8 +275,8 @@ class TestCalculationAccuracy:
         page.goto(f"file://{report_path}")
         # Total: 45.99 + 29.99 + 125.50 + 89.00 + 199.00 + 8.50 + 12.00
         #        + 156.00 + 55.00 + 9.00 + 234.00 + 67.00 = 1030.98 ≈ $1,031
-        # The filtered view card shows spending for visible transactions
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$1,031")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$1,031")
 
     def test_shopping_category_total(self, page: Page, report_path):
         """Shopping category total is correct."""
@@ -280,8 +301,8 @@ class TestCalculationAccuracy:
         page.get_by_test_id("tag-badge").filter(has_text="david").first.click()
 
         # David's transactions total: $772 (rounded)
-        # The filtered view card shows spending for visible transactions
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$772")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$772")
 
     def test_tag_filter_updates_merchant_count(self, page: Page, report_path):
         """Merchant transaction count updates when filtered by tag."""
@@ -314,13 +335,88 @@ class TestCalculationAccuracy:
 
         # Apply filter
         page.get_by_test_id("tag-badge").filter(has_text="david").first.click()
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$772")
+        spending_card = page.locator(".kpi-card.spending")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$772")
 
         # Clear filter by clicking the remove button on the filter chip
         page.get_by_test_id("filter-chip-remove").first.click()
 
         # Original total restored
-        expect(page.get_by_test_id("filtered-amount")).to_contain_text("$1,031")
+        expect(spending_card.locator(".kpi-detail", has_text="All Time").locator(".value")).to_contain_text("$1,031")
+
+
+# =============================================================================
+# Category 2b: Transaction Details container & collapse controls
+# =============================================================================
+
+class TestTransactionDetailsContainer:
+    """Tests for the Transaction Details container, header summary, and collapse controls."""
+
+    def test_container_and_summary_present(self, page: Page, report_path):
+        """The Transaction Details container renders with a view-aware count summary."""
+        page.goto(f"file://{report_path}")
+        expect(page.locator(".details-section > .section-header h2")).to_contain_text("Transaction Details")
+        # Merchant view (default): "N categories, N merchants"
+        expect(page.get_by_test_id("details-summary")).to_have_text("2 categories, 4 merchants")
+
+    def test_summary_updates_for_subcategory_view(self, page: Page, report_path):
+        """Switching to Subcategory view changes the count label wording."""
+        page.goto(f"file://{report_path}")
+        page.get_by_role("button", name="Subcategory", exact=True).click()
+        expect(page.get_by_test_id("details-summary")).to_contain_text("subcategories")
+
+    def test_collapse_all_hides_category_rows(self, page: Page, report_path):
+        """Collapse-all folds every category; the button flips to Expand."""
+        page.goto(f"file://{report_path}")
+        shopping = page.get_by_test_id("section-cat-Shopping")
+        expect(shopping).not_to_have_class(re.compile("is-collapsed"))
+        page.get_by_test_id("collapse-all-toggle").click()
+        expect(shopping).to_have_class(re.compile("is-collapsed"))
+        expect(page.get_by_test_id("collapse-all-toggle")).to_have_attribute("title", "Expand all categories")
+
+    def test_expand_all_reopens_categories(self, page: Page, report_path):
+        """Expand-all re-opens the category sections."""
+        page.goto(f"file://{report_path}")
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        shopping = page.get_by_test_id("section-cat-Shopping")
+        toggle.click()  # collapse all
+        expect(shopping).to_have_class(re.compile("is-collapsed"))
+        toggle.click()  # expand all
+        expect(shopping).not_to_have_class(re.compile("is-collapsed"))
+
+    def test_collapse_all_folds_open_transactions_and_expand_leaves_them_folded(self, page: Page, report_path):
+        """Collapse-all folds open transaction lists; expand-all reopens categories only (txns stay folded)."""
+        page.goto(f"file://{report_path}")
+        page.get_by_test_id("merchant-row-Amazon").click()  # open transactions
+        expect(page.locator(".txn-row:has-text('AMAZON MARKETPLACE')").first).to_be_visible()
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        toggle.click()  # collapse all -> also folds open transactions
+        toggle.click()  # expand all -> reopens categories only
+        expect(page.locator(".txn-row:has-text('AMAZON MARKETPLACE')").first).not_to_be_visible()
+
+    def test_container_collapses_to_header_only(self, page: Page, report_path):
+        """Clicking the container header collapses the whole details body (header only)."""
+        page.goto(f"file://{report_path}")
+        details_body = page.locator(".details-body")
+        expect(details_body).to_be_visible()
+        page.locator(".details-section > .section-header").click()
+        expect(details_body).not_to_be_visible()
+
+    def test_column_alignment(self, page: Page, report_path):
+        """Count column is centered; Total column is right-aligned."""
+        page.goto(f"file://{report_path}")
+        count_align = page.locator("td.count-col").first.evaluate("el => getComputedStyle(el).textAlign")
+        total_align = page.locator("td.money").first.evaluate("el => getComputedStyle(el).textAlign")
+        assert count_align == "center", f"Count column should be centered, got {count_align}"
+        assert total_align == "right", f"Total column should be right-aligned, got {total_align}"
+
+    def test_total_row_pinned_in_tfoot(self, page: Page, report_path):
+        """The total row lives in a <tfoot> and is sticky to the bottom of the scroll box."""
+        page.goto(f"file://{report_path}")
+        total_cell = page.locator("tfoot .total-row td").first
+        expect(total_cell).to_be_attached()
+        position = total_cell.evaluate("el => getComputedStyle(el).position")
+        assert position == "sticky", f"Total row cells should be sticky, got {position}"
 
 
 # =============================================================================
@@ -479,30 +575,34 @@ class TestEdgeCasesAndCalculations:
     def test_credits_shown_in_cashflow_summary(self, page: Page, edge_case_report_path):
         """Credits are shown in the cash flow summary card."""
         page.goto(f"file://{edge_case_report_path}")
-        # Credits should appear in cash flow breakdown
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_item = cashflow_card.locator(".breakdown-item", has_text="Credits")
+        income_card = page.locator(".kpi-card.income")
+        credits_item = income_card.locator(".kpi-detail", has_text="All Time")
         expect(credits_item).to_be_visible()
 
     def test_credits_amount_positive_in_summary(self, page: Page, edge_case_report_path):
-        """Credits are displayed as positive amounts in the summary card."""
+        """All-time credits are shown as a positive amount in Income details."""
         page.goto(f"file://{edge_case_report_path}")
-        # Credits should show with + prefix (refunds reduce spending)
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_value = cashflow_card.locator(".breakdown-item", has_text="Credits").locator(".value")
-        expect(credits_value).to_contain_text("+")
+        income_card = page.locator(".kpi-card.income")
+        credits_value = income_card.locator(".kpi-detail", has_text="All Time").locator(".kpi-detail-secondary")
+        expect(credits_value).to_contain_text("$150")
+
+    def test_income_detail_primary_includes_credits(self, page: Page, edge_case_report_path):
+        """Income detail primary values include credits; gray value is informational only."""
+        page.goto(f"file://{edge_case_report_path}")
+        income_card = page.locator(".kpi-card.income")
+        all_time_value = income_card.locator(".kpi-detail", has_text="All Time").locator(".value")
+        expect(all_time_value).to_contain_text("$3,150")
 
     # -------------------------------------------------------------------------
     # Cash Flow Calculation Tests
     # -------------------------------------------------------------------------
 
     def test_income_total_displayed(self, page: Page, edge_case_report_path):
-        """Income is shown in the cash flow card breakdown."""
+        """Income card is month-anchored and shows the latest month value."""
         page.goto(f"file://{edge_case_report_path}")
-        # Income: $3,000 (payroll) - shown as breakdown item in cashflow card
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        expect(cashflow_card.locator(".income-label")).to_be_visible()
-        expect(cashflow_card.locator("text=$3,000")).to_be_visible()
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator("h4")).to_contain_text("Mar, '24 Income")
+        expect(income_card.locator(".kpi-value-primary")).to_contain_text("$3,000")
 
     def test_transfers_in_filtered_view(self, page: Page, edge_case_report_path):
         """Transfers appear in filtered view card breakdown."""
@@ -512,12 +612,10 @@ class TestEdgeCasesAndCalculations:
         expect(filtered_card).to_be_visible()
 
     def test_cash_flow_calculation(self, page: Page, edge_case_report_path):
-        """Net cash flow = income - spending (transfers excluded, they just move money)."""
+        """Cash flow KPI value shows the latest month in the selected range."""
         page.goto(f"file://{edge_case_report_path}")
-        # Cash flow: $3,000 - $2,100 = $900
-        # Note: spending is net of refunds ($2,250 - $150 = $2,100)
-        # Transfers are excluded since they just move money between accounts
-        expect(page.get_by_test_id("cashflow-amount")).to_contain_text("$900")
+        # March cash flow: $3,000 income + $0 credits - $925 spending = $2,075
+        expect(page.get_by_test_id("cashflow-amount")).to_contain_text("$2,075")
 
     # -------------------------------------------------------------------------
     # Excluded Transaction Tests
@@ -525,21 +623,17 @@ class TestEdgeCasesAndCalculations:
     # -------------------------------------------------------------------------
 
     def test_income_shown_in_cashflow_card(self, page: Page, edge_case_report_path):
-        """Cash flow card shows income in breakdown."""
+        """Cash flow card shows the new compact detail rows."""
         page.goto(f"file://{edge_case_report_path}")
-        # Cash flow card should be visible with income breakdown
         expect(page.get_by_test_id("cashflow-card")).to_be_visible()
-        expect(page.get_by_test_id("cashflow-card").locator(".income-label")).to_be_visible()
-        # Filtered view card should also be visible
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail", has_text="12 Month Avg")).to_be_visible()
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail", has_text="All Time")).to_be_visible()
         expect(page.get_by_test_id("filtered-spending-card")).to_be_visible()
 
     def test_income_clickable_adds_filter(self, page: Page, edge_case_report_path):
-        """Clicking income in cash flow card adds an income tag filter."""
+        """Cash flow card keeps a compact two-line detail layout."""
         page.goto(f"file://{edge_case_report_path}")
-        # Click on income breakdown item in the cashflow card (scoped to avoid multiple matches)
-        page.get_by_test_id("cashflow-card").locator(".income-label").click()
-        # Should add an income tag filter
-        expect(page.get_by_test_id("filter-chip")).to_be_visible()
+        expect(page.get_by_test_id("cashflow-card").locator(".kpi-detail")).to_have_count(4)
 
     # -------------------------------------------------------------------------
     # Monthly Average Tests (shown in category section headers)
@@ -722,34 +816,42 @@ class TestEdgeCasesAndCalculations:
         page.goto(f"file://{edge_case_report_path}")
         page.wait_for_timeout(500)  # Wait for Vue and Chart.js to initialize
 
-        # Access the Chart.js instance data from the monthly chart canvas
+        # Access the category trend chart and sum all stacked category datasets for Jan 2024.
         result = page.evaluate("""() => {
-            // Chart.js stores chart instance as a property on canvas
-            const canvas = document.querySelector('canvas');
-            if (!canvas) return { error: 'No canvas found' };
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
 
-            // Chart.js 3+ stores instance in Chart.instances or on element
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+
             const chartInstance = Chart.getChart(canvas);
             if (!chartInstance) return { error: 'No chart instance found' };
 
-            // Get the data from the chart
-            const labels = chartInstance.data.labels;
-            const data = chartInstance.data.datasets[0].data;
+            const labels = chartInstance.data.labels || [];
+            const janIdx = labels.findIndex(label => /^Jan(?:\\s|\\b)/i.test(String(label || '')));
+            if (janIdx < 0) return { error: 'January label not found', labels };
 
-            // Return as object with month labels as keys
-            const byMonth = {};
-            labels.forEach((label, idx) => {
-                byMonth[label] = data[idx];
-            });
-            return { byMonth, labels, data };
+            const datasets = chartInstance.data.datasets || [];
+            const monthlyTotal = datasets.reduce((sum, ds) => {
+                const val = Number(ds?.data?.[janIdx]) || 0;
+                return sum + val;
+            }, 0);
+
+            const negatives = datasets
+                .map(ds => ({
+                    label: ds?.label || '',
+                    value: Number(ds?.data?.[janIdx]) || 0,
+                }))
+                .filter(row => row.value < 0);
+
+            return { monthlyTotal, janIdx, labels, negatives };
         }""")
 
         if 'error' in result:
             pytest.fail(f"Could not access chart data: {result['error']}")
 
         # January should show $550 (positive amounts only), not $450 (with refund subtracted)
-        # The month label format is "Jan 2024"
-        january_total = result['byMonth'].get('Jan 2024', 0)
+        january_total = result['monthlyTotal']
 
         # This assertion documents the expected behavior after the fix:
         # Only positive amounts should be included in the chart
@@ -761,42 +863,51 @@ class TestEdgeCasesAndCalculations:
             f"Chart data: {result}"
         )
 
+        assert not result['negatives'], (
+            f"Found negative category values in Jan 2024 stacked data: {result['negatives']}"
+        )
+
     def test_chart_category_totals_exclude_negative_amounts(self, page: Page, edge_case_report_path):
         """Category totals in chart should only include positive amounts.
 
         Bug: chartAggregations.byCategory sums ALL transaction amounts including
-        negative ones, incorrectly reducing category totals in the pie/bar charts.
+        negative ones, incorrectly reducing category totals in the category chart.
 
         Fixture Refunds category total: -$150 (should NOT appear in chart data)
         """
         page.goto(f"file://{edge_case_report_path}")
         page.wait_for_timeout(500)
 
-        # Access the category pie chart data
+        # Access the category chart datasets and aggregate totals by dataset label.
         result = page.evaluate("""() => {
-            // Find the pie chart canvas (second canvas)
-            const canvases = document.querySelectorAll('canvas');
-            if (canvases.length < 2) return { error: 'Pie chart canvas not found' };
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
 
-            const pieCanvas = canvases[1];  // Pie chart is second
-            const chartInstance = Chart.getChart(pieCanvas);
-            if (!chartInstance) return { error: 'No pie chart instance found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
 
-            // Get category labels and values
-            const labels = chartInstance.data.labels;
-            const data = chartInstance.data.datasets[0].data;
+            const chartInstance = Chart.getChart(canvas);
+            if (!chartInstance) return { error: 'No category chart instance found' };
 
+            const datasets = chartInstance.data.datasets || [];
             const byCategory = {};
-            labels.forEach((label, idx) => {
-                byCategory[label] = data[idx];
+            const minByCategory = {};
+
+            datasets.forEach(ds => {
+                const label = ds?.label || '';
+                const values = (Array.isArray(ds?.data) ? ds.data : []).map(v => Number(v) || 0);
+                byCategory[label] = values.reduce((sum, v) => sum + v, 0);
+                minByCategory[label] = values.length ? Math.min(...values) : 0;
             });
-            return { byCategory, labels, data };
+
+            return { byCategory, minByCategory, datasetCount: datasets.length };
         }""")
 
         if 'error' in result:
-            pytest.fail(f"Could not access pie chart data: {result['error']}")
+            pytest.fail(f"Could not access category chart data: {result['error']}")
 
         by_category = result['byCategory']
+        min_by_category = result['minByCategory']
 
         # Refunds category should NOT be in chart data (all negative amounts)
         # or if present, should have 0 value (not -150)
@@ -805,6 +916,395 @@ class TestEdgeCasesAndCalculations:
             f"Refunds category total should be 0 or not present in chart data, "
             f"but got ${refunds_total}. Negative amounts should be excluded from charts. "
             f"Chart data: {result}"
+        )
+
+        refunds_min = min_by_category.get('Refunds', 0)
+        assert refunds_min >= 0, (
+            f"Refunds category contains negative monthly values in chart datasets: {refunds_min}. "
+            f"Chart data: {result}"
+        )
+
+    def test_volatility_chart_applies_top10_and_edge_padding(self, page: Page, edge_case_report_path):
+        """Volatility chart keeps top-10 rows and applies y-axis edge breathing room."""
+        page.goto(f"file://{edge_case_report_path}")
+        page.wait_for_timeout(500)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-volatility');
+            if (!panel) return { error: 'Volatility chart panel not found' };
+
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No volatility chart canvas found' };
+
+            const chartInstance = Chart.getChart(canvas);
+            if (!chartInstance) return { error: 'No volatility chart instance found' };
+
+            const labels = chartInstance.data?.labels || [];
+            const yOffset = chartInstance.options?.scales?.y?.offset;
+            const layoutPadding = chartInstance.options?.layout?.padding || {};
+            const topPadding = Number(layoutPadding.top || 0);
+            const bottomPadding = Number(layoutPadding.bottom || 0);
+
+            return {
+                labelCount: labels.length,
+                yOffset,
+                topPadding,
+                bottomPadding,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not access volatility chart data: {result['error']}")
+
+        assert result['labelCount'] <= 10, (
+            f"Volatility chart should render at most 10 rows, got {result['labelCount']}"
+        )
+        assert result['yOffset'] is True, (
+            f"Expected volatility y-axis offset=true for edge spacing, got {result['yOffset']}"
+        )
+        assert result['topPadding'] >= 10 and result['bottomPadding'] >= 10, (
+            f"Expected volatility layout padding top/bottom >= 10, got {result}"
+        )
+
+
+@pytest.fixture(scope="module")
+def chart_controls_report_path(tmp_path_factory):
+    """Generate a multi-year report for chart-control interaction tests.
+
+    Fixture properties:
+    - 30 months of data (2024-01 through 2026-06) so month paging is required.
+    - Multiple categories so focused/tooltip behavior can be validated.
+    - One category present only on alternating months to create zero-value buckets.
+    """
+    tmp_dir = tmp_path_factory.mktemp("chart_controls_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = []
+    for idx in range(30):
+        year = 2024 + (idx // 12)
+        month = (idx % 12) + 1
+        rows.append(f"{month:02d}/10/{year},ALPHA STORE,{120 + (idx % 5) * 10:.2f}")
+        if idx % 2 == 0:
+            rows.append(f"{month:02d}/12/{year},BETA SHOP,{55 + (idx % 4) * 5:.2f}")
+
+    csv_content = "Date,Description,Amount\n" + "\n".join(rows) + "\n"
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    settings_content = """title: "Tally Spending Analysis"
+
+data_sources:
+  - name: Test
+    file: data/transactions.csv
+    format: "{date},{description},{amount}"
+
+merchants_file: config/merchants.rules
+"""
+    (config_dir / "settings.yaml").write_text(settings_content)
+
+    rules_content = """[Alpha]
+match: contains("ALPHA STORE")
+category: Housing
+subcategory: Rent
+
+[Beta]
+match: contains("BETA SHOP")
+category: Shopping
+subcategory: Retail
+"""
+    (config_dir / "merchants.rules").write_text(rules_content)
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+
+    return str(report_file)
+
+
+def _goto_chart_report_fresh(page: Page, report_path: str):
+    """Reset persisted chart UI state so chart-control tests are deterministic."""
+    page.goto(f"file://{report_path}")
+    page.evaluate("""() => {
+        localStorage.removeItem('spending-report-ui-state-v1');
+    }""")
+    page.reload()
+    page.wait_for_timeout(250)
+
+
+class TestChartControlsMinimum:
+    """Minimum chart interaction coverage for core controls and tooltip behavior."""
+
+    def test_category_chart_grouping_switches_to_years(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        years_btn = page.locator("#cat-group-pills .proto-pill", has_text="Years")
+        expect(years_btn).to_be_visible()
+        years_btn.click()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const labels = chart.data?.labels || [];
+            const allYears = labels.every(label => /^\\d{4}$/.test(String(label || '')));
+            return { labels, allYears };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect category grouping chart: {result['error']}")
+
+        assert len(result['labels']) >= 3, f"Expected 3+ year labels, got {result['labels']}"
+        assert result['allYears'], f"Expected year-form labels after Years grouping, got {result['labels']}"
+
+    def test_category_chart_focused_mode_uses_line_and_bold_label(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        focused_box = page.locator("#cat-unstack-checkbox")
+        expect(focused_box).to_be_visible()
+        focused_box.check()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const focusedCount = (chart.data?.datasets || []).filter(ds => Number(ds.borderWidth || 0) >= 3).length;
+            const compareDisabled = !!document.getElementById('cat-compare-checkbox')?.disabled;
+
+            return {
+                type: chart.config?.type,
+                ttBoldLabel: chart.options?.ttBoldLabel || null,
+                focusedCount,
+                compareDisabled,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect focused chart mode: {result['error']}")
+
+        assert result['type'] == 'line', f"Focused mode should render a line chart, got {result['type']}"
+        assert result['ttBoldLabel'], f"Focused mode should set ttBoldLabel, got {result}"
+        assert result['focusedCount'] == 1, f"Expected exactly one focused series, got {result}"
+        assert result['compareDisabled'] is True, f"Compare should be disabled in focused mode: {result}"
+
+    def test_category_chart_compare_years_builds_year_split_datasets(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        compare_box = page.locator("#cat-compare-checkbox")
+        expect(compare_box).to_be_visible()
+        compare_box.check()
+        page.wait_for_timeout(150)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const datasets = chart.data?.datasets || [];
+            const years = [...new Set(datasets.map(ds => ds.ttYear).filter(Boolean))];
+            const labels = chart.data?.labels || [];
+
+            return {
+                labels,
+                years,
+                yearSubLabels: !!chart.options?.yearSubLabels,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect compare-years chart mode: {result['error']}")
+
+        assert len(result['years']) >= 2, f"Expected at least two compare years, got {result}"
+        assert result['yearSubLabels'] is True, f"Expected yearSubLabels enabled in compare mode, got {result}"
+        assert len(result['labels']) == 12, f"Expected month compare labels (12), got {result['labels']}"
+
+    def test_category_chart_month_grouping_pages_when_over_24_months(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        months_btn = page.locator("#cat-group-pills .proto-pill", has_text="Months")
+        expect(months_btn).to_be_visible()
+        months_btn.click()
+        page.wait_for_timeout(150)
+
+        pager_range = page.locator("#cat-chart-pager .pager-range")
+        expect(pager_range).to_be_visible()
+        expect(pager_range).to_contain_text("showing 24 of 30 months")
+
+        prev_btn = page.locator("#cat-chart-pager button").first
+        expect(prev_btn).to_be_enabled()
+        prev_btn.click()
+        page.wait_for_timeout(150)
+
+        expect(pager_range).to_contain_text("showing 6 of 30 months")
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+            return { labelCount: (chart.data?.labels || []).length };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not inspect category pager state: {result['error']}")
+
+        assert result['labelCount'] == 6, f"Expected 6 labels on older page, got {result}"
+
+    def test_category_tooltip_hides_zero_rows(self, page: Page, chart_controls_report_path):
+        _goto_chart_report_fresh(page, chart_controls_report_path)
+
+        result = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const datasets = chart.data?.datasets || [];
+            const labels = chart.data?.labels || [];
+            let targetDataIndex = -1;
+            let hoveredDatasetIndex = -1;
+
+            for (let idx = 0; idx < labels.length; idx += 1) {
+                const vals = datasets.map(ds => Number(ds?.data?.[idx]) || 0);
+                const positiveCount = vals.filter(v => v > 0).length;
+                const zeroCount = vals.filter(v => Math.abs(v) < 1e-9).length;
+                if (positiveCount >= 1 && zeroCount >= 1) {
+                    targetDataIndex = idx;
+                    hoveredDatasetIndex = vals.findIndex(v => v > 0);
+                    break;
+                }
+            }
+
+            if (targetDataIndex < 0 || hoveredDatasetIndex < 0) {
+                return { error: 'No mixed zero/non-zero bucket found for tooltip test' };
+            }
+
+            const external = chart.options?.plugins?.tooltip?.external;
+            if (typeof external !== 'function') {
+                return { error: 'External tooltip handler unavailable' };
+            }
+
+            external({
+                chart,
+                tooltip: {
+                    opacity: 1,
+                    dataPoints: [{ dataIndex: targetDataIndex, datasetIndex: hoveredDatasetIndex }],
+                    caretX: 40,
+                    caretY: 40,
+                },
+            });
+
+            const tip = document.getElementById('ext-tooltip');
+            if (!tip) return { error: 'Tooltip element missing' };
+
+            const rowNames = Array.from(tip.querySelectorAll('.tt-row .tt-name'))
+                .map(el => (el.textContent || '').trim())
+                .filter(Boolean);
+            const zeroNames = datasets
+                .filter(ds => Math.abs(Number(ds?.data?.[targetDataIndex]) || 0) < 1e-9)
+                .map(ds => ds.label)
+                .filter(Boolean);
+
+            const includesZeroName = zeroNames.some(name => rowNames.includes(name));
+            return {
+                rowNames,
+                zeroNames,
+                includesZeroName,
+            };
+        }""")
+
+        if 'error' in result:
+            pytest.fail(f"Could not validate tooltip zero-row behavior: {result['error']}")
+
+        assert result['zeroNames'], f"Expected at least one zero-valued dataset in sampled bucket: {result}"
+        assert result['includesZeroName'] is False, (
+            f"Tooltip should hide zero rows but included one: {result}"
+        )
+
+    def test_category_compare_years_caps_window_and_pages(self, page: Page, multiyear_report_path):
+        _goto_chart_report_fresh(page, multiyear_report_path)
+
+        compare_box = page.locator("#cat-compare-checkbox")
+        expect(compare_box).to_be_visible()
+        compare_box.check()
+        page.wait_for_timeout(150)
+
+        pager_range = page.locator("#cat-chart-pager .pager-range")
+        expect(pager_range).to_be_visible()
+        expect(pager_range).to_contain_text("showing 3 of 4 years")
+
+        result_latest = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const years = [...new Set((chart.data?.datasets || []).map(ds => ds.ttYear).filter(Boolean))];
+            return { years };
+        }""")
+
+        if 'error' in result_latest:
+            pytest.fail(f"Could not inspect latest compare-year window: {result_latest['error']}")
+
+        assert len(result_latest['years']) == 3, (
+            f"Expected compare mode to cap at 3 years, got {result_latest}"
+        )
+
+        prev_btn = page.locator("#cat-chart-pager button").first
+        expect(prev_btn).to_be_enabled()
+        prev_btn.click()
+        page.wait_for_timeout(150)
+
+        result_older = page.evaluate("""() => {
+            const panel = document.getElementById('chart-panel-category');
+            if (!panel) return { error: 'Category chart panel not found' };
+            const canvas = panel.querySelector('canvas');
+            if (!canvas) return { error: 'No category chart canvas found' };
+            const chart = Chart.getChart(canvas);
+            if (!chart) return { error: 'No category chart instance found' };
+
+            const years = [...new Set((chart.data?.datasets || []).map(ds => ds.ttYear).filter(Boolean))];
+            return { years };
+        }""")
+
+        if 'error' in result_older:
+            pytest.fail(f"Could not inspect older compare-year window: {result_older['error']}")
+
+        assert len(result_older['years']) == 3, (
+            f"Expected paged compare mode to keep a 3-year window, got {result_older}"
+        )
+        assert result_latest['years'] != result_older['years'], (
+            f"Expected year window to change when paging, but it did not. latest={result_latest}, older={result_older}"
         )
 
 
@@ -1510,16 +2010,16 @@ class TestGroupingToggle:
         expect(online_row).to_contain_text("1 merchant")
 
     def test_subcategory_filter_adds_correct_type(self, page: Page, report_path):
-        """Clicking subcategory name adds subcategory filter, not merchant filter."""
+        """Clicking the filter button on a subcategory row adds a subcategory filter, not a merchant filter."""
         page.goto(f"file://{report_path}")
 
         # Switch to subcategory mode
         page.locator(".view-toggle button", has_text="Subcategory").click()
 
-        # Click on the subcategory name (first cell) in Online row
+        # Click the filter button on the Online row
         shopping_section = page.get_by_test_id("section-cat-Shopping")
-        online_name = shopping_section.locator(".merchant-name", has_text="Online")
-        online_name.click()
+        online_row = shopping_section.locator("tr.merchant-row", has_text="Online")
+        online_row.locator(".merchant-filter-trigger").click()
 
         # Should have a subcategory filter chip (class contains 'subcategory')
         filter_chip = page.locator(".filter-chip.subcategory")
@@ -1741,23 +2241,27 @@ class TestCreditsDisplay:
     """Tests for credits/refunds display in summary cards."""
 
     def test_credits_shown_in_cash_flow(self, page: Page, report_with_credits):
-        """Credits are displayed in the Cash Flow summary card."""
+        """Credits are displayed in the Income summary card details."""
         page.goto(f"file://{report_with_credits}")
 
-        # Cash flow card should show Credits line
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        expect(cashflow_card.locator(".breakdown-item", has_text="Credits")).to_be_visible()
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator(".kpi-detail", has_text="All Time")).to_be_visible()
 
     def test_credits_positive_display(self, page: Page, report_with_credits):
-        """Credits are shown as positive amounts with + prefix."""
+        """All-time credits remain positive in Income details."""
         page.goto(f"file://{report_with_credits}")
 
-        # Find the credits line in cash flow
-        cashflow_card = page.get_by_test_id("cashflow-card")
-        credits_item = cashflow_card.locator(".breakdown-item", has_text="Credits")
-        credits_value = credits_item.locator(".value")
-        # Should show positive amount (the $40 in credits)
-        expect(credits_value).to_contain_text("+")
+        income_card = page.locator(".kpi-card.income")
+        credits_item = income_card.locator(".kpi-detail", has_text="All Time")
+        credits_value = credits_item.locator(".kpi-detail-secondary")
+        expect(credits_value).to_contain_text("$40")
+
+    def test_income_headline_includes_credits(self, page: Page, report_with_credits):
+        """Income headline includes credits so the primary value is total inflow."""
+        page.goto(f"file://{report_with_credits}")
+
+        income_card = page.locator(".kpi-card.income")
+        expect(income_card.locator(".kpi-value-primary")).to_contain_text("$40")
 
 
 # =============================================================================
@@ -2125,3 +2629,796 @@ class TestTransformDirective:
 
         badge = txn_row.locator(".extra-fields-trigger")
         expect(badge).not_to_be_visible()
+
+
+# =============================================================================
+# Category 4: Multi-granularity Date Filter (Month / Quarter / Year / Custom)
+# and multi-year transaction row display.
+# =============================================================================
+
+@pytest.fixture(scope="module")
+def multiyear_report_path(tmp_path_factory):
+    """Report spanning 4 calendar years with a views_file that excludes several
+    merchants, for date-filter and multi-year-row tests.
+
+    Key fixture properties:
+    - views_file defines a Food-only view, so Shopping/Subscriptions merchants
+      match zero views and are absent from `sections` (Part 1 bug surface).
+    - April 2026 appears ONLY via Amazon (Shopping, excluded) -> its month would
+      vanish if availableMonths sourced from `sections`.
+    - Netflix has all 12 months of 2025 (enables a Year chip) plus 2026 months
+      (multi-year -> rows show the year).
+    - Target has only 2026 transactions (single-year -> rows show no year).
+    - Amazon adds 2023 and 2024 transactions so 4 years exist (year tabs cap 3).
+    """
+    tmp_dir = tmp_path_factory.mktemp("multiyear_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = []
+    for mm in range(1, 13):  # Netflix: all 12 months of 2025
+        rows.append(f"{mm:02d}/05/2025,NETFLIX,15.99")
+    rows += [
+        "01/06/2026,NETFLIX,15.99",
+        "02/06/2026,NETFLIX,15.99",
+        "03/12/2025,WHOLE FOODS MARKET,100.00",   # Food (in-view)
+        "06/15/2026,WHOLE FOODS MARKET,120.00",   # Food (in-view), 2026
+        "01/15/2023,AMAZON MARKETPLACE,40.00",    # 2023 (year-tab cap)
+        "06/15/2024,AMAZON MARKETPLACE,50.00",    # 2024 (year-tab cap)
+        "04/10/2026,AMAZON MARKETPLACE,45.00",    # April 2026: unique + excluded
+        "05/20/2026,TARGET,60.00",                # Target single-year 2026
+        "07/22/2026,TARGET,70.00",
+    ]
+    csv_content = "Date,Description,Amount\n" + "\n".join(rows) + "\n"
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n\n'
+        "data_sources:\n"
+        "  - name: Test\n"
+        "    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n\n'
+        "merchants_file: config/merchants.rules\n"
+        "views_file: config/views.rules\n"
+    )
+    (config_dir / "merchants.rules").write_text(
+        "[Netflix]\nmatch: contains(\"NETFLIX\")\ncategory: Subscriptions\nsubcategory: Streaming\n\n"
+        "[Whole Foods]\nmatch: normalized(\"WHOLE FOODS\")\ncategory: Food\nsubcategory: Grocery\n\n"
+        "[Amazon]\nmatch: normalized(\"AMAZON\")\ncategory: Shopping\nsubcategory: Online\n\n"
+        "[Target]\nmatch: normalized(\"TARGET\")\ncategory: Shopping\nsubcategory: Retail\n"
+    )
+    (config_dir / "views.rules").write_text(
+        "[Food & Dining]\ndescription: Food spending\nfilter: category == \"Food\"\n"
+    )
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True, text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+    return str(report_file)
+
+
+def _open_date_popover(page):
+    """Open the date filter popover and return once it is visible."""
+    page.get_by_test_id("date-filter-trigger").click()
+    expect(page.get_by_test_id("date-popover")).to_be_visible()
+
+
+def _chip_texts(page):
+    return page.locator("[data-testid='filter-chip'] .chip-text").all_text_contents()
+
+
+class TestDateFilter:
+    """Tests for the multi-granularity date-filter popover."""
+
+    def test_excluded_merchant_month_appears_in_grid(self, page: Page, multiyear_report_path):
+        """Part 1 regression: April 2026 exists only via Amazon (excluded from
+        every view). It must still appear in the month grid, not vanish."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        # Switch to the 2026 tab regardless of the machine's current year.
+        page.get_by_test_id("date-year-tab-2026").click()
+        expect(page.get_by_test_id("date-month-cell-2026-04")).to_be_visible()
+
+    def test_this_last_preset_rows_render(self, page: Page, multiyear_report_path):
+        """This/Last rows render all six presets."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        for tid in ["this-month", "this-quarter", "this-year",
+                    "last-month", "last-quarter", "last-year"]:
+            expect(page.get_by_test_id(f"date-preset-{tid}")).to_be_visible()
+
+    def test_year_tabs_capped_to_three_most_recent(self, page: Page, multiyear_report_path):
+        """Year tabs show only the 3 most recent data years (2024/2025/2026),
+        not the oldest (2023)."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        expect(page.get_by_test_id("date-year-tab-2026")).to_be_visible()
+        expect(page.get_by_test_id("date-year-tab-2025")).to_be_visible()
+        expect(page.get_by_test_id("date-year-tab-2024")).to_be_visible()
+        expect(page.get_by_test_id("date-year-tab-2023")).to_have_count(0)
+
+    def test_selecting_quarter_months_aggregates_to_quarter_chip(self, page: Page, multiyear_report_path):
+        """Selecting Jan+Feb+Mar 2025 in the grid aggregates to one Q1 2025 chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in ("01", "02", "03"):
+            page.get_by_test_id(f"date-month-cell-2025-{mm}").click()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Q1 2025"]
+
+    def test_incremental_apply_collapses_to_quarter(self, page: Page, multiyear_report_path):
+        """Apply Jan+Feb as two month chips; reopen, add Mar; re-apply collapses
+        the three into a single Q1 2025 chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        page.get_by_test_id("date-month-cell-2025-01").click()
+        page.get_by_test_id("date-month-cell-2025-02").click()
+        page.get_by_test_id("date-apply").click()
+        assert sorted(_chip_texts(page)) == ["Feb 2025", "Jan 2025"]
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        page.get_by_test_id("date-month-cell-2025-03").click()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Q1 2025"]
+
+    def test_selecting_full_year_aggregates_to_year_chip(self, page: Page, multiyear_report_path):
+        """Selecting all 12 months of 2025 collapses to a single 2025 chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in range(1, 13):
+            page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["2025"]
+
+    def test_year_and_quarter_from_different_periods_union(self, page: Page, multiyear_report_path):
+        """A 2025 Year chip plus a custom 2026 range union (both present, and the
+        filtered total is non-zero rather than an empty AND)."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in range(1, 13):
+            page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
+        # Custom range in 2026, independent of the 2025 months.
+        page.get_by_test_id("date-start-text").fill("1/1/2026")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("6/30/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+
+        chips = _chip_texts(page)
+        assert "2025" in chips
+        assert any("2026" in c and "–" in c for c in chips), chips
+        # Union is non-empty (2025 Netflix + 2026 transactions both counted).
+        expect(page.get_by_test_id("filtered-amount").locator(".kpi-value-primary")).not_to_contain_text("$0")
+
+    def test_kpi_trend_label_updates_with_filter_anchor_month(self, page: Page, multiyear_report_path):
+        """KPI title anchors to the last visible month while trend text keeps only
+        the prior-window comparison count."""
+        page.goto(f"file://{multiyear_report_path}")
+
+        spending_trend = page.locator(".kpi-card.spending .kpi-trend")
+        spending_title = page.locator(".kpi-card.spending h4")
+        expect(spending_trend).to_be_visible()
+        expect(spending_title).to_contain_text("Jul, '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 12 months")
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in range(1, 13):
+            page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
+        page.get_by_test_id("date-apply").click()
+
+        expect(spending_title).to_contain_text("Dec, '25 Spending")
+        expect(spending_trend).to_contain_text("vs prior 11 months")
+        expect(spending_trend).not_to_contain_text("prior 6")
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-clear-all").click()
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-start-text").fill("1/1/2026")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("6/30/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+
+        expect(spending_title).to_contain_text("Jun, '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 4 months")
+
+    def test_drill_calendar_commits_day_and_filters(self, page: Page, multiyear_report_path):
+        """The Start drill calendar commits a day-precision date into its input,
+        and a start+end range produces a filtering daterange chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        # Open Start calendar (defaults to today's month) and pick the 15th.
+        page.get_by_test_id("date-start-cal-btn").click()
+        expect(page.get_by_test_id("date-start-cal")).to_be_visible()
+        page.get_by_test_id("date-start-day-15").click()
+        # Calendar closes and the text input reflects the committed date
+        # (formatted "Mon D, YYYY", so it contains ", ").
+        expect(page.get_by_test_id("date-start-cal")).to_have_count(0)
+        assert ", " in page.get_by_test_id("date-start-text").input_value()
+
+    def test_cross_year_custom_range_shows_year_on_both_ends(self, page: Page, multiyear_report_path):
+        """A custom range spanning two calendar years shows the year on both the
+        start and the end of the chip label."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-start-text").fill("12/15/2025")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("2/10/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+        chips = _chip_texts(page)
+        assert chips == ["Dec 15, 2025 – Feb 10, 2026"], chips
+
+    def test_quarter_chip_label_restores_from_hash(self, page: Page, multiyear_report_path):
+        """A quarter range chip restored from the URL hash re-derives its Q label
+        (the case most likely to regress if getDisplayText isn't updated)."""
+        page.goto(f"file://{multiyear_report_path}#+d:2025-01..2025-03")
+        assert _chip_texts(page) == ["Q1 2025"]
+
+    def test_custom_range_rehydrates_into_popover(self, page: Page, multiyear_report_path):
+        """An applied daterange chip loads back into the Start/End widget when
+        the popover reopens."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        assert _chip_texts(page) == ["Jan 1 – Jan 31, 2026"]
+        _open_date_popover(page)
+        assert page.get_by_test_id("date-start-text").input_value() == "Jan 1, 2026"
+        assert page.get_by_test_id("date-end-text").input_value() == "Jan 31, 2026"
+
+    def test_unedited_apply_keeps_custom_range(self, page: Page, multiyear_report_path):
+        """Regression: open the popover and Apply with no edits — the daterange
+        chip and the hash survive."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        _open_date_popover(page)
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Jan 1 – Jan 31, 2026"]
+        assert page.evaluate("location.hash") == "#+dr:2026-01-01..2026-01-31"
+
+    def test_months_and_custom_range_both_survive_unedited_apply(self, page: Page, multiyear_report_path):
+        """Month chips and a custom range coexist through a no-op reopen+Apply."""
+        page.goto(f"file://{multiyear_report_path}#+d:2025-01&+dr:2026-01-01..2026-01-31")
+        assert sorted(_chip_texts(page)) == ["Jan 1 – Jan 31, 2026", "Jan 2025"]
+        _open_date_popover(page)
+        page.get_by_test_id("date-apply").click()
+        assert sorted(_chip_texts(page)) == ["Jan 1 – Jan 31, 2026", "Jan 2025"]
+
+    def test_edited_range_replaces_old_chip(self, page: Page, multiyear_report_path):
+        """Editing the rehydrated range yields exactly one daterange chip."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        _open_date_popover(page)
+        page.get_by_test_id("date-end-text").fill("2/15/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Jan 1 – Feb 15, 2026"]
+
+    def test_removed_range_does_not_resurrect(self, page: Page, multiyear_report_path):
+        """Removing the chip clears the widget, so reopening + Apply doesn't
+        re-add the range."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        page.get_by_test_id("filter-chip-remove").click()
+        _open_date_popover(page)
+        assert page.get_by_test_id("date-start-text").input_value() == ""
+        assert page.get_by_test_id("date-end-text").input_value() == ""
+        page.get_by_test_id("date-apply").click()
+        expect(page.locator("[data-testid='filter-chip']")).to_have_count(0)
+
+    def test_reversed_range_is_normalized_on_apply(self, page: Page, multiyear_report_path):
+        """End before Start still produces an ordered chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-start-text").fill("2/15/2026")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("1/1/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Jan 1 – Feb 15, 2026"]
+
+    def test_malformed_range_hash_opens_empty_without_error(self, page: Page, multiyear_report_path):
+        """A hand-edited hash must not wedge the widget or throw."""
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"file://{multiyear_report_path}#+dr:garbage")
+        _open_date_popover(page)
+        assert page.get_by_test_id("date-start-text").input_value() == ""
+        assert page.get_by_test_id("date-end-text").input_value() == ""
+        assert errors == [], errors
+
+    def test_clear_all_filters_wipes_and_closes(self, page: Page, multiyear_report_path):
+        """The footer 'Clear all filters' removes every chip and closes the popover."""
+        page.goto(f"file://{multiyear_report_path}#+d:2025-01..2025-12")
+        assert _chip_texts(page) == ["2025"]
+        _open_date_popover(page)
+        page.get_by_test_id("date-clear-all").click()
+        expect(page.get_by_test_id("date-popover")).to_have_count(0)
+        expect(page.locator("[data-testid='filter-chip']")).to_have_count(0)
+
+
+class TestMultiYearTransactionRows:
+    """Part 3: transaction rows always show the year, regardless of whether the merchant's list spans years."""
+
+    def test_multiyear_merchant_rows_show_year(self, page: Page, multiyear_report_path):
+        """Netflix spans 2025 and 2026, so its transaction rows include ', YYYY'."""
+        page.goto(f"file://{multiyear_report_path}")
+        page.get_by_test_id("merchant-row-Netflix").click()
+        page.wait_for_timeout(150)
+        dates = page.locator(".txn-row:has-text('NETFLIX') .txn-date").all_text_contents()
+        assert dates, "expected Netflix transaction rows"
+        assert all(", 20" in d for d in dates), dates
+
+    def test_single_year_merchant_rows_also_show_year(self, page: Page, multiyear_report_path):
+        """Target has only 2026 transactions, but rows still include ', YYYY' (year is always shown)."""
+        page.goto(f"file://{multiyear_report_path}")
+        page.get_by_test_id("merchant-row-Target").click()
+        page.wait_for_timeout(150)
+        dates = page.locator(".txn-row:has-text('TARGET') .txn-date").all_text_contents()
+        assert dates, "expected Target transaction rows"
+        assert all(", 20" in d for d in dates), dates
+
+
+@pytest.fixture(scope="module")
+def current_quarter_report_path(tmp_path_factory):
+    """Report whose only data is three transactions in the three months of the
+    current calendar quarter, so selecting them lights up the This Quarter pill
+    (coverage-based highlight) deterministically regardless of run date."""
+    import datetime
+    today = datetime.date.today()
+    q_start_month = ((today.month - 1) // 3) * 3 + 1
+    months = [q_start_month, q_start_month + 1, q_start_month + 2]
+
+    tmp_dir = tmp_path_factory.mktemp("current_quarter_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = [f"{mm:02d}/10/{today.year},NETFLIX,15.99" for mm in months]
+    (data_dir / "transactions.csv").write_text("Date,Description,Amount\n" + "\n".join(rows) + "\n")
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n\n'
+        "data_sources:\n  - name: Test\n    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n\n'
+        "merchants_file: config/merchants.rules\n"
+    )
+    (config_dir / "merchants.rules").write_text(
+        "[Netflix]\nmatch: contains(\"NETFLIX\")\ncategory: Subscriptions\nsubcategory: Streaming\n"
+    )
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True, text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+    return str(report_file), today.year, months
+
+
+@pytest.fixture(scope="module")
+def kpi_trailing_transfer_report_path(tmp_path_factory):
+    """Report where the final month has only transfer activity.
+
+    Trend labels should anchor to the last month with spending/income activity,
+    not the trailing transfer-only month.
+    """
+    tmp_dir = tmp_path_factory.mktemp("kpi_trailing_transfer_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    csv_content = """Date,Description,Amount
+01/10/2026,WHOLE FOODS MARKET,100.00
+02/10/2026,WHOLE FOODS MARKET,120.00
+03/10/2026,WHOLE FOODS MARKET,110.00
+04/10/2026,ACCOUNT TRANSFER,350.00
+"""
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n\n'
+        "data_sources:\n"
+        "  - name: Test\n"
+        "    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n\n'
+        "merchants_file: config/merchants.rules\n"
+    )
+
+    (config_dir / "merchants.rules").write_text(
+        "[Whole Foods]\n"
+        "match: normalized(\"WHOLE FOODS\")\n"
+        "category: Food\n"
+        "subcategory: Grocery\n\n"
+        "[Transfer]\n"
+        "match: contains(\"ACCOUNT TRANSFER\")\n"
+        "category: Finance\n"
+        "subcategory: Transfer\n"
+        "tags: transfer\n"
+    )
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+    return str(report_file)
+
+
+class TestDateFilterCoverageHighlight:
+    """Coverage-based preset highlighting (no stored quarter/year flag)."""
+
+    def test_selecting_quarter_months_highlights_this_quarter(self, page: Page, current_quarter_report_path):
+        report_path, year, months = current_quarter_report_path
+        page.goto(f"file://{report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id(f"date-year-tab-{year}").click()
+        # Before selecting, This Quarter is not active.
+        this_q = page.get_by_test_id("date-preset-this-quarter")
+        expect(this_q).not_to_have_class(re.compile(r"\bactive\b"))
+        for mm in months:
+            page.get_by_test_id(f"date-month-cell-{year}-{mm:02d}").click()
+        # All three of the quarter's months selected -> pill lights up.
+        expect(this_q).to_have_class(re.compile(r"\bactive\b"))
+
+
+class TestKpiTrendAnchoring:
+    """KPI trend labeling should ignore trailing months with only transfer-like activity."""
+
+    def test_spending_trend_ignores_trailing_transfer_only_month(self, page: Page, kpi_trailing_transfer_report_path):
+        page.goto(f"file://{kpi_trailing_transfer_report_path}")
+
+        spending_title = page.locator(".kpi-card.spending h4")
+        spending_trend = page.locator(".kpi-card.spending .kpi-trend")
+        expect(spending_trend).to_be_visible()
+        expect(spending_title).to_contain_text("Mar, '26 Spending")
+        expect(spending_trend).to_contain_text("vs prior 2 months")
+
+
+@pytest.fixture(scope="module")
+def peek_mode_report_path(tmp_path_factory):
+    """Report whose category chart renders a full top-10 chip row plus "Other".
+
+    - 6 months (2025-01 .. 2025-06) across 12 categories.
+    - Per-transaction amounts descend strictly with the merchant index, so the
+      top-10 split is deterministic: Cat01..Cat10 get chips, and Cat11/Cat12 fall
+      into the "Other" bucket.
+    """
+    tmp_dir = tmp_path_factory.mktemp("peek_mode_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = []
+    for month in range(1, 7):
+        for idx in range(1, 13):
+            rows.append(f"{month:02d}/05/2025,MERCH{idx:02d} STORE,{200 - idx * 10:.2f}")
+    (data_dir / "transactions.csv").write_text(
+        "Date,Description,Amount\n" + "\n".join(rows) + "\n"
+    )
+
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n'
+        "\n"
+        "data_sources:\n"
+        "  - name: Test\n"
+        "    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n'
+        "\n"
+        "merchants_file: config/merchants.rules\n"
+    )
+
+    rules = [
+        f'[Merchant{idx:02d}]\nmatch: contains("MERCH{idx:02d}")\n'
+        f"category: Cat{idx:02d}\nsubcategory: Sub{idx:02d}\n"
+        for idx in range(1, 13)
+    ]
+    (config_dir / "merchants.rules").write_text("\n".join(rules))
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+
+    return str(report_file)
+
+
+_PEEK_STATE_JS = """() => {
+    const badge = document.getElementById('cat-peek-badge');
+    const clearBtn = document.getElementById('cat-clear-filters-btn');
+    const chipState = el =>
+        el.classList.contains('active') ? 'selected'
+        : el.classList.contains('not-selected') ? 'not-selected'
+        : 'regular';
+    const canvas = document.querySelector('#chart-panel-category canvas');
+    const chart = canvas && Chart.getChart(canvas);
+    return {
+        badgeVisible: !!badge && !badge.hidden,
+        clearBtnVisible: !!clearBtn && !clearBtn.hidden,
+        chips: Array.from(document.querySelectorAll('#cat-legend-chips .legend-chip')).map(el => ({
+            label: el.textContent.trim(),
+            state: chipState(el),
+            disabled: el.classList.contains('disabled'),
+        })),
+        filterChips: Array.from(document.querySelectorAll('.filter-chips .filter-chip'))
+            .map(el => el.textContent.replace(/\\s+/g, ' ').trim()),
+        datasets: chart
+            ? chart.data.datasets.map((ds, i) => ({ label: ds.label, visible: chart.isDatasetVisible(i) }))
+            : [],
+        hash: location.hash,
+    };
+}"""
+
+
+def _goto_peek_report(page: Page, report_path: str, hash_: str = ""):
+    """Load the peek fixture with persisted chart UI state cleared.
+
+    `hash_` seeds hand-typed (hash-restored, untagged) filters, which is the only
+    filter kind that survives a reload - chart-added filters never reach the hash.
+    """
+    page.goto(f"file://{report_path}")
+    page.evaluate("() => localStorage.removeItem('spending-report-ui-state-v1')")
+    page.goto(f"file://{report_path}{hash_}")
+    page.reload()
+    page.wait_for_timeout(400)
+
+
+def _peek_state(page: Page):
+    return page.evaluate(_PEEK_STATE_JS)
+
+
+def _chip(page: Page, label: str):
+    return page.locator("#cat-legend-chips .legend-chip", has_text=label)
+
+
+def _chip_states(state):
+    return {chip["label"]: chip["state"] for chip in state["chips"]}
+
+
+class TestChartPeekMode:
+    """Category-chart drill-down ("peek mode").
+
+    Chip toggles and canvas clicks add filters tagged `source: 'chart'`. Those are
+    session-only: they never reach the URL hash, they surface a "Peek" badge and a
+    Clear Filters button, and any filter the user adds by hand clears them.
+    """
+
+    def test_chip_click_enters_peek_mode(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        before = _peek_state(page)
+        assert before["badgeVisible"] is False
+        assert before["clearBtnVisible"] is False
+        assert [c["label"] for c in before["chips"]] == [f"Cat{i:02d}" for i in range(1, 11)] + ["Other"]
+        assert all(c["state"] == "regular" for c in before["chips"]), before["chips"]
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is True
+        assert after["clearBtnVisible"] is True
+        states = _chip_states(after)
+        assert states["Cat01"] == "selected"
+        assert states["Cat02"] == "not-selected"
+        assert states["Other"] == "not-selected"
+        assert any("Cat01" in chip for chip in after["filterChips"])
+
+        visible = {d["label"] for d in after["datasets"] if d["visible"]}
+        assert visible == {"Cat01"}, f"only the selected category stays visible: {after['datasets']}"
+
+    def test_chip_selection_is_additive_and_subtractive(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(200)
+        _chip(page, "Cat02").click()
+        page.wait_for_timeout(300)
+
+        states = _chip_states(_peek_state(page))
+        assert states["Cat01"] == "selected"
+        assert states["Cat02"] == "selected"
+        assert states["Cat03"] == "not-selected"
+
+        _chip(page, "Cat02").click()
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        states = _chip_states(state)
+        assert states["Cat01"] == "selected"
+        assert states["Cat02"] == "not-selected"
+        assert not any("Cat02" in chip for chip in state["filterChips"])
+
+    def test_selecting_every_chip_resets_to_regular(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        for idx in range(1, 11):
+            _chip(page, f"Cat{idx:02d}").click()
+            page.wait_for_timeout(150)
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        assert all(c["state"] == "regular" for c in state["chips"]), state["chips"]
+        assert state["filterChips"] == [], "all-on collapses back to no category filter"
+        assert state["badgeVisible"] is False
+
+    def test_chart_filters_are_not_saved_to_the_url(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        assert any("Cat01" in chip for chip in state["filterChips"])
+        assert state["hash"] in ("", "#"), f"chart filters must not reach the hash: {state['hash']!r}"
+
+        page.reload()
+        page.wait_for_timeout(500)
+
+        after = _peek_state(page)
+        assert after["filterChips"] == [], "peek filters are session-only and drop on reload"
+        assert after["badgeVisible"] is False
+
+    def test_clear_filters_button_spares_hand_typed_filters(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path, "#+c:Cat05")
+
+        before = _peek_state(page)
+        assert any("Cat05" in chip for chip in before["filterChips"])
+        assert before["badgeVisible"] is False, "a hand-typed filter is not peek mode"
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+        mid = _peek_state(page)
+        assert mid["badgeVisible"] is True
+        assert len(mid["filterChips"]) == 2
+
+        page.click("#cat-clear-filters-btn")
+        page.wait_for_timeout(400)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is False
+        assert any("Cat05" in chip for chip in after["filterChips"]), "hand-typed filter survives"
+        assert not any("Cat01" in chip for chip in after["filterChips"]), "chart filter is removed"
+
+    def test_hand_typed_filter_exits_peek_mode(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+        assert _peek_state(page)["badgeVisible"] is True
+
+        search = page.locator("input[placeholder*='Search merchants']")
+        search.click()
+        search.fill("Merchant07")
+        page.wait_for_timeout(400)
+        page.locator(".autocomplete-item", has_text="Merchant07").first.click()
+        page.wait_for_timeout(500)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is False, "adding a filter by hand ends peek mode"
+        assert not any("Cat01" in chip for chip in after["filterChips"])
+        assert any("Merchant07" in chip for chip in after["filterChips"])
+        assert "Merchant07" in after["hash"], "hand-typed filters stay hash-persisted"
+
+    def test_clicking_the_peek_badge_exits_without_collapsing_the_panel(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        _chip(page, "Cat01").click()
+        page.wait_for_timeout(300)
+        assert _peek_state(page)["badgeVisible"] is True
+
+        page.click("#cat-peek-badge")
+        page.wait_for_timeout(400)
+
+        after = _peek_state(page)
+        assert after["badgeVisible"] is False
+        assert after["filterChips"] == []
+        collapsed = page.evaluate(
+            "() => document.getElementById('chart-panel-category').classList.contains('collapsed')"
+        )
+        assert collapsed is False, "the badge sits inside the title; its click must not fold the panel"
+
+    def test_canvas_click_filters_to_category_and_bucket(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        # getBoundingClientRect is viewport-relative, so the canvas has to be on
+        # screen before its bar coordinates mean anything to page.mouse.
+        page.locator("#chart-panel-category canvas").scroll_into_view_if_needed()
+        page.wait_for_timeout(250)
+
+        point = page.evaluate("""() => {
+            const canvas = document.querySelector('#chart-panel-category canvas');
+            const chart = canvas && Chart.getChart(canvas);
+            if (!chart) return null;
+            const dsIndex = chart.data.datasets.findIndex(ds => ds.label === 'Cat01');
+            if (dsIndex < 0) return null;
+            const bar = chart.getDatasetMeta(dsIndex).data[0];
+            const p = bar.getCenterPoint();
+            const box = canvas.getBoundingClientRect();
+            return { x: box.left + p.x, y: box.top + p.y };
+        }""")
+        assert point, "could not locate a Cat01 bar to click"
+
+        page.mouse.click(point["x"], point["y"])
+        page.wait_for_timeout(500)
+
+        state = _peek_state(page)
+        assert state["badgeVisible"] is True
+        assert any("Cat01" in chip for chip in state["filterChips"])
+        assert len(state["filterChips"]) == 2, (
+            f"a bar click adds its category and its bucket's date: {state['filterChips']}"
+        )
+        assert state["hash"] in ("", "#"), "canvas-added filters are session-only too"
+
+    def test_other_chip_is_inert(self, page: Page, peek_mode_report_path):
+        _goto_peek_report(page, peek_mode_report_path)
+
+        other = _chip(page, "Other")
+        expect(other).to_be_visible()
+        assert "disabled" in (other.get_attribute("class") or "")
+        # Disabled natively, not merely styled that way, so it is skipped by
+        # tab order and announces as disabled rather than as a live control.
+        expect(other).to_be_disabled()
+
+        other.click(force=True)
+        page.wait_for_timeout(300)
+
+        state = _peek_state(page)
+        assert state["filterChips"] == [], "the Other bucket is not a filterable category"
+        assert state["badgeVisible"] is False
+
+    def test_filtering_a_category_inside_other_leaves_every_chip_unselected(
+        self, page: Page, peek_mode_report_path
+    ):
+        """Categories outside the top 10 are deliberately not pinned into the chip
+        row - the legend just shows nothing selected."""
+        _goto_peek_report(page, peek_mode_report_path, "#+c:Cat11")
+
+        state = _peek_state(page)
+        labels = [c["label"] for c in state["chips"]]
+        assert "Cat11" not in labels, "a category in the Other tail gets no chip of its own"
+        assert all(c["state"] == "not-selected" for c in state["chips"]), state["chips"]
+
+    def test_excluded_category_is_dropped_from_the_chart(self, page: Page, peek_mode_report_path):
+        """Only include-mode category filters are exempted from the chart's data;
+        an exclude chip must hide the category from the chart as well as the tables."""
+        _goto_peek_report(page, peek_mode_report_path, "#-c:Cat01")
+
+        state = _peek_state(page)
+        labels = [d["label"] for d in state["datasets"]]
+        assert "Cat01" not in labels, f"excluded category still charted: {labels}"
+        assert all(c["state"] == "regular" for c in state["chips"]), (
+            "an exclude filter is not a chip selection"
+        )
+        assert state["badgeVisible"] is False

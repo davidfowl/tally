@@ -7,6 +7,7 @@ Analyzes transactions using merchant categorization rules.
 import json
 from collections import defaultdict
 from datetime import datetime
+import math
 
 from . import section_engine
 from .colors import C
@@ -130,6 +131,59 @@ def analyze_transactions(transactions):
     all_months = set(by_month.keys())
     num_months = len(all_months) if all_months else 12
 
+    def month_span(months):
+        """Calendar months from a merchant's first charge to its last, inclusive.
+
+        months_active counts how many months a merchant appears in, which says
+        nothing about how far apart they are: a merchant billed every January
+        for three years has three active months spread over a twenty-five month
+        span. Comparing the two is what separates that from three consecutive
+        months.
+        """
+        if not months:
+            return 0
+        keys = sorted(months)
+        start_year, start_month = (int(part) for part in keys[0].split('-')[:2])
+        end_year, end_month = (int(part) for part in keys[-1].split('-')[:2])
+        return (end_year - start_year) * 12 + (end_month - start_month) + 1
+
+    def infer_annual_amount(txns):
+        """Infer annual recurrence when payments recur ~12 months apart."""
+        month_amounts = defaultdict(list)
+        for txn in txns or []:
+            month_key = txn.get('month')
+            amount = float(txn.get('amount', 0) or 0)
+            if not month_key or amount <= 0:
+                continue
+            try:
+                year_str, month_str = month_key.split('-', 1)
+                month_index = int(year_str) * 12 + int(month_str)
+            except (ValueError, TypeError):
+                continue
+            month_amounts[month_index].append(amount)
+
+        if len(month_amounts) < 2:
+            return None
+
+        matches = []
+        for month_idx, amounts in month_amounts.items():
+            for offset in range(10, 15):
+                prior = month_amounts.get(month_idx - offset)
+                if not prior:
+                    continue
+                for amount in amounts:
+                    for other_amount in prior:
+                        avg = (amount + other_amount) / 2
+                        if avg <= 0:
+                            continue
+                        if abs(amount - other_amount) / avg <= 0.2:
+                            matches.extend([amount, other_amount])
+
+        if len(matches) >= 2:
+            return sum(matches) / len(matches)
+
+        return None
+
     for merchant, data in by_merchant.items():
         data['months_active'] = len(data['months'])
         data['avg_when_active'] = data['total'] / data['months_active'] if data['months_active'] > 0 else 0
@@ -146,6 +200,36 @@ def analyze_transactions(transactions):
         else:
             data['cv'] = 0
             data['is_consistent'] = True
+
+        tags_lower = {str(tag).lower() for tag in data.get('tags', set())}
+        recurrence = None
+        recurring_monthly_cost = 0.0
+
+        if 'fixed' in tags_lower:
+            recurrence = 'monthly'
+            recurring_monthly_cost = data['avg_when_active']
+        elif 'variable' in tags_lower:
+            recurrence = None
+        # Two coverage tests, because either alone misreads a merchant.
+        # Against num_months: is it active across enough of the reporting
+        # period to still be a live cost? Against its own span: are its charges
+        # dense enough to be monthly at all? Without the second, a merchant
+        # billed once a year looks monthly whenever the data set is as sparse
+        # as the merchant - three Januaries in a January-only export cleared
+        # the first test and had its annual charge booked as a monthly one.
+        elif (data['months_active'] >= max(3, math.ceil(num_months * 0.5))
+                and data['months_active'] >= math.ceil(month_span(data['months']) * 0.5)
+                and data['cv'] < 0.3):
+            recurrence = 'monthly'
+            recurring_monthly_cost = data['avg_when_active']
+        else:
+            annual_amount = infer_annual_amount(data.get('transactions'))
+            if annual_amount is not None:
+                recurrence = 'annual'
+                recurring_monthly_cost = annual_amount / 12
+
+        data['recurrence'] = recurrence
+        data['recurring_monthly_cost'] = recurring_monthly_cost
 
         data['months'] = sorted(list(data['months']))
 
@@ -363,9 +447,9 @@ def build_merchant_json(merchant_name, data, verbose=0):
     # Add pattern match info if available
     match_info = data.get('match_info')
     if match_info:
-        pattern_tags = match_info.get('tags', [])
-        if isinstance(pattern_tags, set):
-            pattern_tags = sorted(pattern_tags)
+        # Sort unconditionally - tags originate from a set, so a list built from
+        # one carries arbitrary order into the JSON and breaks reproducibility
+        pattern_tags = sorted(match_info.get('tags', []))
         result['pattern'] = {
             'matched': match_info.get('pattern', ''),
             'source': match_info.get('source', 'unknown'),
