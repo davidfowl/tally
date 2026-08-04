@@ -3404,6 +3404,38 @@ class TestRecurrenceClassification:
         assert merchant['recurrence'] is None
         assert merchant['recurring_monthly_cost'] == 0
 
+    def test_annual_merchant_not_monthly_in_a_sparse_dataset(self):
+        """An every-January charge stays annual even with no other data.
+
+        months_active alone cannot tell three consecutive months from three
+        Januaries. With only January exports loaded, num_months is 3 too, so
+        the reporting-period test passes and the charge was booked as monthly
+        - twelve times its real monthly cost.
+        """
+        txns = [
+            self._txn('Annual Insurance', 1200.0, 2024, 1, 15),
+            self._txn('Annual Insurance', 1210.0, 2025, 1, 15),
+            self._txn('Annual Insurance', 1190.0, 2026, 1, 15),
+        ]
+
+        stats = analyze_transactions(txns)
+        merchant = stats['by_merchant']['Annual Insurance']
+
+        assert merchant['months_active'] == 3
+        assert merchant['recurrence'] == 'annual'
+        assert merchant['recurring_monthly_cost'] == pytest.approx(1200.0 / 12, rel=0.05)
+
+    def test_consecutive_months_still_infer_monthly(self):
+        """The span test must not reject a genuinely dense merchant."""
+        txns = [self._txn('Streaming', 15.0, 2025, m, 3) for m in range(1, 7)]
+
+        stats = analyze_transactions(txns)
+        merchant = stats['by_merchant']['Streaming']
+
+        assert merchant['months_active'] == 6
+        assert merchant['recurrence'] == 'monthly'
+        assert merchant['recurring_monthly_cost'] == pytest.approx(15.0, rel=1e-3)
+
     def test_annual_inference_detects_similar_12_month_spacing(self):
         txns = []
 

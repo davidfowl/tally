@@ -3577,6 +3577,9 @@ createApp({
                     state === 'regular' ? 'regular' : '',
                     item.disabled ? 'disabled' : '',
                 ].filter(Boolean).join(' ');
+                // The class alone only dropped the click listener, leaving the
+                // control focusable and announced as enabled.
+                if (item.disabled) b.disabled = true;
                 if (borderHighlighted) b.style.borderColor = item.color;
                 const dot = document.createElement('span');
                 dot.className = 'chip-dot';

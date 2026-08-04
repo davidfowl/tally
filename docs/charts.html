@@ -261,7 +261,9 @@
 
         <h2 id="fixed-variable"><a href="#fixed-variable" class="anchor-link">#</a>Fixed vs Variable Spending</h2>
         <ul>
-            <li>Data used: categories mapped into baseline fixed costs and flexible variable costs, then stacked by month.</li>
+            <li>Data used: spending split per <em>merchant</em>, not per category. A merchant counts as fixed when tally infers a recurring cadence for it; everything else is variable. The two are then stacked by month.</li>
+            <li>How the cadence is inferred: <strong>monthly</strong> when the merchant is active across enough of the reporting period, its charges are dense enough over its own lifespan, and its amounts are consistent; <strong>annual</strong> when its payments recur roughly twelve months apart. A merchant matching neither is variable.</li>
+            <li>Overriding it: tag a rule <code>fixed</code> to force a merchant into fixed spending, or <code>variable</code> to keep it out regardless of what the inference would decide.</li>
             <li>Why it matters: fixed spend defines your minimum operating cost, while variable spend shows where optimization and cuts are possible.</li>
         </ul>
         <div class="chart-card">

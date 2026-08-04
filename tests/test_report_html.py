@@ -3387,8 +3387,11 @@ class TestChartPeekMode:
         other = _chip(page, "Other")
         expect(other).to_be_visible()
         assert "disabled" in (other.get_attribute("class") or "")
+        # Disabled natively, not merely styled that way, so it is skipped by
+        # tab order and announces as disabled rather than as a live control.
+        expect(other).to_be_disabled()
 
-        other.click()
+        other.click(force=True)
         page.wait_for_timeout(300)
 
         state = _peek_state(page)

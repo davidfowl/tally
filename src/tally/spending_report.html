@@ -149,17 +149,22 @@
                 <div class="section-content" :class="{ collapsed: chartsCollapsed }">
                     <div class="chart-container" :class="{ collapsed: chartPanels.category }" id="chart-panel-category">
                         <div class="chart-head">
-                            <h3 class="chart-title-toggle" @click="toggleChartPanel('category')">
-                                <span class="toggle">{{ chartPanels.category ? '▶' : '▼' }}</span>
-                                Spending by Category
-                                <span class="chart-peek-badge" id="cat-peek-badge" role="button" aria-label="Exit peek mode" hidden>
+                            <h3 class="chart-title-toggle">
+                                <button type="button" class="chart-title-btn"
+                                        :aria-expanded="!chartPanels.category"
+                                        aria-controls="chart-panel-category"
+                                        @click="toggleChartPanel('category')">
+                                    <span class="toggle" aria-hidden="true">{{ chartPanels.category ? '▶' : '▼' }}</span>
+                                    Spending by Category
+                                </button>
+                                <button type="button" class="chart-peek-badge" id="cat-peek-badge" aria-label="Exit peek mode" hidden>
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
                                          stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
                                         <circle cx="12" cy="12" r="3"/>
                                     </svg>Peek Mode
                                     <span class="chip-remove" aria-hidden="true">&times;</span>
-                                </span>
+                                </button>
                             </h3>
                             <div class="chart-controls">
                                 <div class="proto-pill-row" id="cat-group-pills"></div>
@@ -182,9 +187,14 @@
 
                     <div class="chart-container" :class="{ collapsed: chartPanels.seasonality }" id="chart-panel-seasonality">
                         <div class="chart-head">
-                            <h3 class="chart-title-toggle" @click="toggleChartPanel('seasonality')">
-                                <span class="toggle">{{ chartPanels.seasonality ? '▶' : '▼' }}</span>
-                                Spending Seasonality
+                            <h3 class="chart-title-toggle">
+                                <button type="button" class="chart-title-btn"
+                                        :aria-expanded="!chartPanels.seasonality"
+                                        aria-controls="chart-panel-seasonality"
+                                        @click="toggleChartPanel('seasonality')">
+                                    <span class="toggle" aria-hidden="true">{{ chartPanels.seasonality ? '▶' : '▼' }}</span>
+                                    Spending Seasonality
+                                </button>
                             </h3>
                             <span class="head-chip">Top 10 Expense Categories</span>
                         </div>
@@ -195,9 +205,14 @@
 
                     <div class="chart-container" :class="{ collapsed: chartPanels.cash }" id="chart-panel-cash">
                         <div class="chart-head">
-                            <h3 class="chart-title-toggle" @click="toggleChartPanel('cash')">
-                                <span class="toggle">{{ chartPanels.cash ? '▶' : '▼' }}</span>
-                                Cash Flow
+                            <h3 class="chart-title-toggle">
+                                <button type="button" class="chart-title-btn"
+                                        :aria-expanded="!chartPanels.cash"
+                                        aria-controls="chart-panel-cash"
+                                        @click="toggleChartPanel('cash')">
+                                    <span class="toggle" aria-hidden="true">{{ chartPanels.cash ? '▶' : '▼' }}</span>
+                                    Cash Flow
+                                </button>
                             </h3>
                             <div class="chart-controls">
                                 <div class="proto-pill-row" id="cash-group-pills"></div>
@@ -214,9 +229,14 @@
 
                     <div class="chart-container" :class="{ collapsed: chartPanels.volatility }" id="chart-panel-volatility">
                         <div class="chart-head">
-                            <h3 class="chart-title-toggle" @click="toggleChartPanel('volatility')">
-                                <span class="toggle">{{ chartPanels.volatility ? '▶' : '▼' }}</span>
-                                Expense Volatility
+                            <h3 class="chart-title-toggle">
+                                <button type="button" class="chart-title-btn"
+                                        :aria-expanded="!chartPanels.volatility"
+                                        aria-controls="chart-panel-volatility"
+                                        @click="toggleChartPanel('volatility')">
+                                    <span class="toggle" aria-hidden="true">{{ chartPanels.volatility ? '▶' : '▼' }}</span>
+                                    Expense Volatility
+                                </button>
                             </h3>
                             <span class="head-chip">Top 10 · by monthly swing</span>
                         </div>
@@ -229,9 +249,14 @@
 
                     <div class="chart-container" :class="{ collapsed: chartPanels.fixed }" id="chart-panel-fixed">
                         <div class="chart-head">
-                            <h3 class="chart-title-toggle" @click="toggleChartPanel('fixed')">
-                                <span class="toggle">{{ chartPanels.fixed ? '▶' : '▼' }}</span>
-                                Fixed vs Variable Spending
+                            <h3 class="chart-title-toggle">
+                                <button type="button" class="chart-title-btn"
+                                        :aria-expanded="!chartPanels.fixed"
+                                        aria-controls="chart-panel-fixed"
+                                        @click="toggleChartPanel('fixed')">
+                                    <span class="toggle" aria-hidden="true">{{ chartPanels.fixed ? '▶' : '▼' }}</span>
+                                    Fixed vs Variable Spending
+                                </button>
                             </h3>
                             <div class="chart-controls">
                                 <div class="proto-pill-row" id="fixed-group-pills"></div>
@@ -248,9 +273,14 @@
 
                     <div class="chart-container" :class="{ collapsed: chartPanels.audit }" id="chart-panel-audit">
                         <div class="chart-head">
-                            <h3 class="chart-title-toggle" @click="toggleChartPanel('audit')">
-                                <span class="toggle">{{ chartPanels.audit ? '▶' : '▼' }}</span>
-                                Fixed Spending Audit
+                            <h3 class="chart-title-toggle">
+                                <button type="button" class="chart-title-btn"
+                                        :aria-expanded="!chartPanels.audit"
+                                        aria-controls="chart-panel-audit"
+                                        @click="toggleChartPanel('audit')">
+                                    <span class="toggle" aria-hidden="true">{{ chartPanels.audit ? '▶' : '▼' }}</span>
+                                    Fixed Spending Audit
+                                </button>
                             </h3>
                             <span class="head-chip">Top 10 · by annualized</span>
                         </div>

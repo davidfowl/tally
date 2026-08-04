@@ -2154,8 +2154,23 @@ footer {
     gap: 0.35rem;
 }
 .chart-title-toggle {
-    cursor: pointer;
     user-select: none;
+}
+/* The heading stays a heading for navigation; the collapse control inside it is
+   a real button so it is keyboard-reachable and reports its expanded state.
+   These rules strip the button chrome so the title still reads as a title. */
+.chart-title-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
 }
 .chart-title-toggle .toggle {
     color: var(--text-muted);

@@ -131,6 +131,22 @@ def analyze_transactions(transactions):
     all_months = set(by_month.keys())
     num_months = len(all_months) if all_months else 12
 
+    def month_span(months):
+        """Calendar months from a merchant's first charge to its last, inclusive.
+
+        months_active counts how many months a merchant appears in, which says
+        nothing about how far apart they are: a merchant billed every January
+        for three years has three active months spread over a twenty-five month
+        span. Comparing the two is what separates that from three consecutive
+        months.
+        """
+        if not months:
+            return 0
+        keys = sorted(months)
+        start_year, start_month = (int(part) for part in keys[0].split('-')[:2])
+        end_year, end_month = (int(part) for part in keys[-1].split('-')[:2])
+        return (end_year - start_year) * 12 + (end_month - start_month) + 1
+
     def infer_annual_amount(txns):
         """Infer annual recurrence when payments recur ~12 months apart."""
         month_amounts = defaultdict(list)
@@ -194,7 +210,16 @@ def analyze_transactions(transactions):
             recurring_monthly_cost = data['avg_when_active']
         elif 'variable' in tags_lower:
             recurrence = None
-        elif data['months_active'] >= max(3, math.ceil(num_months * 0.5)) and data['cv'] < 0.3:
+        # Two coverage tests, because either alone misreads a merchant.
+        # Against num_months: is it active across enough of the reporting
+        # period to still be a live cost? Against its own span: are its charges
+        # dense enough to be monthly at all? Without the second, a merchant
+        # billed once a year looks monthly whenever the data set is as sparse
+        # as the merchant - three Januaries in a January-only export cleared
+        # the first test and had its annual charge booked as a monthly one.
+        elif (data['months_active'] >= max(3, math.ceil(num_months * 0.5))
+                and data['months_active'] >= math.ceil(month_span(data['months']) * 0.5)
+                and data['cv'] < 0.3):
             recurrence = 'monthly'
             recurring_monthly_cost = data['avg_when_active']
         else:
