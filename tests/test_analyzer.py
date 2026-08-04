@@ -3220,6 +3220,56 @@ class TestReportFields:
                 'report_fields': ['memo'],
             })
 
+    def test_bare_string_report_fields_is_one_name(self):
+        """`report_fields: memo` means the memo capture, not m/e/m/o."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format({
+            'name': 'wf',
+            'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+            'report_fields': 'memo',
+        })
+        assert source['_format_spec'].report_fields == ['memo']
+
+    def test_empty_report_fields_promotes_nothing(self):
+        """An empty `report_fields:` is None in YAML and must not be iterated."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format({
+            'name': 'wf',
+            'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+            'report_fields': None,
+        })
+        assert source['_format_spec'].report_fields == []
+
+    def test_report_fields_rejects_wrong_type(self):
+        """A mapping or a list of non-strings is named, not a TypeError later."""
+        from tally.config_loader import resolve_source_format
+
+        with pytest.raises(ValueError, match='must be a capture name or a list'):
+            resolve_source_format({
+                'name': 'wf',
+                'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+                'report_fields': {'memo': True},
+            })
+
+        with pytest.raises(ValueError, match='must be a capture name or a list'):
+            resolve_source_format({
+                'name': 'wf',
+                'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+                'report_fields': ['memo', 7],
+            })
+
+    def test_global_bare_string_report_fields(self):
+        """The same coercion applies to the settings.yaml top-level value."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format(
+            {'name': 'wf', 'format': '{date:%m/%d/%Y},{description},{memo},{amount}'},
+            report_fields='memo',
+        )
+        assert source['_format_spec'].report_fields == ['memo']
+
 
 class TestEmptyFieldDirectiveSuppression:
     """field: directives evaluating to empty values should not create blank fields."""

@@ -495,7 +495,7 @@ field.description = regex_replace(field.description, <span class="string">"^APLP
             </tr>
         </table>
         <p>Use <code>report_fields</code> to show a column verbatim; use <code>field:</code> when the value must be derived. A passthrough like <code>field: memo = field.memo</code> is redundant once <code>memo</code> is in <code>report_fields</code> &mdash; and narrower, since it only fires on that rule.</p>
-        <p>When both produce the same key, the <code>field:</code> directive wins. Neither is visible to other rules; they feed the report popup, CSV export columns, and report search only.</p>
+        <p>When both produce the same key, the <code>field:</code> directive wins. A <code>field:</code> directive's <em>output</em> is not an input to other rules &mdash; it feeds the report popup, CSV export columns, and report search only. The captured column that <code>report_fields</code> surfaces is a different thing that happens to share the name: it is available to every rule as <code>field.&lt;name&gt;</code>, whether or not you list it in <code>report_fields</code>, which controls display and nothing else.</p>
 
         <h2 id="extraction"><a href="#extraction" class="anchor-link">#</a>Extraction Functions</h2>
         <table>

@@ -134,6 +134,20 @@ body {
 
 [v-cloak] { display: none; }
 
+/* Text carried to screen readers only - for state a sighted user reads from
+   a purely visual cue, such as the year tab's pending-months dot. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 body.app-initializing #app {
     opacity: 0;
     pointer-events: none;
@@ -442,6 +456,10 @@ h1 {
     cursor: pointer;
     color: var(--text-secondary);
     border: 1px solid transparent;
+    /* A <button> for keyboard access; these keep it looking like the tab it is. */
+    background: transparent;
+    font-family: inherit;
+    line-height: inherit;
 }
 .date-popover .year-tab.active {
     background: var(--bg-card-hover);
@@ -495,6 +513,10 @@ h1 {
     font-size: 0.82rem;
     cursor: pointer;
     transition: all 0.15s;
+    /* A <button> for keyboard access; keeps the grid cell's own look. */
+    font-family: inherit;
+    line-height: inherit;
+    width: 100%;
 }
 .date-popover .month-cell:hover { border-color: var(--accent-blue); }
 .date-popover .month-cell.selected {

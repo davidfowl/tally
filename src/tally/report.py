@@ -4,6 +4,7 @@ HTML Report Generation - Generate spending analysis HTML reports.
 This module handles generation of interactive HTML reports from analyzed transaction data.
 """
 
+import html
 import json
 import sys
 from collections import defaultdict
@@ -332,9 +333,21 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         'investmentTotal': stats.get('investment_total', 0),
     }
 
-    # Assemble final HTML
-    resolved_title = title or 'Tally Spending Analysis'
-    data_script = f'window.spendingData = {json.dumps(spending_data)};'
+    # Assemble final HTML.
+    # Resolve the title once, here, and store it back so the static loading
+    # shell and the mounted Vue app cannot disagree about what the report is
+    # called. YAML hands us whatever the user typed - `title: 2025` arrives as
+    # an int - so coerce before it reaches str.replace().
+    resolved_title = str(title) if title not in (None, '') else 'Tally Spending Analysis'
+    spending_data['title'] = resolved_title
+    # The shell interpolates the title into markup, so it must be escaped;
+    # the Vue path gets the raw value and escapes it at render time.
+    shell_title = html.escape(resolved_title, quote=True)
+    # A '</' in any string value would close the <script> element this gets
+    # embedded in. '\/' is a valid JSON escape for '/', so the payload still
+    # parses to the identical value while being inert to the HTML tokenizer.
+    data_json = json.dumps(spending_data).replace('</', '<\\/')
+    data_script = f'window.spendingData = {data_json};'
 
     if not embedded_html:
         # Write separate files for easier development
@@ -355,7 +368,7 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
 
         # Create HTML with external references
         final_html = html_template.replace(
-            '__REPORT_TITLE__', resolved_title
+            '__REPORT_TITLE__', shell_title
         ).replace(
             '<style>/* CSS_PLACEHOLDER */</style>',
             '<link rel="stylesheet" href="spending_report.css">'
@@ -369,7 +382,7 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     else:
         # Embed everything inline (default)
         final_html = html_template.replace(
-            '__REPORT_TITLE__', resolved_title
+            '__REPORT_TITLE__', shell_title
         ).replace(
             '/* CSS_PLACEHOLDER */', css_content
         ).replace(

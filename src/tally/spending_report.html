@@ -25,7 +25,7 @@
                 <h1 data-testid="report-title">{{ title }}</h1>
                 <p class="subtitle">{{ subtitle }}</p>
                 <div class="header-actions">
-                    <button class="reset-settings-btn" data-testid="reset-settings" @click="resetUiSettings" title="Reset Layout Settings">↺</button>
+                    <button class="reset-settings-btn" data-testid="reset-settings" @click="resetUiSettings" title="Reset Layout Settings" aria-label="Reset layout settings">↺</button>
                     <button class="theme-toggle" data-testid="theme-toggle" @click="toggleTheme" :title="isDarkTheme ? 'Switch to light mode' : 'Switch to dark mode'">
                         {{ isDarkTheme ? '☀️' : '🌙' }}
                     </button>
@@ -73,21 +73,25 @@
                         </div>
                         <div class="popover-divider"></div>
                         <div class="year-tabs" data-testid="date-year-tabs">
-                            <div v-for="year in yearTabs" :key="year" class="year-tab"
-                                 :class="{ active: year === activeYearTab }"
-                                 :data-testid="'date-year-tab-' + year"
-                                 @click="activeYearTab = year">
+                            <button type="button" v-for="year in yearTabs" :key="year" class="year-tab"
+                                    :class="{ active: year === activeYearTab }"
+                                    :data-testid="'date-year-tab-' + year"
+                                    :aria-pressed="year === activeYearTab"
+                                    @click="activeYearTab = year">
                                 <span>{{ year }}</span>
-                                <span v-if="yearTabHasPending(year)" class="dot"></span>
-                            </div>
+                                <span v-if="yearTabHasPending(year)" class="dot" aria-hidden="true"></span>
+                                <span v-if="yearTabHasPending(year)" class="sr-only">has selected months</span>
+                            </button>
                             <button type="button" class="link-btn" data-testid="date-clear-months"
                                     @click="clearPendingMonths">Clear</button>
                         </div>
                         <div class="month-grid month-grid-3col" data-testid="date-month-grid">
-                            <div v-for="m in activeYearMonths" :key="m.key" class="month-cell"
-                                 :class="{ selected: pendingMonths.has(m.key) }"
-                                 :data-testid="'date-month-cell-' + m.key"
-                                 @click="toggleDateItem({ type: 'month', key: m.key })">{{ m.label.split(' ')[0] }}</div>
+                            <button type="button" v-for="m in activeYearMonths" :key="m.key" class="month-cell"
+                                    :class="{ selected: pendingMonths.has(m.key) }"
+                                    :data-testid="'date-month-cell-' + m.key"
+                                    :aria-pressed="pendingMonths.has(m.key)"
+                                    :aria-label="m.label"
+                                    @click="toggleDateItem({ type: 'month', key: m.key })">{{ m.label.split(' ')[0] }}</button>
                         </div>
                         <div class="popover-divider"></div>
                         <div class="daterange-row">
@@ -293,6 +297,7 @@
                     :title="section.title"
                     :items="Object.values(section.filteredMerchants)"
                     :total-amount="section.filteredTotal"
+                    :spending-amount="section.filteredSpending"
                     :category-total="section.filteredTotal"
                     :grand-total="grandTotal"
                     :gross-spending="grossSpending"
@@ -328,6 +333,7 @@
                     :title="categoryName"
                     :items="groupByMode === 'subcategory' ? category.sortedSubcategories : category.sortedMerchants"
                     :total-amount="category.filteredTotal"
+                    :spending-amount="category.filteredSpending"
                     :category-total="category.filteredTotal"
                     :grand-total="grandTotal"
                     :gross-spending="grossSpending"

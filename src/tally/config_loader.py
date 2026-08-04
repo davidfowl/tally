@@ -24,6 +24,28 @@ def load_settings(config_dir, settings_file='settings.yaml'):
         return yaml.safe_load(f)
 
 
+def normalize_report_fields(value, label='report_fields'):
+    """Coerce a report_fields setting into a list of capture names.
+
+    YAML hands back whatever was typed. `report_fields: memo` is a bare string,
+    which iterating treats as the four capture names m, e, m, o; an empty
+    `report_fields:` is None, which is not iterable at all. Accept the bare
+    string as the single name it plainly means, treat an empty value as "none",
+    and reject anything else by name rather than letting it become a TypeError
+    from somewhere further down.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list) or not all(isinstance(f, str) for f in value):
+        raise ValueError(
+            f"{label} must be a capture name or a list of capture names, "
+            f"got {type(value).__name__}: {value!r}"
+        )
+    return list(value)
+
+
 def resolve_source_format(source, warnings=None, report_fields=None):
     """
     Resolve the format specification for a data source.
@@ -100,7 +122,8 @@ def resolve_source_format(source, warnings=None, report_fields=None):
 
             available = set(format_spec.extra_fields or {}) | set(format_spec.custom_captures or {})
             if 'report_fields' in source:
-                unknown = [f for f in source['report_fields'] if f not in available]
+                requested = normalize_report_fields(source['report_fields'])
+                unknown = [f for f in requested if f not in available]
                 if unknown:
                     raise ValueError(
                         f"Source '{source_name}': report_fields references field(s) "
@@ -109,9 +132,12 @@ def resolve_source_format(source, warnings=None, report_fields=None):
                         f"Add the field to your format, e.g. "
                         f"format: \"{{date}},{{description}},{{{unknown[0]}}},{{amount}}\""
                     )
-                format_spec.report_fields = list(source['report_fields'])
+                format_spec.report_fields = requested
             elif report_fields:
-                format_spec.report_fields = [f for f in report_fields if f in available]
+                global_fields = normalize_report_fields(
+                    report_fields, label='report_fields (settings.yaml top level)'
+                )
+                format_spec.report_fields = [f for f in global_fields if f in available]
 
             source['_format_spec'] = format_spec
             source['_parser_type'] = 'generic'

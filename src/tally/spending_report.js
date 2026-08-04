@@ -224,13 +224,29 @@ function dateRangeDisplayText(text) {
     return startPart + ' – ' + MONTH_NAMES_SHORT[parseInt(bp[1], 10) - 1] + ' ' + parseInt(bp[2], 10) + ', ' + bp[0];
 }
 
+// A y/m/d triple that a calendar actually has. The regexes below only prove
+// the shape, so 2/31/2026, 13/1/2026 and 99/99/2026 all reach here looking
+// well-formed; without this they become chips that can never match a
+// transaction.
+function isRealDate(dt) {
+    if (!dt || dt.m < 1 || dt.m > 12 || dt.d < 1) return false;
+    // Day 0 of the next month is the last day of this one.
+    return dt.d <= new Date(dt.y, dt.m, 0).getDate();
+}
+
 function parseTypedDate(str) {
     str = (str || '').trim();
     if (!str) return null;
     const m1 = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-    if (m1) return { y: +m1[1], m: +m1[2], d: +m1[3] };
+    if (m1) {
+        const dt = { y: +m1[1], m: +m1[2], d: +m1[3] };
+        return isRealDate(dt) ? dt : null;
+    }
     const m2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m2) return { y: +m2[3], m: +m2[1], d: +m2[2] };
+    if (m2) {
+        const dt = { y: +m2[3], m: +m2[1], d: +m2[2] };
+        return isRealDate(dt) ? dt : null;
+    }
     const d = new Date(str);
     if (!isNaN(d.getTime())) return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
     return null;
@@ -258,6 +274,9 @@ const MerchantSection = defineComponent({
         // Subcategory mode: rows are subcategories, not merchants
         subcategoryMode: { type: Boolean, default: false },
         categoryTotal: { type: Number, default: 0 },
+        // Spending-only counterpart of totalAmount, for percentages taken
+        // against grossSpending (which excludes income/investment/transfers).
+        spendingAmount: { type: Number, default: 0 },
         grandTotal: { type: Number, default: 0 },
         grossSpending: { type: Number, default: 0 },
         totalUnfilteredSpending: { type: Number, default: 0 },
@@ -309,7 +328,7 @@ const MerchantSection = defineComponent({
                             <span v-if="typeTotals.income > 0 && incomeTotal > 0" class="income-pct">({{ formatPct(typeTotals.income, incomeTotal) }} income)</span>
                             <span v-if="typeTotals.investment > 0 && investmentTotal > 0" class="investment-pct">({{ formatPct(typeTotals.investment, investmentTotal) }} invest)</span>
                         </span>
-                        <span class="section-pct" v-else-if="grossSpending > 0">({{ formatPct(totalAmount, grossSpending) }})</span>
+                        <span class="section-pct" v-else-if="grossSpending > 0">({{ formatPct(spendingAmount, grossSpending) }})</span>
                     </template>
                     <template v-else>
                         <span v-if="showTotal" class="section-ytd credit-amount">+{{ formatCurrency(totalAmount) }}</span>
@@ -862,7 +881,11 @@ createApp({
         const spendingData = computed(() => window.spendingData || { sections: {}, numMonths: 12 });
 
         // Report title and subtitle
-        const title = computed(() => spendingData.value.title || 'Financial Report');
+        // report.py always resolves this, so the fallback only covers a
+        // hand-edited spending_data.js. Keep it identical to the Python
+        // default - two different fallbacks is what made the mounted app
+        // rename a report that the loading shell had already titled.
+        const title = computed(() => spendingData.value.title || 'Tally Spending Analysis');
         const subtitle = computed(() => {
             const data = spendingData.value;
             const sources = data.sources || [];
@@ -896,6 +919,19 @@ createApp({
 
             return ids;
         });
+
+        // Spending-only subtotal, on the same basis grossSpending uses: classify
+        // each transaction and keep the spending bucket, so income, investment
+        // and transfer amounts drop out instead of being raw-summed. Any
+        // percentage taken against grossSpending must use this rather than
+        // filteredTotal, or numerator and denominator disagree about what counts.
+        function spendingSubtotal(txns) {
+            let total = 0;
+            for (const t of txns || []) {
+                total += categorizeAmount(t.amount || 0, t.tags || []).spending;
+            }
+            return total;
+        }
 
         // Core filtering - returns sections with filtered merchants and transactions
         const filteredSections = computed(() => {
@@ -947,10 +983,12 @@ createApp({
             for (const [catName, category] of Object.entries(categoryView)) {
                 const filteredSubcategories = {};
                 let categoryTotal = 0;
+                let categorySpending = 0;
 
                 for (const [subcatName, subcat] of Object.entries(category.subcategories || {})) {
                     const filteredMerchants = {};
                     let subcatTotal = 0;
+                    let subcatSpending = 0;
 
                     for (const [merchantId, merchant] of Object.entries(subcat.merchants || {})) {
                         // Filter transactions
@@ -970,6 +1008,7 @@ createApp({
                                 filteredMonths: months.size
                             };
                             subcatTotal += filteredTotal;
+                            subcatSpending += spendingSubtotal(filteredTxns);
                         }
                     }
 
@@ -977,9 +1016,11 @@ createApp({
                         filteredSubcategories[subcatName] = {
                             ...subcat,
                             filteredMerchants,
-                            filteredTotal: subcatTotal
+                            filteredTotal: subcatTotal,
+                            filteredSpending: subcatSpending
                         };
                         categoryTotal += subcatTotal;
+                        categorySpending += subcatSpending;
                     }
                 }
 
@@ -987,7 +1028,8 @@ createApp({
                     result[catName] = {
                         ...category,
                         filteredSubcategories,
-                        filteredTotal: categoryTotal
+                        filteredTotal: categoryTotal,
+                        filteredSpending: categorySpending
                     };
                 }
             }
@@ -1225,6 +1267,7 @@ createApp({
             for (const [sectionId, section] of Object.entries(sections)) {
                 const filteredMerchants = {};
                 let sectionTotal = 0;
+                let sectionSpending = 0;
 
                 for (const [merchantId, merchant] of Object.entries(section.merchants || {})) {
                     // Filter transactions
@@ -1244,6 +1287,7 @@ createApp({
                             filteredMonths: months.size
                         };
                         sectionTotal += filteredTotal;
+                        sectionSpending += spendingSubtotal(filteredTxns);
                     }
                 }
 
@@ -1251,7 +1295,8 @@ createApp({
                     result[sectionId] = {
                         ...section,
                         filteredMerchants,
-                        filteredTotal: sectionTotal
+                        filteredTotal: sectionTotal,
+                        filteredSpending: sectionSpending
                     };
                 }
             }
@@ -1984,6 +2029,10 @@ createApp({
             pendingMonths.clear();
             let rangeChip = null;
             for (const f of activeFilters.value) {
+                // The popover edits include-mode date filters only. An excluded
+                // chip rehydrated here would come back out of applyDateFilters()
+                // as an inclusion, silently inverting what the user asked for.
+                if (f.mode !== 'include') continue;
                 if (f.type === 'month') {
                     if (f.text.includes('..')) expandMonthRange(f.text).forEach(k => pendingMonths.add(k));
                     else pendingMonths.add(f.text);
@@ -2026,7 +2075,11 @@ createApp({
         // Apply: re-aggregate pending months into the fewest chips, then append
         // the (independent) custom range. Existing date chips are replaced.
         function applyDateFilters() {
-            activeFilters.value = activeFilters.value.filter(f => filterCategory(f.type) !== 'date');
+            // Replace the include-mode date chips this popover owns; excluded
+            // date chips are not editable here, so they survive untouched.
+            activeFilters.value = activeFilters.value.filter(f =>
+                filterCategory(f.type) !== 'date' || f.mode !== 'include'
+            );
             aggregateMonthKeys([...pendingMonths]).forEach(entry =>
                 activeFilters.value.push(aggregateEntryToChip(entry))
             );
@@ -2240,21 +2293,50 @@ createApp({
             document.body.appendChild(txMeasureHost);
         }
 
+        // Rendered width depends only on the string - the measuring spans carry
+        // fixed classes - and the same dates, accounts and amounts repeat across
+        // thousands of transactions and across all three profiles. Uncached,
+        // every transaction forced three synchronous layouts, which stalls large
+        // reports. Cleared per recompute so a resize re-measures.
+        const txMeasureCache = { date: new Map(), account: new Map(), amount: new Map() };
+
+        function measureCachedPx(kind, key, measure) {
+            const cache = txMeasureCache[kind];
+            let px = cache.get(key);
+            if (px === undefined) {
+                px = measure();
+                cache.set(key, px);
+            }
+            return px;
+        }
+
+        function clearTxnMeasureCache() {
+            txMeasureCache.date.clear();
+            txMeasureCache.account.clear();
+            txMeasureCache.amount.clear();
+        }
+
         function measureTxnDatePx(label) {
-            txMeasureDateEl.textContent = label || '';
-            return Math.ceil(txMeasureDateEl.getBoundingClientRect().width);
+            return measureCachedPx('date', label || '', () => {
+                txMeasureDateEl.textContent = label || '';
+                return Math.ceil(txMeasureDateEl.getBoundingClientRect().width);
+            });
         }
 
         function measureTxnAmountPx(label) {
-            txMeasureAmountEl.textContent = label || '';
-            return Math.ceil(txMeasureAmountEl.getBoundingClientRect().width);
+            return measureCachedPx('amount', label || '', () => {
+                txMeasureAmountEl.textContent = label || '';
+                return Math.ceil(txMeasureAmountEl.getBoundingClientRect().width);
+            });
         }
 
         function measureTxnAccountPx(source) {
             if (!source) return 0;
-            txMeasureAccountEl.className = 'txn-source ' + source.toLowerCase();
-            txMeasureAccountEl.textContent = source;
-            return Math.ceil(txMeasureAccountEl.getBoundingClientRect().width);
+            return measureCachedPx('account', source, () => {
+                txMeasureAccountEl.className = 'txn-source ' + source.toLowerCase();
+                txMeasureAccountEl.textContent = source;
+                return Math.ceil(txMeasureAccountEl.getBoundingClientRect().width);
+            });
         }
 
         function formatTxnAmountLabel(txn) {
@@ -2307,6 +2389,9 @@ createApp({
         }
 
         function recomputeTxnColumnProfiles() {
+            // Font metrics can change with the viewport, so start each pass cold;
+            // within the pass the three modes share every measurement.
+            clearTxnMeasureCache();
             txColumnProfiles.merchant = measureTxnColumnsForMode('merchant');
             txColumnProfiles.subcategory = measureTxnColumnsForMode('subcategory');
             txColumnProfiles.section = hasSections.value ? measureTxnColumnsForMode('section') : txColumnProfiles.merchant;
@@ -2362,7 +2447,13 @@ createApp({
         }
 
         function expandMonthRange(rangeStr) {
-            const [start, end] = rangeStr.split('..');
+            const [start, end] = String(rangeStr).split('..');
+            // Both halves must be real YYYY-MM keys before we iterate. A
+            // hand-edited hash like '#+dr:garbage..garbage' otherwise walks
+            // 'garba' -> NaN-NaN, and 'NaN-NaN' <= 'garba' stays true forever,
+            // hanging the report while the array grows without bound.
+            const monthKey = /^\d{4}-(0[1-9]|1[0-2])$/;
+            if (!monthKey.test(start || '') || !monthKey.test(end || '')) return [];
             const months = [];
             let current = start;
             while (current <= end) {
