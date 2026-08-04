@@ -415,9 +415,20 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
             if match_info and match_info.get('raw_values'):
                 for key, value in match_info['raw_values'].items():
                     txn[key] = value
-            # Add extra_fields from field: directives in .rules files
+            # Surface CSV captures named in report_fields, skipping blanks so a
+            # transaction without the field shows no detail badge at all
+            extra_fields = {}
+            if format_spec.report_fields:
+                extra_fields = {
+                    name: captures[name]
+                    for name in format_spec.report_fields
+                    if captures.get(name)
+                }
+            # Add extra_fields from field: directives in .rules files (these win)
             if match_info and match_info.get('extra_fields'):
-                txn['extra_fields'] = match_info['extra_fields']
+                extra_fields.update(match_info['extra_fields'])
+            if extra_fields:
+                txn['extra_fields'] = extra_fields
             # Apply transform_description if set
             if match_info and match_info.get('transform_description'):
                 txn['original_description'] = txn.get('raw_description', txn.get('description', ''))

@@ -7,10 +7,13 @@ import os
 from datetime import date
 
 from tally.analyzer import parse_amount, analyze_transactions, export_json, export_csv, classify_by_sections
+from tally.analyzer import build_merchant_json
+from tally.commands.run import collect_source_names
 from tally.analyzer import parse_generic_csv as _parse_generic_csv
 from tally.parsers import SkippedRow, ParseResult, _detect_date_format
 from tally.format_parser import parse_format_string
 from tally.merchant_utils import get_all_rules
+from tally.report import write_summary_file_vue
 from tally.section_engine import parse_sections
 
 
@@ -275,6 +278,48 @@ class TestExportJson:
         assert parsed['by_month']['2025-02']['total'] == 25.0
 
 
+class TestReportJsonDeterminism:
+    """The report JSON is diffed against the previous run, so it must be reproducible."""
+
+    def test_pattern_tags_sorted_when_list(self):
+        """match_info['tags'] arrives as a list built from a set - sort it anyway."""
+        result = build_merchant_json('AMAZON', {
+            'match_info': {'pattern': 'AMAZON*', 'source': 'merchants.rules',
+                           'tags': ['zeta', 'alpha', 'mid']},
+        })
+
+        assert result['pattern']['tags'] == ['alpha', 'mid', 'zeta']
+
+    def test_pattern_tags_sorted_when_set(self):
+        """The path the dead isinstance guard used to cover."""
+        result = build_merchant_json('AMAZON', {
+            'match_info': {'pattern': 'AMAZON*', 'source': 'merchants.rules',
+                           'tags': {'zeta', 'alpha', 'mid'}},
+        })
+
+        assert result['pattern']['tags'] == ['alpha', 'mid', 'zeta']
+
+    def test_source_names_dedupe_preserves_declaration_order(self):
+        """Duplicate source names collapse without being reordered."""
+        data_sources = [
+            {'name': 'B', 'file': 'b1.csv'},
+            {'name': 'A', 'file': 'a.csv'},
+            {'name': 'B', 'file': 'b2.csv'},
+        ]
+
+        assert collect_source_names(data_sources) == ['B', 'A']
+
+    def test_source_names_excludes_supplemental(self):
+        """Supplemental sources produce no transactions, so they stay out of the subtitle."""
+        data_sources = [
+            {'name': 'B', 'file': 'b.csv'},
+            {'name': 'Orders', 'file': 'orders.csv', '_supplemental': True},
+            {'name': 'A', 'file': 'a.csv'},
+        ]
+
+        assert collect_source_names(data_sources) == ['B', 'A']
+
+
 class TestExportCsv:
     """Tests for export_csv function."""
 
@@ -432,6 +477,50 @@ class TestExportCsv:
         assert 'paypal_txn_id' in reader.fieldnames
         assert rows[0]['paypal_merchant'] == 'Acme Corp'
         assert rows[0]['paypal_txn_id'] == '123ABC'
+
+
+class TestHtmlReportTupleKeyFallback:
+    """Tests for HTML report generation with tuple by_merchant keys."""
+
+    def test_write_summary_file_vue_falls_back_to_tuple_merchant_name(self, tmp_path):
+        """HTML report should use tuple merchant names when data['name'] is unavailable."""
+        txns = [
+            {
+                'date': date(2025, 1, 5),
+                'description': 'ROCHESTER PUBLIC SCHOOLS CAFE',
+                'raw_description': 'ROCHESTER PUBLIC SCHOOLS CAFE',
+                'merchant': 'Rochester Public Schools',
+                'amount': 42.50,
+                'category': 'Food',
+                'subcategory': 'School Meals',
+                'source': 'test.csv',
+                'tags': [],
+                'excluded': None,
+            },
+            {
+                'date': date(2025, 1, 12),
+                'description': 'ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE',
+                'raw_description': 'ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE',
+                'merchant': 'Rochester Public Schools',
+                'amount': 75.00,
+                'category': 'Education',
+                'subcategory': 'Fees',
+                'source': 'test.csv',
+                'tags': [],
+                'excluded': None,
+            },
+        ]
+
+        stats = analyze_transactions(txns)
+        for data in stats['by_merchant'].values():
+            data.pop('name', None)
+
+        output_path = tmp_path / 'report.html'
+        write_summary_file_vue(stats, output_path, title='Tuple Key Report')
+
+        report_html = output_path.read_text(encoding='utf-8')
+        assert 'Rochester Public Schools' in report_html
+        assert "('Rochester Public Schools', 'Food', 'School Meals')" not in report_html
 
 
 class TestParseAmount:
@@ -3101,3 +3190,322 @@ class TestReportDiff:
         assert "Netflix" in detailed
         assert "Amazon" in detailed
         assert "lost 'shopping'" in detailed
+
+
+class TestReportFields:
+    """Tests for the report_fields setting and blank extra_field suppression."""
+
+    def test_report_fields_promotes_capture(self):
+        """report_fields surfaces a CSV capture as extra_fields, skipping blanks."""
+        csv_content = """Date,Description,Memo,Amount
+11/26/2025,LOWES #02736,Any idea what this is?,-45.00
+11/24/2025,LOWES #02736,,-12.00
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            format_spec = parse_format_string("{date:%m/%d/%Y},{description},{memo},{amount}")
+            format_spec.report_fields = ['memo']
+            txns = parse_generic_csv(f.name, format_spec, get_all_rules())
+
+            assert txns[0]['extra_fields'] == {'memo': 'Any idea what this is?'}
+            # Blank memo produces no extra_fields at all - no "+1" badge in the report
+            assert 'extra_fields' not in txns[1]
+        finally:
+            os.unlink(f.name)
+
+    def test_captures_not_promoted_without_report_fields(self):
+        """Captures stay rule-only (field.*) unless named in report_fields."""
+        csv_content = """Date,Description,Memo,Amount
+11/26/2025,LOWES #02736,Any idea what this is?,-45.00
+"""
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        try:
+            f.write(csv_content)
+            f.close()
+
+            format_spec = parse_format_string("{date:%m/%d/%Y},{description},{memo},{amount}")
+            txns = parse_generic_csv(f.name, format_spec, get_all_rules())
+
+            assert 'extra_fields' not in txns[0]
+            assert txns[0]['field']['memo'] == 'Any idea what this is?'
+        finally:
+            os.unlink(f.name)
+
+    def test_report_fields_from_global_setting(self):
+        """Global report_fields applies to sources that capture the field."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format(
+            {'name': 'wf', 'format': '{date:%m/%d/%Y},{description},{memo},{amount}'},
+            report_fields=['memo'],
+        )
+        assert source['_format_spec'].report_fields == ['memo']
+
+    def test_global_report_fields_ignores_missing_field(self):
+        """A global report_fields naming a field this source lacks is not an error."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format(
+            {'name': 'amex', 'format': '{date:%m/%d/%Y},{description},{amount}'},
+            report_fields=['memo'],
+        )
+        assert source['_format_spec'].report_fields == []
+
+    def test_source_report_fields_rejects_missing_field(self):
+        """An explicit source-level report_fields typo fails loudly."""
+        from tally.config_loader import resolve_source_format
+
+        with pytest.raises(ValueError, match='not captured by the format string'):
+            resolve_source_format({
+                'name': 'wf',
+                'format': '{date:%m/%d/%Y},{description},{amount}',
+                'report_fields': ['memo'],
+            })
+
+    def test_bare_string_report_fields_is_one_name(self):
+        """`report_fields: memo` means the memo capture, not m/e/m/o."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format({
+            'name': 'wf',
+            'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+            'report_fields': 'memo',
+        })
+        assert source['_format_spec'].report_fields == ['memo']
+
+    def test_empty_report_fields_promotes_nothing(self):
+        """An empty `report_fields:` is None in YAML and must not be iterated."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format({
+            'name': 'wf',
+            'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+            'report_fields': None,
+        })
+        assert source['_format_spec'].report_fields == []
+
+    def test_report_fields_rejects_wrong_type(self):
+        """A mapping or a list of non-strings is named, not a TypeError later."""
+        from tally.config_loader import resolve_source_format
+
+        with pytest.raises(ValueError, match='must be a capture name or a list'):
+            resolve_source_format({
+                'name': 'wf',
+                'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+                'report_fields': {'memo': True},
+            })
+
+        with pytest.raises(ValueError, match='must be a capture name or a list'):
+            resolve_source_format({
+                'name': 'wf',
+                'format': '{date:%m/%d/%Y},{description},{memo},{amount}',
+                'report_fields': ['memo', 7],
+            })
+
+    def test_global_bare_string_report_fields(self):
+        """The same coercion applies to the settings.yaml top-level value."""
+        from tally.config_loader import resolve_source_format
+
+        source = resolve_source_format(
+            {'name': 'wf', 'format': '{date:%m/%d/%Y},{description},{memo},{amount}'},
+            report_fields='memo',
+        )
+        assert source['_format_spec'].report_fields == ['memo']
+
+
+class TestEmptyFieldDirectiveSuppression:
+    """field: directives evaluating to empty values should not create blank fields."""
+
+    def test_blank_field_directive_omitted(self):
+        """A field: capturing an empty memo yields no extra_fields entry."""
+        from tally.merchant_utils import get_all_rules, normalize_merchant, clear_engine_cache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Lowes]
+match: contains("LOWES")
+category: Hardware
+field: memo = field.memo
+""")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+
+            _, _, _, with_memo = normalize_merchant(
+                "LOWES #02736", rules, amount=45.0,
+                field={'memo': 'Any idea what this is?'})
+            assert with_memo['extra_fields'] == {'memo': 'Any idea what this is?'}
+
+            _, _, _, blank_memo = normalize_merchant(
+                "LOWES #02736", rules, amount=12.0, field={'memo': ''})
+            assert 'extra_fields' not in blank_memo
+
+            clear_engine_cache()
+
+    def test_zero_field_directive_retained(self):
+        """Zero is a meaningful value and must survive the empty-value guard."""
+        from tally.merchant_utils import get_all_rules, normalize_merchant, clear_engine_cache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = os.path.join(tmpdir, 'merchants.rules')
+            with open(rules_file, 'w') as f:
+                f.write("""
+[Lowes]
+match: contains("LOWES")
+category: Hardware
+field: fee = 0
+""")
+
+            clear_engine_cache()
+            rules = get_all_rules(rules_file)
+
+            _, _, _, info = normalize_merchant("LOWES #02736", rules, amount=45.0)
+            assert info['extra_fields'] == {'fee': 0}
+
+            clear_engine_cache()
+
+
+class TestRecurrenceClassification:
+    """Tests for recurrence inference and tag overrides in analyze_transactions."""
+
+    def _merchant(self, stats, name):
+        by_merchant = stats['by_merchant']
+        if name in by_merchant:
+            return by_merchant[name]
+        for key, data in by_merchant.items():
+            if isinstance(key, tuple):
+                if key and key[0] == name:
+                    return data
+            elif data.get('name') == name:
+                return data
+        raise KeyError(name)
+
+    def _txn(self, merchant, amount, year, month, day, tags=None):
+        return {
+            'date': date(year, month, day),
+            'description': merchant,
+            'raw_description': merchant,
+            'merchant': merchant,
+            'amount': amount,
+            'category': 'Subscriptions',
+            'subcategory': 'General',
+            'source': 'test.csv',
+            'match_info': {'tags': tags or []},
+            'tags': tags or [],
+            'excluded': None,
+        }
+
+    def test_monthly_inference_requires_half_span(self):
+        txns = []
+
+        # Force an 8-month span in the dataset.
+        for m in range(1, 9):
+            txns.append(self._txn('Span Anchor', 10.0, 2025, m, 1))
+
+        # Active 3/8 months with consistent amounts: below ceil(8 * 0.5) = 4.
+        for m in (1, 3, 7):
+            txns.append(self._txn('Borderline Monthly', 50.0, 2025, m, 5))
+
+        stats = analyze_transactions(txns)
+        merchant = self._merchant(stats, 'Borderline Monthly')
+
+        assert merchant['months_active'] == 3
+        assert merchant['recurrence'] is None
+        assert merchant['recurring_monthly_cost'] == 0
+
+    def test_monthly_inference_requires_low_cv(self):
+        txns = []
+
+        for m in range(1, 9):
+            txns.append(self._txn('Span Anchor', 10.0, 2025, m, 1))
+
+        # Active 4/8 months (meets threshold), but lumpy amounts fail cv < 0.3.
+        for m, amount in ((1, 10.0), (3, 10.0), (5, 10.0), (7, 200.0)):
+            txns.append(self._txn('Lumpy Utility', amount, 2025, m, 7))
+
+        stats = analyze_transactions(txns)
+        merchant = self._merchant(stats, 'Lumpy Utility')
+
+        assert merchant['months_active'] == 4
+        assert merchant['cv'] >= 0.3
+        assert merchant['recurrence'] is None
+
+    def test_fixed_tag_override_forces_monthly(self):
+        txns = [
+            self._txn('Manual Fixed', 20.0, 2025, 1, 10, tags=['fixed']),
+            self._txn('Manual Fixed', 500.0, 2025, 6, 10, tags=['fixed']),
+        ]
+
+        stats = analyze_transactions(txns)
+        merchant = self._merchant(stats, 'Manual Fixed')
+
+        assert merchant['recurrence'] == 'monthly'
+        assert merchant['recurring_monthly_cost'] > 0
+
+    def test_variable_tag_override_blocks_monthly(self):
+        txns = []
+
+        for m in range(1, 7):
+            txns.append(self._txn('Variable Override', 40.0, 2025, m, 8, tags=['variable']))
+
+        stats = analyze_transactions(txns)
+        merchant = self._merchant(stats, 'Variable Override')
+
+        assert merchant['months_active'] == 6
+        assert merchant['cv'] < 0.3
+        assert merchant['recurrence'] is None
+        assert merchant['recurring_monthly_cost'] == 0
+
+    def test_annual_merchant_not_monthly_in_a_sparse_dataset(self):
+        """An every-January charge stays annual even with no other data.
+
+        months_active alone cannot tell three consecutive months from three
+        Januaries. With only January exports loaded, num_months is 3 too, so
+        the reporting-period test passes and the charge was booked as monthly
+        - twelve times its real monthly cost.
+        """
+        txns = [
+            self._txn('Annual Insurance', 1200.0, 2024, 1, 15),
+            self._txn('Annual Insurance', 1210.0, 2025, 1, 15),
+            self._txn('Annual Insurance', 1190.0, 2026, 1, 15),
+        ]
+
+        stats = analyze_transactions(txns)
+        merchant = self._merchant(stats, 'Annual Insurance')
+
+        assert merchant['months_active'] == 3
+        assert merchant['recurrence'] == 'annual'
+        assert merchant['recurring_monthly_cost'] == pytest.approx(1200.0 / 12, rel=0.05)
+
+    def test_consecutive_months_still_infer_monthly(self):
+        """The span test must not reject a genuinely dense merchant."""
+        txns = [self._txn('Streaming', 15.0, 2025, m, 3) for m in range(1, 7)]
+
+        stats = analyze_transactions(txns)
+        merchant = self._merchant(stats, 'Streaming')
+
+        assert merchant['months_active'] == 6
+        assert merchant['recurrence'] == 'monthly'
+        assert merchant['recurring_monthly_cost'] == pytest.approx(15.0, rel=1e-3)
+
+    def test_annual_inference_detects_similar_12_month_spacing(self):
+        txns = []
+
+        # Force a long span so monthly inference cannot apply.
+        for m in range(1, 13):
+            txns.append(self._txn('Span Anchor', 5.0, 2025, m, 1))
+            txns.append(self._txn('Span Anchor', 5.0, 2026, m, 1))
+
+        txns.append(self._txn('Annual License', 1200.0, 2025, 2, 14))
+        txns.append(self._txn('Annual License', 1180.0, 2026, 2, 14))
+
+        stats = analyze_transactions(txns)
+        merchant = self._merchant(stats, 'Annual License')
+
+        assert merchant['recurrence'] == 'annual'
+        assert merchant['recurring_monthly_cost'] == pytest.approx(((1200.0 + 1180.0) / 2) / 12, rel=1e-3)

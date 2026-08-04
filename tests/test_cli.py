@@ -1,10 +1,171 @@
 """Tests for CLI error handling and user experience."""
 
+import json
 import pytest
 import subprocess
 import tempfile
 import os
 from pathlib import Path
+
+
+class TestGlobPatternSupport:
+    """Tests for wildcard/glob pattern support in data source file paths."""
+
+    def test_glob_pattern_matches_multiple_files(self):
+        """Glob pattern should match multiple CSV files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            # Create settings with glob pattern
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/test*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            # Create multiple matching files
+            with open(os.path.join(data_dir, 'test-jan.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-15,NETFLIX,-15.99\n")
+
+            with open(os.path.join(data_dir, 'test-feb.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-02-15,SPOTIFY,-9.99\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'run', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            # Should report transactions from 2 files
+            assert '2 files' in result.stdout
+            assert '2 transactions' in result.stdout
+
+    def test_glob_pattern_single_file_fallback(self):
+        """Single file path (no wildcards) should still work."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/transactions.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            with open(os.path.join(data_dir, 'transactions.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-15,TEST,-10.00\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'run', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            assert 'TestBank: 1 transactions' in result.stdout
+            assert '1 transactions' in result.stdout
+
+    def test_glob_pattern_no_matches_shows_error(self):
+        """Glob pattern with no matches should show helpful message."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/nonexistent*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'run', '--format', 'summary', config_dir],
+                capture_output=True,
+                text=True
+            )
+            # Should report that no files matched the glob pattern
+            assert result.returncode == 1
+            assert 'No files matched' in result.stdout
+            assert 'data/nonexistent*.csv' in result.stdout
+
+    def test_glob_diag_shows_matched_files(self):
+        """Diag command should show matched files for glob patterns."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/test*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            # Create multiple matching files
+            with open(os.path.join(data_dir, 'test-a.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+
+            with open(os.path.join(data_dir, 'test-b.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'diag', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            # Should show the configured glob and resolved file count
+            assert 'data/test*.csv' in result.stdout
+            assert '(2 files)' in result.stdout
+
+    def test_glob_files_processed_in_sorted_order(self):
+        """Files should be processed in sorted order for consistency."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: TestBank
+    file: data/*.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+            # Create files in non-alphabetical order
+            with open(os.path.join(data_dir, 'z-last.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-01,Z_FIRST,-1.00\n")
+
+            with open(os.path.join(data_dir, 'a-first.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-01,A_FIRST,-1.00\n")
+
+            # Resolver should return files in sorted order regardless of creation order
+            from tally.path_utils import resolve_data_source_paths
+
+            files, _ = resolve_data_source_paths(config_dir, 'data/*.csv')
+            basenames = [os.path.basename(f) for f in files]
+            assert basenames == ['a-first.csv', 'z-last.csv']
 
 
 class TestCLIErrorHandling:
@@ -152,6 +313,51 @@ data_sources:
             assert "No merchants found matching: category:NonExistent" in result.stdout
             assert 'Available categories:' in result.stdout
 
+    def test_explain_summary_handles_tuple_merchant_keys(self):
+        """Default explain summary should render duplicate merchant names without crashing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, 'config')
+            data_dir = os.path.join(tmpdir, 'data')
+            os.makedirs(config_dir)
+            os.makedirs(data_dir)
+
+            with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+                f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data/test.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+merchants_file: config/merchants.rules
+""")
+
+            with open(os.path.join(config_dir, 'merchants.rules'), 'w') as f:
+                f.write("""[School Food]
+match: contains("ROCHESTER PUBLIC SCHOOLS CAFE")
+category: Food
+subcategory: School Meals
+merchant: Rochester Public Schools
+
+[School Fees]
+match: contains("ROCHESTER PUBLIC SCHOOLS ACTIVITY")
+category: Education
+subcategory: Fees
+merchant: Rochester Public Schools
+""")
+
+            with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
+                f.write("date,description,amount\n")
+                f.write("2025-01-05,ROCHESTER PUBLIC SCHOOLS CAFE,42.50\n")
+                f.write("2025-01-12,ROCHESTER PUBLIC SCHOOLS ACTIVITY FEE,75.00\n")
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'explain', '--config', config_dir],
+                capture_output=True,
+                text=True
+            )
+            assert result.returncode == 0
+            assert 'Rochester Public Schools' in result.stdout
+            assert "('Rochester Public Schools'" not in result.stdout
+
     def test_invalid_format_shows_choices(self):
         """Invalid --format should show valid choices."""
         result = subprocess.run(
@@ -194,6 +400,65 @@ data_sources:
             # Message may be in stdout or stderr depending on error type
             output = result.stdout + result.stderr
             assert 'No view' in output or 'views' in output.lower()
+
+
+class TestExplainJsonOutput:
+    """Tests for JSON explain output."""
+
+    def _create_config(self, tmpdir):
+        config_dir = os.path.join(tmpdir, 'config')
+        data_dir = os.path.join(tmpdir, 'data')
+        os.makedirs(config_dir)
+        os.makedirs(data_dir)
+
+        with open(os.path.join(config_dir, 'settings.yaml'), 'w') as f:
+            f.write("""year: 2025
+data_sources:
+  - name: Test
+    file: data/test.csv
+    format: "{date:%Y-%m-%d},{description},{amount}"
+""")
+
+        with open(os.path.join(config_dir, 'merchant_categories.csv'), 'w') as f:
+            f.write("Pattern,Merchant,Category,Subcategory\n")
+            f.write("AMAZON BOOKS,Amazon,Shopping,Books\n")
+            f.write("AMAZON PRIME,Amazon,Subscriptions,Streaming\n")
+            f.write("AMAZE CAFE,Amaze Cafe,Food,Coffee\n")
+
+        with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
+            f.write("date,description,amount\n")
+            f.write("2025-01-15,AMAZON BOOKS ORDER,12.99\n")
+            f.write("2025-01-18,AMAZON PRIME MEMBERSHIP,14.99\n")
+            f.write("2025-01-20,AMAZE CAFE LATTE,6.50\n")
+
+        return config_dir
+
+    @pytest.mark.parametrize(
+        ("query", "match_mode", "matched_names", "merchant_count"),
+        [
+            ("Amazon", "exact", ["Amazon"], 2),
+            ("amazon", "case_insensitive", ["Amazon"], 2),
+            ("Amaz", "partial", ["Amaze Cafe", "Amazon"], 3),
+        ],
+    )
+    def test_explain_json_match_modes_return_single_payload(self, query, match_mode, matched_names, merchant_count):
+        """Exact/case-insensitive/partial explain JSON should be a single parseable payload."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = self._create_config(tmpdir)
+
+            result = subprocess.run(
+                ['uv', 'run', 'tally', 'explain', '--format', 'json', query, config_dir],
+                capture_output=True,
+                text=True
+            )
+
+            assert result.returncode == 0
+            payload = json.loads(result.stdout)
+            assert payload['query'] == query
+            assert payload['match_mode'] == match_mode
+            assert payload['matched_names'] == matched_names
+            assert len(payload['merchants']) == merchant_count
+            assert [merchant['name'] for merchant in payload['merchants']].count('Amazon') == min(merchant_count, 2)
 
 
 class TestMigration:
