@@ -27,7 +27,7 @@ jobs:
       notes: ${{ steps.output.outputs.notes }}
       generated: ${{ steps.output.outputs.generated }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
