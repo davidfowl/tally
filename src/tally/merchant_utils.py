@@ -561,6 +561,7 @@ def normalize_merchant(
         if result.matched:
             match_info = {
                 'pattern': result.matched_rule.match_expr if result.matched_rule else None,
+                'rule_name': result.matched_rule.name if result.matched_rule else None,
                 'source': 'user',
                 'tags': list(result.tags),
             }
@@ -579,7 +580,13 @@ def normalize_merchant(
         # No categorization match - fallback to extract merchant name
         merchant_name = extract_merchant_name(description)
         if result.tags or raw_values:
-            match_info = {'pattern': None, 'source': 'auto', 'tags': list(result.tags)}
+            first_tag_rule = result.tag_rules[0] if result.tag_rules else None
+            match_info = {
+                'pattern': first_tag_rule.match_expr if first_tag_rule else None,
+                'rule_name': first_tag_rule.name if first_tag_rule else None,
+                'source': 'user' if first_tag_rule else 'auto',
+                'tags': list(result.tags),
+            }
             if result.tag_sources:
                 match_info['tag_sources'] = result.tag_sources
             if raw_values:
@@ -602,6 +609,9 @@ def normalize_merchant(
     all_tags = []
     # Track which rule added each tag: {tag: (rule_name, pattern)}
     tag_sources = {}
+    first_tag_rule = None
+    first_tag_pattern = None
+    first_tag_source = 'auto'
 
     for rule in rules:
         # Handle various formats: 4-tuple, 5-tuple, 6-tuple, 7-tuple (with tags)
@@ -641,10 +651,14 @@ def normalize_merchant(
             if tags:
                 resolved_tags = _resolve_dynamic_tags(tags, transaction)
                 all_tags.extend(resolved_tags)
+                if resolved_tags and first_tag_rule is None:
+                    first_tag_rule = merchant
+                    first_tag_pattern = pattern
+                    first_tag_source = source
                 # Track which rule added each tag (first rule wins for each tag)
                 for tag in resolved_tags:
                     if tag not in tag_sources:
-                        tag_sources[tag] = {'rule': source, 'pattern': pattern}
+                        tag_sources[tag] = {'rule': merchant, 'pattern': pattern}
 
             # Use first categorization rule for merchant/category/subcategory
             # Tag-only rules have empty category
@@ -662,7 +676,12 @@ def normalize_merchant(
     # Return matched result with all collected tags (deduplicated, order preserved)
     unique_tags = list(dict.fromkeys(all_tags))
     if result_merchant is not None:
-        match_info = {'pattern': result_pattern, 'source': result_source, 'tags': unique_tags}
+        match_info = {
+            'pattern': result_pattern,
+            'rule_name': result_merchant,
+            'source': result_source,
+            'tags': unique_tags,
+        }
         if tag_sources:
             match_info['tag_sources'] = tag_sources
         if raw_values:
@@ -673,7 +692,12 @@ def normalize_merchant(
     # Still include any tags from tag-only rules that matched
     merchant_name = extract_merchant_name(description)
     if unique_tags or raw_values:
-        match_info = {'pattern': None, 'source': 'auto', 'tags': unique_tags}
+        match_info = {
+            'pattern': first_tag_pattern,
+            'rule_name': first_tag_rule,
+            'source': first_tag_source,
+            'tags': unique_tags,
+        }
         if tag_sources:
             match_info['tag_sources'] = tag_sources
         if raw_values:

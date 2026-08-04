@@ -39,6 +39,27 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _expand_categories_after_navigation(page: Page):
+    """Category sections default to collapsed on a fresh load ("Save Layout
+    Settings to Local Storage": no saved state means everything starts
+    collapsed). This suite predates that feature and assumes the old
+    expanded-by-default state, so expand everything after each navigation
+    instead of adding an expand step to every test.
+    """
+    original_goto = page.goto
+
+    def goto_and_expand(url, **kwargs):
+        response = original_goto(url, **kwargs)
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        if toggle.get_attribute("title") == "Expand all categories":
+            toggle.click()
+        return response
+
+    page.goto = goto_and_expand
+    yield
+
+
 @pytest.fixture(scope="module")
 def report_path(tmp_path_factory):
     """Generate a test report with known fixture data.
@@ -183,8 +204,8 @@ class TestUINavigation:
         # Amazon has transactions on: Jan 5, Jan 10, Feb 1, Mar 1
         # Should be sorted descending: Mar 1, Feb 1, Jan 10, Jan 5
         assert len(dates) == 4, f"Expected 4 Amazon transactions, got {len(dates)}: {dates}"
-        # Verify descending order
-        assert dates == ["Mar 1", "Feb 1", "Jan 10", "Jan 5"], f"Expected descending order, got {dates}"
+        # Verify descending order (dates always include the year)
+        assert dates == ["Mar 1, 2024", "Feb 1, 2024", "Jan 10, 2024", "Jan 5, 2024"], f"Expected descending order, got {dates}"
 
     def test_tag_click_adds_filter(self, page: Page, report_path):
         """Clicking a tag adds it as a filter."""
@@ -321,6 +342,80 @@ class TestCalculationAccuracy:
 
         # Original total restored
         expect(page.get_by_test_id("filtered-amount")).to_contain_text("$1,031")
+
+
+# =============================================================================
+# Category 2b: Transaction Details container & collapse controls
+# =============================================================================
+
+class TestTransactionDetailsContainer:
+    """Tests for the Transaction Details container, header summary, and collapse controls."""
+
+    def test_container_and_summary_present(self, page: Page, report_path):
+        """The Transaction Details container renders with a view-aware count summary."""
+        page.goto(f"file://{report_path}")
+        expect(page.locator(".details-section > .section-header h2")).to_contain_text("Transaction Details")
+        # Merchant view (default): "N categories, N merchants"
+        expect(page.get_by_test_id("details-summary")).to_have_text("2 categories, 4 merchants")
+
+    def test_summary_updates_for_subcategory_view(self, page: Page, report_path):
+        """Switching to Subcategory view changes the count label wording."""
+        page.goto(f"file://{report_path}")
+        page.get_by_role("button", name="Subcategory", exact=True).click()
+        expect(page.get_by_test_id("details-summary")).to_contain_text("subcategories")
+
+    def test_collapse_all_hides_category_rows(self, page: Page, report_path):
+        """Collapse-all folds every category; the button flips to Expand."""
+        page.goto(f"file://{report_path}")
+        shopping = page.get_by_test_id("section-cat-Shopping")
+        expect(shopping).not_to_have_class(re.compile("is-collapsed"))
+        page.get_by_test_id("collapse-all-toggle").click()
+        expect(shopping).to_have_class(re.compile("is-collapsed"))
+        expect(page.get_by_test_id("collapse-all-toggle")).to_have_attribute("title", "Expand all categories")
+
+    def test_expand_all_reopens_categories(self, page: Page, report_path):
+        """Expand-all re-opens the category sections."""
+        page.goto(f"file://{report_path}")
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        shopping = page.get_by_test_id("section-cat-Shopping")
+        toggle.click()  # collapse all
+        expect(shopping).to_have_class(re.compile("is-collapsed"))
+        toggle.click()  # expand all
+        expect(shopping).not_to_have_class(re.compile("is-collapsed"))
+
+    def test_collapse_all_folds_open_transactions_and_expand_leaves_them_folded(self, page: Page, report_path):
+        """Collapse-all folds open transaction lists; expand-all reopens categories only (txns stay folded)."""
+        page.goto(f"file://{report_path}")
+        page.get_by_test_id("merchant-row-Amazon").click()  # open transactions
+        expect(page.locator(".txn-row:has-text('AMAZON MARKETPLACE')").first).to_be_visible()
+        toggle = page.get_by_test_id("collapse-all-toggle")
+        toggle.click()  # collapse all -> also folds open transactions
+        toggle.click()  # expand all -> reopens categories only
+        expect(page.locator(".txn-row:has-text('AMAZON MARKETPLACE')").first).not_to_be_visible()
+
+    def test_container_collapses_to_header_only(self, page: Page, report_path):
+        """Clicking the container header collapses the whole details body (header only)."""
+        page.goto(f"file://{report_path}")
+        details_body = page.locator(".details-body")
+        expect(details_body).to_be_visible()
+        page.locator(".details-section > .section-header").click()
+        expect(details_body).not_to_be_visible()
+
+    def test_column_alignment(self, page: Page, report_path):
+        """Count column is centered; Total column is right-aligned."""
+        page.goto(f"file://{report_path}")
+        count_align = page.locator("td.count-col").first.evaluate("el => getComputedStyle(el).textAlign")
+        total_align = page.locator("td.money").first.evaluate("el => getComputedStyle(el).textAlign")
+        assert count_align == "center", f"Count column should be centered, got {count_align}"
+        assert total_align == "right", f"Total column should be right-aligned, got {total_align}"
+
+    def test_total_row_pinned_in_tfoot(self, page: Page, report_path):
+        """The total row lives in a <tfoot> and is sticky to the bottom of the scroll box."""
+        page.goto(f"file://{report_path}")
+        total_cell = page.locator("tfoot .total-row td").first
+        expect(total_cell).to_be_attached()
+        position = total_cell.evaluate("el => getComputedStyle(el).position")
+        assert position == "sticky", f"Total row cells should be sticky, got {position}"
 
 
 # =============================================================================
@@ -1510,16 +1605,16 @@ class TestGroupingToggle:
         expect(online_row).to_contain_text("1 merchant")
 
     def test_subcategory_filter_adds_correct_type(self, page: Page, report_path):
-        """Clicking subcategory name adds subcategory filter, not merchant filter."""
+        """Clicking the filter button on a subcategory row adds a subcategory filter, not a merchant filter."""
         page.goto(f"file://{report_path}")
 
         # Switch to subcategory mode
         page.locator(".view-toggle button", has_text="Subcategory").click()
 
-        # Click on the subcategory name (first cell) in Online row
+        # Click the filter button on the Online row
         shopping_section = page.get_by_test_id("section-cat-Shopping")
-        online_name = shopping_section.locator(".merchant-name", has_text="Online")
-        online_name.click()
+        online_row = shopping_section.locator("tr.merchant-row", has_text="Online")
+        online_row.locator(".merchant-filter-trigger").click()
 
         # Should have a subcategory filter chip (class contains 'subcategory')
         filter_chip = page.locator(".filter-chip.subcategory")
@@ -2125,3 +2220,365 @@ class TestTransformDirective:
 
         badge = txn_row.locator(".extra-fields-trigger")
         expect(badge).not_to_be_visible()
+
+
+# =============================================================================
+# Category 4: Multi-granularity Date Filter (Month / Quarter / Year / Custom)
+# and multi-year transaction row display.
+# =============================================================================
+
+@pytest.fixture(scope="module")
+def multiyear_report_path(tmp_path_factory):
+    """Report spanning 4 calendar years with a views_file that excludes several
+    merchants, for date-filter and multi-year-row tests.
+
+    Key fixture properties:
+    - views_file defines a Food-only view, so Shopping/Subscriptions merchants
+      match zero views and are absent from `sections` (Part 1 bug surface).
+    - April 2026 appears ONLY via Amazon (Shopping, excluded) -> its month would
+      vanish if availableMonths sourced from `sections`.
+    - Netflix has all 12 months of 2025 (enables a Year chip) plus 2026 months
+      (multi-year -> rows show the year).
+    - Target has only 2026 transactions (single-year -> rows show no year).
+    - Amazon adds 2023 and 2024 transactions so 4 years exist (year tabs cap 3).
+    """
+    tmp_dir = tmp_path_factory.mktemp("multiyear_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = []
+    for mm in range(1, 13):  # Netflix: all 12 months of 2025
+        rows.append(f"{mm:02d}/05/2025,NETFLIX,15.99")
+    rows += [
+        "01/06/2026,NETFLIX,15.99",
+        "02/06/2026,NETFLIX,15.99",
+        "03/12/2025,WHOLE FOODS MARKET,100.00",   # Food (in-view)
+        "06/15/2026,WHOLE FOODS MARKET,120.00",   # Food (in-view), 2026
+        "01/15/2023,AMAZON MARKETPLACE,40.00",    # 2023 (year-tab cap)
+        "06/15/2024,AMAZON MARKETPLACE,50.00",    # 2024 (year-tab cap)
+        "04/10/2026,AMAZON MARKETPLACE,45.00",    # April 2026: unique + excluded
+        "05/20/2026,TARGET,60.00",                # Target single-year 2026
+        "07/22/2026,TARGET,70.00",
+    ]
+    csv_content = "Date,Description,Amount\n" + "\n".join(rows) + "\n"
+    (data_dir / "transactions.csv").write_text(csv_content)
+
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n\n'
+        "data_sources:\n"
+        "  - name: Test\n"
+        "    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n\n'
+        "merchants_file: config/merchants.rules\n"
+        "views_file: config/views.rules\n"
+    )
+    (config_dir / "merchants.rules").write_text(
+        "[Netflix]\nmatch: contains(\"NETFLIX\")\ncategory: Subscriptions\nsubcategory: Streaming\n\n"
+        "[Whole Foods]\nmatch: normalized(\"WHOLE FOODS\")\ncategory: Food\nsubcategory: Grocery\n\n"
+        "[Amazon]\nmatch: normalized(\"AMAZON\")\ncategory: Shopping\nsubcategory: Online\n\n"
+        "[Target]\nmatch: normalized(\"TARGET\")\ncategory: Shopping\nsubcategory: Retail\n"
+    )
+    (config_dir / "views.rules").write_text(
+        "[Food & Dining]\ndescription: Food spending\nfilter: category == \"Food\"\n"
+    )
+
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True, text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+    return str(report_file)
+
+
+def _open_date_popover(page):
+    """Open the date filter popover and return once it is visible."""
+    page.get_by_test_id("date-filter-trigger").click()
+    expect(page.get_by_test_id("date-popover")).to_be_visible()
+
+
+def _chip_texts(page):
+    return page.locator("[data-testid='filter-chip'] .chip-text").all_text_contents()
+
+
+class TestDateFilter:
+    """Tests for the multi-granularity date-filter popover."""
+
+    def test_excluded_merchant_month_appears_in_grid(self, page: Page, multiyear_report_path):
+        """Part 1 regression: April 2026 exists only via Amazon (excluded from
+        every view). It must still appear in the month grid, not vanish."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        # Switch to the 2026 tab regardless of the machine's current year.
+        page.get_by_test_id("date-year-tab-2026").click()
+        expect(page.get_by_test_id("date-month-cell-2026-04")).to_be_visible()
+
+    def test_this_last_preset_rows_render(self, page: Page, multiyear_report_path):
+        """This/Last rows render all six presets."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        for tid in ["this-month", "this-quarter", "this-year",
+                    "last-month", "last-quarter", "last-year"]:
+            expect(page.get_by_test_id(f"date-preset-{tid}")).to_be_visible()
+
+    def test_year_tabs_capped_to_three_most_recent(self, page: Page, multiyear_report_path):
+        """Year tabs show only the 3 most recent data years (2024/2025/2026),
+        not the oldest (2023)."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        expect(page.get_by_test_id("date-year-tab-2026")).to_be_visible()
+        expect(page.get_by_test_id("date-year-tab-2025")).to_be_visible()
+        expect(page.get_by_test_id("date-year-tab-2024")).to_be_visible()
+        expect(page.get_by_test_id("date-year-tab-2023")).to_have_count(0)
+
+    def test_selecting_quarter_months_aggregates_to_quarter_chip(self, page: Page, multiyear_report_path):
+        """Selecting Jan+Feb+Mar 2025 in the grid aggregates to one Q1 2025 chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in ("01", "02", "03"):
+            page.get_by_test_id(f"date-month-cell-2025-{mm}").click()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Q1 2025"]
+
+    def test_incremental_apply_collapses_to_quarter(self, page: Page, multiyear_report_path):
+        """Apply Jan+Feb as two month chips; reopen, add Mar; re-apply collapses
+        the three into a single Q1 2025 chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        page.get_by_test_id("date-month-cell-2025-01").click()
+        page.get_by_test_id("date-month-cell-2025-02").click()
+        page.get_by_test_id("date-apply").click()
+        assert sorted(_chip_texts(page)) == ["Feb 2025", "Jan 2025"]
+
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        page.get_by_test_id("date-month-cell-2025-03").click()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Q1 2025"]
+
+    def test_selecting_full_year_aggregates_to_year_chip(self, page: Page, multiyear_report_path):
+        """Selecting all 12 months of 2025 collapses to a single 2025 chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in range(1, 13):
+            page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["2025"]
+
+    def test_year_and_quarter_from_different_periods_union(self, page: Page, multiyear_report_path):
+        """A 2025 Year chip plus a custom 2026 range union (both present, and the
+        filtered total is non-zero rather than an empty AND)."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-year-tab-2025").click()
+        for mm in range(1, 13):
+            page.get_by_test_id(f"date-month-cell-2025-{mm:02d}").click()
+        # Custom range in 2026, independent of the 2025 months.
+        page.get_by_test_id("date-start-text").fill("1/1/2026")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("6/30/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+
+        chips = _chip_texts(page)
+        assert "2025" in chips
+        assert any("2026" in c and "–" in c for c in chips), chips
+        # Union is non-empty (2025 Netflix + 2026 transactions both counted).
+        expect(page.get_by_test_id("filtered-amount")).not_to_contain_text("$0")
+
+    def test_drill_calendar_commits_day_and_filters(self, page: Page, multiyear_report_path):
+        """The Start drill calendar commits a day-precision date into its input,
+        and a start+end range produces a filtering daterange chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        # Open Start calendar (defaults to today's month) and pick the 15th.
+        page.get_by_test_id("date-start-cal-btn").click()
+        expect(page.get_by_test_id("date-start-cal")).to_be_visible()
+        page.get_by_test_id("date-start-day-15").click()
+        # Calendar closes and the text input reflects the committed date
+        # (formatted "Mon D, YYYY", so it contains ", ").
+        expect(page.get_by_test_id("date-start-cal")).to_have_count(0)
+        assert ", " in page.get_by_test_id("date-start-text").input_value()
+
+    def test_cross_year_custom_range_shows_year_on_both_ends(self, page: Page, multiyear_report_path):
+        """A custom range spanning two calendar years shows the year on both the
+        start and the end of the chip label."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-start-text").fill("12/15/2025")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("2/10/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+        chips = _chip_texts(page)
+        assert chips == ["Dec 15, 2025 – Feb 10, 2026"], chips
+
+    def test_quarter_chip_label_restores_from_hash(self, page: Page, multiyear_report_path):
+        """A quarter range chip restored from the URL hash re-derives its Q label
+        (the case most likely to regress if getDisplayText isn't updated)."""
+        page.goto(f"file://{multiyear_report_path}#+d:2025-01..2025-03")
+        assert _chip_texts(page) == ["Q1 2025"]
+
+    def test_custom_range_rehydrates_into_popover(self, page: Page, multiyear_report_path):
+        """An applied daterange chip loads back into the Start/End widget when
+        the popover reopens."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        assert _chip_texts(page) == ["Jan 1 – Jan 31, 2026"]
+        _open_date_popover(page)
+        assert page.get_by_test_id("date-start-text").input_value() == "Jan 1, 2026"
+        assert page.get_by_test_id("date-end-text").input_value() == "Jan 31, 2026"
+
+    def test_unedited_apply_keeps_custom_range(self, page: Page, multiyear_report_path):
+        """Regression: open the popover and Apply with no edits — the daterange
+        chip and the hash survive."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        _open_date_popover(page)
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Jan 1 – Jan 31, 2026"]
+        assert page.evaluate("location.hash") == "#+dr:2026-01-01..2026-01-31"
+
+    def test_months_and_custom_range_both_survive_unedited_apply(self, page: Page, multiyear_report_path):
+        """Month chips and a custom range coexist through a no-op reopen+Apply."""
+        page.goto(f"file://{multiyear_report_path}#+d:2025-01&+dr:2026-01-01..2026-01-31")
+        assert sorted(_chip_texts(page)) == ["Jan 1 – Jan 31, 2026", "Jan 2025"]
+        _open_date_popover(page)
+        page.get_by_test_id("date-apply").click()
+        assert sorted(_chip_texts(page)) == ["Jan 1 – Jan 31, 2026", "Jan 2025"]
+
+    def test_edited_range_replaces_old_chip(self, page: Page, multiyear_report_path):
+        """Editing the rehydrated range yields exactly one daterange chip."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        _open_date_popover(page)
+        page.get_by_test_id("date-end-text").fill("2/15/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Jan 1 – Feb 15, 2026"]
+
+    def test_removed_range_does_not_resurrect(self, page: Page, multiyear_report_path):
+        """Removing the chip clears the widget, so reopening + Apply doesn't
+        re-add the range."""
+        page.goto(f"file://{multiyear_report_path}#+dr:2026-01-01..2026-01-31")
+        page.get_by_test_id("filter-chip-remove").click()
+        _open_date_popover(page)
+        assert page.get_by_test_id("date-start-text").input_value() == ""
+        assert page.get_by_test_id("date-end-text").input_value() == ""
+        page.get_by_test_id("date-apply").click()
+        expect(page.locator("[data-testid='filter-chip']")).to_have_count(0)
+
+    def test_reversed_range_is_normalized_on_apply(self, page: Page, multiyear_report_path):
+        """End before Start still produces an ordered chip."""
+        page.goto(f"file://{multiyear_report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id("date-start-text").fill("2/15/2026")
+        page.get_by_test_id("date-start-text").blur()
+        page.get_by_test_id("date-end-text").fill("1/1/2026")
+        page.get_by_test_id("date-end-text").blur()
+        page.get_by_test_id("date-apply").click()
+        assert _chip_texts(page) == ["Jan 1 – Feb 15, 2026"]
+
+    def test_malformed_range_hash_opens_empty_without_error(self, page: Page, multiyear_report_path):
+        """A hand-edited hash must not wedge the widget or throw."""
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"file://{multiyear_report_path}#+dr:garbage")
+        _open_date_popover(page)
+        assert page.get_by_test_id("date-start-text").input_value() == ""
+        assert page.get_by_test_id("date-end-text").input_value() == ""
+        assert errors == [], errors
+
+    def test_clear_all_filters_wipes_and_closes(self, page: Page, multiyear_report_path):
+        """The footer 'Clear all filters' removes every chip and closes the popover."""
+        page.goto(f"file://{multiyear_report_path}#+d:2025-01..2025-12")
+        assert _chip_texts(page) == ["2025"]
+        _open_date_popover(page)
+        page.get_by_test_id("date-clear-all").click()
+        expect(page.get_by_test_id("date-popover")).to_have_count(0)
+        expect(page.locator("[data-testid='filter-chip']")).to_have_count(0)
+
+
+class TestMultiYearTransactionRows:
+    """Part 3: transaction rows always show the year, regardless of whether the merchant's list spans years."""
+
+    def test_multiyear_merchant_rows_show_year(self, page: Page, multiyear_report_path):
+        """Netflix spans 2025 and 2026, so its transaction rows include ', YYYY'."""
+        page.goto(f"file://{multiyear_report_path}")
+        page.get_by_test_id("merchant-row-Netflix").click()
+        page.wait_for_timeout(150)
+        dates = page.locator(".txn-row:has-text('NETFLIX') .txn-date").all_text_contents()
+        assert dates, "expected Netflix transaction rows"
+        assert all(", 20" in d for d in dates), dates
+
+    def test_single_year_merchant_rows_also_show_year(self, page: Page, multiyear_report_path):
+        """Target has only 2026 transactions, but rows still include ', YYYY' (year is always shown)."""
+        page.goto(f"file://{multiyear_report_path}")
+        page.get_by_test_id("merchant-row-Target").click()
+        page.wait_for_timeout(150)
+        dates = page.locator(".txn-row:has-text('TARGET') .txn-date").all_text_contents()
+        assert dates, "expected Target transaction rows"
+        assert all(", 20" in d for d in dates), dates
+
+
+@pytest.fixture(scope="module")
+def current_quarter_report_path(tmp_path_factory):
+    """Report whose only data is three transactions in the three months of the
+    current calendar quarter, so selecting them lights up the This Quarter pill
+    (coverage-based highlight) deterministically regardless of run date."""
+    import datetime
+    today = datetime.date.today()
+    q_start_month = ((today.month - 1) // 3) * 3 + 1
+    months = [q_start_month, q_start_month + 1, q_start_month + 2]
+
+    tmp_dir = tmp_path_factory.mktemp("current_quarter_test")
+    config_dir = tmp_dir / "config"
+    data_dir = tmp_dir / "data"
+    output_dir = tmp_dir / "output"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    output_dir.mkdir()
+
+    rows = [f"{mm:02d}/10/{today.year},NETFLIX,15.99" for mm in months]
+    (data_dir / "transactions.csv").write_text("Date,Description,Amount\n" + "\n".join(rows) + "\n")
+    (config_dir / "settings.yaml").write_text(
+        'title: "Tally Spending Analysis"\n\n'
+        "data_sources:\n  - name: Test\n    file: data/transactions.csv\n"
+        '    format: "{date},{description},{amount}"\n\n'
+        "merchants_file: config/merchants.rules\n"
+    )
+    (config_dir / "merchants.rules").write_text(
+        "[Netflix]\nmatch: contains(\"NETFLIX\")\ncategory: Subscriptions\nsubcategory: Streaming\n"
+    )
+    report_file = output_dir / "report.html"
+    result = subprocess.run(
+        ["uv", "run", "tally", "run", "-o", str(report_file), str(config_dir)],
+        capture_output=True, text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Failed to generate report: {result.stderr}")
+    return str(report_file), today.year, months
+
+
+class TestDateFilterCoverageHighlight:
+    """Coverage-based preset highlighting (no stored quarter/year flag)."""
+
+    def test_selecting_quarter_months_highlights_this_quarter(self, page: Page, current_quarter_report_path):
+        report_path, year, months = current_quarter_report_path
+        page.goto(f"file://{report_path}")
+        _open_date_popover(page)
+        page.get_by_test_id(f"date-year-tab-{year}").click()
+        # Before selecting, This Quarter is not active.
+        this_q = page.get_by_test_id("date-preset-this-quarter")
+        expect(this_q).not_to_have_class(re.compile(r"\bactive\b"))
+        for mm in months:
+            page.get_by_test_id(f"date-month-cell-{year}-{mm:02d}").click()
+        # All three of the quarter's months selected -> pill lights up.
+        expect(this_q).to_have_class(re.compile(r"\bactive\b"))

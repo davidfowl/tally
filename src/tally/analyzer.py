@@ -363,9 +363,9 @@ def build_merchant_json(merchant_name, data, verbose=0):
     # Add pattern match info if available
     match_info = data.get('match_info')
     if match_info:
-        pattern_tags = match_info.get('tags', [])
-        if isinstance(pattern_tags, set):
-            pattern_tags = sorted(pattern_tags)
+        # Sort unconditionally - tags originate from a set, so a list built from
+        # one carries arbitrary order into the JSON and breaks reproducibility
+        pattern_tags = sorted(match_info.get('tags', []))
         result['pattern'] = {
             'matched': match_info.get('pattern', ''),
             'source': match_info.get('source', 'unknown'),

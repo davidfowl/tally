@@ -3,19 +3,33 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Financial Report</title>
+    <title>__REPORT_TITLE__</title>
     <style>/* CSS_PLACEHOLDER */</style>
 </head>
-<body>
-    <div id="app">
+<body class="app-initializing">
+    <div id="app-loading" class="app-loading-shell" aria-live="polite" aria-busy="true">
+        <div class="container">
+            <header class="loading-header">
+                <h1 class="loading-title">__REPORT_TITLE__</h1>
+                <p class="loading-subtitle">Preparing your spending analysis...</p>
+            </header>
+            <div class="loading-progress-wrap" role="status" aria-label="Loading report">
+                <div class="loading-progress-bar"></div>
+            </div>
+        </div>
+    </div>
+    <div id="app" v-cloak>
         <div class="container">
             <!-- Header -->
             <header>
                 <h1 data-testid="report-title">{{ title }}</h1>
                 <p class="subtitle">{{ subtitle }}</p>
-                <button class="theme-toggle" data-testid="theme-toggle" @click="toggleTheme" :title="isDarkTheme ? 'Switch to light mode' : 'Switch to dark mode'">
-                    {{ isDarkTheme ? '☀️' : '🌙' }}
-                </button>
+                <div class="header-actions">
+                    <button class="reset-settings-btn" data-testid="reset-settings" @click="resetUiSettings" title="Reset Layout Settings" aria-label="Reset layout settings">↺</button>
+                    <button class="theme-toggle" data-testid="theme-toggle" @click="toggleTheme" :title="isDarkTheme ? 'Switch to light mode' : 'Switch to dark mode'">
+                        {{ isDarkTheme ? '☀️' : '🌙' }}
+                    </button>
+                </div>
             </header>
 
             <!-- Search & Filters -->
@@ -39,12 +53,72 @@
                         </div>
                     </div>
                 </div>
-                <select class="date-range-select" @change="addMonthFilter($event.target.value); $event.target.value = ''">
-                    <option value="">+ Date filter</option>
-                    <optgroup label="Individual Months">
-                        <option v-for="m in availableMonths" :key="m.key" :value="m.key">{{ m.label }}</option>
-                    </optgroup>
-                </select>
+                <div class="date-filter-wrap">
+                    <button type="button" class="date-range-select date-filter-trigger"
+                            :class="{ open: datePopoverOpen }"
+                            data-testid="date-filter-trigger"
+                            @click.stop="toggleDatePopover">📅 Date filter <span class="chev">▾</span></button>
+                    <div class="date-popover" v-if="datePopoverOpen" data-testid="date-popover" @click.stop>
+                        <div class="quick-grid quick-grid-3col" data-testid="date-this-row">
+                            <button v-for="item in thisLastPresets.thisRow" :key="item.key" type="button"
+                                    class="quick-pill" :class="{ active: isDateItemActive(item) }"
+                                    :data-testid="'date-preset-' + item.label.toLowerCase().replace(/ /g, '-')"
+                                    @click="toggleDateItem(item)">{{ item.label }}</button>
+                        </div>
+                        <div class="quick-grid quick-grid-3col" data-testid="date-last-row">
+                            <button v-for="item in thisLastPresets.lastRow" :key="item.key" type="button"
+                                    class="quick-pill" :class="{ active: isDateItemActive(item) }"
+                                    :data-testid="'date-preset-' + item.label.toLowerCase().replace(/ /g, '-')"
+                                    @click="toggleDateItem(item)">{{ item.label }}</button>
+                        </div>
+                        <div class="popover-divider"></div>
+                        <div class="year-tabs" data-testid="date-year-tabs">
+                            <button type="button" v-for="year in yearTabs" :key="year" class="year-tab"
+                                    :class="{ active: year === activeYearTab }"
+                                    :data-testid="'date-year-tab-' + year"
+                                    :aria-pressed="year === activeYearTab"
+                                    @click="activeYearTab = year">
+                                <span>{{ year }}</span>
+                                <span v-if="yearTabHasPending(year)" class="dot" aria-hidden="true"></span>
+                                <span v-if="yearTabHasPending(year)" class="sr-only">has selected months</span>
+                            </button>
+                            <button type="button" class="link-btn" data-testid="date-clear-months"
+                                    @click="clearPendingMonths">Clear</button>
+                        </div>
+                        <div class="month-grid month-grid-3col" data-testid="date-month-grid">
+                            <button type="button" v-for="m in activeYearMonths" :key="m.key" class="month-cell"
+                                    :class="{ selected: pendingMonths.has(m.key) }"
+                                    :data-testid="'date-month-cell-' + m.key"
+                                    :aria-pressed="pendingMonths.has(m.key)"
+                                    :aria-label="m.label"
+                                    @click="toggleDateItem({ type: 'month', key: m.key })">{{ m.label.split(' ')[0] }}</button>
+                        </div>
+                        <div class="popover-divider"></div>
+                        <div class="daterange-row">
+                            <div class="date-input-wrap">
+                                <label>Start</label>
+                                <drill-calendar :model-value="customStart"
+                                                @update:model-value="customStart = $event"
+                                                testid-prefix="date-start"
+                                                placeholder="e.g. 3/15/2026"></drill-calendar>
+                            </div>
+                            <div class="date-input-wrap">
+                                <label>End</label>
+                                <drill-calendar :model-value="customEnd"
+                                                @update:model-value="customEnd = $event"
+                                                testid-prefix="date-end"
+                                                placeholder="e.g. 7/7/2026"
+                                                :align-right="true"></drill-calendar>
+                            </div>
+                        </div>
+                        <div class="popover-footer">
+                            <button type="button" class="link-btn link-danger" data-testid="date-clear-all"
+                                    @click="clearAllDateFilters">Clear all filters</button>
+                            <button type="button" class="apply-btn" data-testid="date-apply"
+                                    @click="applyDateFilters">Apply</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="filter-chips" v-if="activeFilters.length > 0" data-testid="filter-chips">
                     <div v-for="(filter, index) in activeFilters"
                          :key="index"
@@ -130,7 +204,7 @@
             </div>
 
             <!-- Charts Section -->
-            <div class="chart-section">
+            <div class="chart-section" :class="{ collapsed: chartsCollapsed }">
                 <div class="section-header" @click="chartsCollapsed = !chartsCollapsed">
                     <h2>
                         <span class="toggle">{{ chartsCollapsed ? '▶' : '▼' }}</span>
@@ -140,20 +214,20 @@
                 <div class="section-content" :class="{ collapsed: chartsCollapsed }">
                     <div class="charts-grid">
                         <div class="chart-container">
-                            <h3>Monthly Trend</h3>
+                            <h3>Cash Flow Trend</h3>
                             <div class="chart-wrapper">
                                 <canvas ref="monthlyChart"></canvas>
                             </div>
                         </div>
                         <div class="chart-container">
-                            <h3>By Category</h3>
+                            <h3>Spending by Category</h3>
                             <div class="chart-wrapper">
                                 <canvas ref="categoryPieChart"></canvas>
                             </div>
                         </div>
                     </div>
                     <div class="chart-container" style="margin-top: 2rem;">
-                        <h3>Category Trends by Month</h3>
+                        <h3>Spending by Category Trend</h3>
                         <div class="chart-wrapper" style="height: 350px;">
                             <canvas ref="categoryByMonthChart"></canvas>
                         </div>
@@ -161,28 +235,57 @@
                 </div>
             </div>
 
-            <!-- Unified View Toggle -->
+            <!-- Transaction Details container -->
+            <div class="details-section" :class="{ collapsed: detailsCollapsed }">
+                <div class="section-header" @click="detailsCollapsed = !detailsCollapsed">
+                    <h2>
+                        <span class="toggle">{{ detailsCollapsed ? '▶' : '▼' }}</span>
+                        Transaction Details
+                    </h2>
+                    <span class="header-count" data-testid="details-summary">{{ detailsSummary }}</span>
+                </div>
+                <div class="details-body">
+            <!-- Unified View Toggle. Two groups so they wrap cleanly on mobile:
+                 view modes stay on one line, negatives + collapse drop to the next. -->
             <div class="view-toggle">
-                <button :class="{ active: currentView === 'category' && groupByMode === 'merchant' }"
-                        @click="currentView = 'category'; groupByMode = 'merchant'">
-                    Merchant
-                </button>
-                <button :class="{ active: currentView === 'category' && groupByMode === 'subcategory' }"
-                        @click="currentView = 'category'; groupByMode = 'subcategory'">
-                    Subcategory
-                </button>
-                <button v-if="hasSections"
-                        :class="{ active: currentView === 'section' }"
-                        @click="currentView = 'section'">
-                    View
-                </button>
-                <button v-if="currentView === 'category' || hasSections"
-                        class="toggle-negatives"
-                        :class="{ active: includeNegativeTotals }"
-                        :title="includeNegativeTotals ? 'Exclude categories and merchants with net negative totals' : 'Include categories and merchants with net negative totals'"
-                        @click="includeNegativeTotals = !includeNegativeTotals">
-                    {{ includeNegativeTotals ? 'Exclude Negatives' : 'Include Negatives' }}
-                </button>
+                <div class="view-modes">
+                    <button :class="{ active: currentView === 'category' && groupByMode === 'merchant' }"
+                            @click="currentView = 'category'; groupByMode = 'merchant'">
+                        Merchant
+                    </button>
+                    <button :class="{ active: currentView === 'category' && groupByMode === 'subcategory' }"
+                            @click="currentView = 'category'; groupByMode = 'subcategory'">
+                        Subcategory
+                    </button>
+                    <button v-if="hasSections"
+                            :class="{ active: currentView === 'section' }"
+                            @click="currentView = 'section'">
+                        View
+                    </button>
+                </div>
+                <div class="toggle-actions">
+                    <button v-if="(currentView === 'category' || hasSections) && negativeTotalsCount > 0"
+                            class="toggle-negatives"
+                            :class="{ active: includeNegativeTotals }"
+                            :title="includeNegativeTotals ? 'Exclude categories and merchants with net negative totals' : 'Include categories and merchants with net negative totals'"
+                            @click="includeNegativeTotals = !includeNegativeTotals">
+                        {{ includeNegativeTotals ? 'Exclude Negatives' : 'Include Negatives' }}
+                        <span v-if="!includeNegativeTotals" class="negatives-badge">{{ negativeTotalsCount > 99 ? '99+' : negativeTotalsCount }}</span>
+                    </button>
+                    <button class="icon-btn collapse-all-btn" data-testid="collapse-all-toggle" :title="allCollapsed ? 'Expand all categories' : 'Collapse all categories'" @click="toggleAllSections()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <template v-if="allCollapsed">
+                                <polyline points="7 13 12 18 17 13"></polyline>
+                                <polyline points="7 6 12 11 17 6"></polyline>
+                            </template>
+                            <template v-else>
+                                <polyline points="17 11 12 6 7 11"></polyline>
+                                <polyline points="17 18 12 13 7 18"></polyline>
+                            </template>
+                        </svg>
+                        <span>{{ allCollapsed ? 'Expand all' : 'Collapse all' }}</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Section View -->
@@ -194,6 +297,7 @@
                     :title="section.title"
                     :items="Object.values(section.filteredMerchants)"
                     :total-amount="section.filteredTotal"
+                    :spending-amount="section.filteredSpending"
                     :category-total="section.filteredTotal"
                     :grand-total="grandTotal"
                     :gross-spending="grossSpending"
@@ -210,20 +314,26 @@
                     :format-date="formatDate"
                     :format-pct="formatPct"
                     :add-filter="addFilter"
+                    :is-include-filter-active="isIncludeFilterActive"
+                    :toggle-include-filter="toggleIncludeFilter"
                     :highlight-description="highlightDescription"
                     :tag-color="tagColor"
                 ></merchant-section>
             </template>
 
-            <!-- Category View - Grouped by Merchant -->
-            <template v-if="currentView === 'category' && groupByMode === 'merchant'">
+            <!-- Category View - one keyed v-for for both merchant & subcategory grouping.
+                 Both groupings key sections by the same category names, so a single
+                 v-for lets Vue patch <section> nodes in place across a groupByMode
+                 toggle instead of tearing them down and remounting them. -->
+            <template v-if="currentView === 'category'">
                 <merchant-section
-                    v-for="(category, categoryName) in positiveCategoryView"
+                    v-for="(category, categoryName) in (groupByMode === 'subcategory' ? subcategoryGroupedView : positiveCategoryView)"
                     :key="categoryName"
                     :section-key="'cat:' + categoryName"
                     :title="categoryName"
-                    :items="category.sortedMerchants"
+                    :items="groupByMode === 'subcategory' ? category.sortedSubcategories : category.sortedMerchants"
                     :total-amount="category.filteredTotal"
+                    :spending-amount="category.filteredSpending"
                     :category-total="category.filteredTotal"
                     :grand-total="grandTotal"
                     :gross-spending="grossSpending"
@@ -234,6 +344,7 @@
                     :num-months="numFilteredMonths"
                     :header-color="categoryColorMap[categoryName]"
                     :category-mode="true"
+                    :subcategory-mode="groupByMode === 'subcategory'"
                     :collapsed-sections="collapsedSections"
                     :sort-config="sortConfig"
                     :expanded-items="expandedMerchants"
@@ -244,45 +355,14 @@
                     :format-date="formatDate"
                     :format-pct="formatPct"
                     :add-filter="addFilter"
+                    :is-include-filter-active="isIncludeFilterActive"
+                    :toggle-include-filter="toggleIncludeFilter"
                     :highlight-description="highlightDescription"
                     :tag-color="tagColor"
                 ></merchant-section>
             </template>
-
-            <!-- Category View - Grouped by Subcategory -->
-            <template v-if="currentView === 'category' && groupByMode === 'subcategory'">
-                <merchant-section
-                    v-for="(category, categoryName) in subcategoryGroupedView"
-                    :key="categoryName"
-                    :section-key="'cat:' + categoryName"
-                    :title="categoryName"
-                    :items="category.sortedSubcategories"
-                    :total-amount="category.filteredTotal"
-                    :category-total="category.filteredTotal"
-                    :grand-total="grandTotal"
-                    :gross-spending="grossSpending"
-                    :total-unfiltered-spending="spendingTotal"
-                    :income-total="incomeTotal"
-                    :investment-total="investmentTotal"
-                    :type-totals="category.typeTotals"
-                    :num-months="numFilteredMonths"
-                    :header-color="categoryColorMap[categoryName]"
-                    :category-mode="true"
-                    :subcategory-mode="true"
-                    :collapsed-sections="collapsedSections"
-                    :sort-config="sortConfig"
-                    :expanded-items="expandedMerchants"
-                    :extra-field-matches="extraFieldMatches"
-                    :toggle-section="toggleSection"
-                    :toggle-sort="toggleSort"
-                    :format-currency="formatCurrency"
-                    :format-date="formatDate"
-                    :format-pct="formatPct"
-                    :add-filter="addFilter"
-                    :highlight-description="highlightDescription"
-                    :tag-color="tagColor"
-                ></merchant-section>
-            </template>
+                </div><!-- /.details-body -->
+            </div><!-- /.details-section -->
 
             <!-- Footer -->
             <footer>

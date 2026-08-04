@@ -3,6 +3,18 @@
 
 const { createApp, ref, reactive, computed, watch, onMounted, nextTick, defineComponent } = Vue;
 
+function setAppInitializingState() {
+    document.body.classList.add('app-initializing');
+    document.body.classList.remove('app-ready');
+}
+
+function setAppReadyState() {
+    document.body.classList.remove('app-initializing');
+    document.body.classList.add('app-ready');
+}
+
+setAppInitializingState();
+
 // =============================================================================
 // TRANSACTION CLASSIFICATION - Mirrors Python classification.py
 // =============================================================================
@@ -87,6 +99,161 @@ function calculateCashFlow(income, spending, credits) {
 
 // =============================================================================
 
+// =============================================================================
+// DATE FILTER HELPERS (Month / Quarter / Year / Custom range)
+// =============================================================================
+
+const MONTH_NAMES_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_NAMES_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function quarterOf(monthNum) { return Math.ceil(monthNum / 3); }
+
+// 'YYYY-MM' -> 'Mon YYYY'
+function monthKeyLabel(key) {
+    const parts = key.split('-');
+    return MONTH_NAMES_SHORT[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+}
+function quarterMonthKeys(year, q) {
+    const startM = (q - 1) * 3 + 1;
+    return [startM, startM + 1, startM + 2].map(m => year + '-' + pad2(m));
+}
+function yearMonthKeys(year) {
+    const out = [];
+    for (let m = 1; m <= 12; m++) out.push(year + '-' + pad2(m));
+    return out;
+}
+
+// Flatten a preset item ({type:'month'|'quarter'|'year', key}) to its
+// constituent calendar-month keys. This is the shared path that lets
+// quarter/year presets, individual month clicks, and aggregation all use one
+// coverage/toggle mechanism.
+function monthsForItem(item) {
+    if (item.type === 'month') return [item.key];
+    if (item.type === 'quarter') {
+        const parts = item.key.split('-Q');
+        return quarterMonthKeys(parseInt(parts[0], 10), parseInt(parts[1], 10));
+    }
+    if (item.type === 'year') return yearMonthKeys(parseInt(item.key, 10));
+    return [];
+}
+
+// Greedily compress a flat set of month keys into the fewest chips: any full
+// year first, then any full quarters remaining in that year, then whatever
+// individual months are left. Returns {type, key, label}[].
+function aggregateMonthKeys(monthKeys) {
+    const remaining = {};
+    monthKeys.forEach(k => { remaining[k] = true; });
+    const byYear = {};
+    monthKeys.forEach(k => { (byYear[k.slice(0, 4)] = byYear[k.slice(0, 4)] || []).push(k); });
+
+    const results = [];
+    Object.keys(byYear).sort().forEach(yearStr => {
+        const year = parseInt(yearStr, 10);
+        if (yearMonthKeys(year).every(k => remaining[k])) {
+            results.push({ type: 'year', key: yearStr, label: yearStr });
+            yearMonthKeys(year).forEach(k => delete remaining[k]);
+            return;
+        }
+        for (let q = 1; q <= 4; q++) {
+            const qMonths = quarterMonthKeys(year, q);
+            if (qMonths.every(k => remaining[k])) {
+                results.push({ type: 'quarter', key: yearStr + '-Q' + q, label: 'Q' + q + ' ' + yearStr });
+                qMonths.forEach(k => delete remaining[k]);
+            }
+        }
+    });
+    Object.keys(remaining).sort().forEach(k => {
+        results.push({ type: 'month', key: k, label: monthKeyLabel(k) });
+    });
+    return results;
+}
+
+// Chip type -> filter category. month/daterange share the 'date' category so
+// they OR together in passesFilters instead of AND-ing as separate types.
+function filterCategory(type) {
+    return (type === 'month' || type === 'daterange') ? 'date' : type;
+}
+
+// Convert an aggregated {type,key,label} entry into an activeFilters chip.
+// Quarter/year become 'YYYY-MM..YYYY-MM' range strings under the 'month' type
+// (reusing monthMatches), matching the chip data model in the plan.
+function aggregateEntryToChip(entry) {
+    if (entry.type === 'year') {
+        return { text: entry.key + '-01..' + entry.key + '-12', type: 'month', mode: 'include', displayText: entry.label };
+    }
+    if (entry.type === 'quarter') {
+        const parts = entry.key.split('-Q');
+        const startM = (parseInt(parts[1], 10) - 1) * 3 + 1;
+        return {
+            text: parts[0] + '-' + pad2(startM) + '..' + parts[0] + '-' + pad2(startM + 2),
+            type: 'month', mode: 'include', displayText: entry.label
+        };
+    }
+    return { text: entry.key, type: 'month', mode: 'include', displayText: monthKeyLabel(entry.key) };
+}
+
+// Restore a display label for a 'month'-type chip after a hash reload: plain
+// month, a full-year range, a quarter range, or a generic month range.
+function monthChipDisplayText(text) {
+    if (!text.includes('..')) return monthKeyLabel(text);
+    const [start, end] = text.split('..');
+    const [sy, sm] = start.split('-');
+    const [ey, em] = end.split('-');
+    if (sy === ey && sm === '01' && em === '12') return sy;               // Year
+    if (sy === ey) {
+        const smN = parseInt(sm, 10), emN = parseInt(em, 10);
+        if (emN - smN === 2 && (smN - 1) % 3 === 0) {                     // Quarter
+            return 'Q' + quarterOf(smN) + ' ' + sy;
+        }
+    }
+    return monthKeyLabel(start) + ' – ' + monthKeyLabel(end);            // Generic range
+}
+
+// Cross-year-aware label for a 'daterange' chip ('YYYY-MM-DD..YYYY-MM-DD').
+// Year shown on both ends when they differ, once (on end) when they match.
+function dateRangeDisplayText(text) {
+    const [a, b] = String(text).split('..');
+    // Hand-edited hashes can carry anything; fall back to the raw text rather
+    // than throwing on a missing/malformed half.
+    const iso = /^\d{4}-\d{1,2}-\d{1,2}$/;
+    if (!iso.test(a || '') || !iso.test(b || '')) return text;
+    const ap = a.split('-'), bp = b.split('-');
+    const startPart = MONTH_NAMES_SHORT[parseInt(ap[1], 10) - 1] + ' ' + parseInt(ap[2], 10) +
+        (ap[0] !== bp[0] ? ', ' + ap[0] : '');
+    return startPart + ' – ' + MONTH_NAMES_SHORT[parseInt(bp[1], 10) - 1] + ' ' + parseInt(bp[2], 10) + ', ' + bp[0];
+}
+
+// A y/m/d triple that a calendar actually has. The regexes below only prove
+// the shape, so 2/31/2026, 13/1/2026 and 99/99/2026 all reach here looking
+// well-formed; without this they become chips that can never match a
+// transaction.
+function isRealDate(dt) {
+    if (!dt || dt.m < 1 || dt.m > 12 || dt.d < 1) return false;
+    // Day 0 of the next month is the last day of this one.
+    return dt.d <= new Date(dt.y, dt.m, 0).getDate();
+}
+
+function parseTypedDate(str) {
+    str = (str || '').trim();
+    if (!str) return null;
+    const m1 = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m1) {
+        const dt = { y: +m1[1], m: +m1[2], d: +m1[3] };
+        return isRealDate(dt) ? dt : null;
+    }
+    const m2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m2) {
+        const dt = { y: +m2[3], m: +m2[1], d: +m2[2] };
+        return isRealDate(dt) ? dt : null;
+    }
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
+    return null;
+}
+function fmtDrillDate(dt) { return MONTH_NAMES_SHORT[dt.m - 1] + ' ' + dt.d + ', ' + dt.y; }
+function dateToKey(dt) { return dt.y + '-' + pad2(dt.m) + '-' + pad2(dt.d); }
+
 // ========== REUSABLE COMPONENTS ==========
 
 // Sortable merchant/group section component
@@ -107,6 +274,9 @@ const MerchantSection = defineComponent({
         // Subcategory mode: rows are subcategories, not merchants
         subcategoryMode: { type: Boolean, default: false },
         categoryTotal: { type: Number, default: 0 },
+        // Spending-only counterpart of totalAmount, for percentages taken
+        // against grossSpending (which excludes income/investment/transfers).
+        spendingAmount: { type: Number, default: 0 },
         grandTotal: { type: Number, default: 0 },
         grossSpending: { type: Number, default: 0 },
         totalUnfilteredSpending: { type: Number, default: 0 },
@@ -126,6 +296,8 @@ const MerchantSection = defineComponent({
         formatDate: { type: Function, required: true },
         formatPct: { type: Function, default: null },
         addFilter: { type: Function, required: true },
+        isIncludeFilterActive: { type: Function, required: true },
+        toggleIncludeFilter: { type: Function, required: true },
         highlightDescription: { type: Function, default: (d) => d },
         tagColor: { type: Function, default: () => '#888' }
     },
@@ -140,11 +312,11 @@ const MerchantSection = defineComponent({
         }
     },
     template: `
-        <section :class="[sectionKey.replace(':', '-') + '-section', 'category-section']" :data-testid="'section-' + sectionKey.replace(':', '-')">
+        <section :class="[sectionKey.replace(':', '-') + '-section', 'category-section', { 'is-collapsed': collapsedSections.has(sectionKey) }]" :data-testid="'section-' + sectionKey.replace(':', '-')">
             <div class="section-header" @click="toggleSection(sectionKey)">
                 <h2>
                     <span class="toggle">{{ collapsedSections.has(sectionKey) ? '▶' : '▼' }}</span>
-                    <span v-if="headerColor" class="category-dot" :style="{ backgroundColor: headerColor }"></span>
+                    <span v-if="headerColor" class="category-dot" :style="{ backgroundColor: headerColor, '--dot-color': headerColor }"></span>
                     {{ title }}
                 </h2>
                 <span class="section-total">
@@ -156,7 +328,7 @@ const MerchantSection = defineComponent({
                             <span v-if="typeTotals.income > 0 && incomeTotal > 0" class="income-pct">({{ formatPct(typeTotals.income, incomeTotal) }} income)</span>
                             <span v-if="typeTotals.investment > 0 && investmentTotal > 0" class="investment-pct">({{ formatPct(typeTotals.investment, investmentTotal) }} invest)</span>
                         </span>
-                        <span class="section-pct" v-else-if="grossSpending > 0">({{ formatPct(totalAmount, grossSpending) }})</span>
+                        <span class="section-pct" v-else-if="grossSpending > 0">({{ formatPct(spendingAmount, grossSpending) }})</span>
                     </template>
                     <template v-else>
                         <span v-if="showTotal" class="section-ytd credit-amount">+{{ formatCurrency(totalAmount) }}</span>
@@ -174,14 +346,14 @@ const MerchantSection = defineComponent({
                                 <th @click.stop="toggleSort(sectionKey, 'subcategory')"
                                     :class="getSortClass('subcategory')">{{ subcategoryMode ? 'Merchants' : (categoryMode ? 'Subcategory' : 'Category') }}</th>
                                 <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
-                                <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
+                                <th v-if="categoryMode" class="count-col" @click.stop="toggleSort(sectionKey, 'count')"
                                     :class="getSortClass('count')">Count</th>
                                 <th>Tags</th>
-                                <th v-if="!categoryMode" @click.stop="toggleSort(sectionKey, 'count')"
+                                <th v-if="!categoryMode" class="count-col" @click.stop="toggleSort(sectionKey, 'count')"
                                     :class="getSortClass('count')">Count</th>
                                 <th class="money" @click.stop="toggleSort(sectionKey, 'total')"
                                     :class="getSortClass('total')">{{ creditMode ? 'Amount' : 'Total' }}</th>
-                                <th v-if="categoryMode" @click.stop="toggleSort(sectionKey, 'total')"
+                                <th v-if="categoryMode" class="pct" @click.stop="toggleSort(sectionKey, 'total')"
                                     :class="getSortClass('total')">%</th>
                             </tr>
                         </thead>
@@ -191,58 +363,63 @@ const MerchantSection = defineComponent({
                                     :class="{ expanded: isExpanded(item.id || idx) }"
                                     :data-testid="'merchant-row-' + (item.id || item.displayName || item.merchant || idx)"
                                     @click="toggleExpand(item.id || idx)">
-                                    <td class="merchant" :class="{ clickable: categoryMode }">
-                                        <span class="chevron">{{ isExpanded(item.id || idx) ? '▼' : '▶' }}</span>
-                                        <span class="merchant-name" @click.stop="categoryMode ? addFilter(item.id, subcategoryMode ? 'subcategory' : 'merchant', item.displayName) : null">
-                                            {{ item.displayName || item.merchant }}
-                                        </span>
-                                        <span v-if="item.matchInfo || item.viewInfo" class="match-info-trigger"
-                                                      @click.stop="togglePopup($event)">info
-                                            <span class="match-info-popup" ref="popup" @click.stop>
-                                                <button class="popup-close" @click="closePopup($event)">&times;</button>
-                                                <div class="popup-header">Why This Matched</div>
-                                                <template v-if="item.matchInfo">
-                                                    <div v-if="item.matchInfo.explanation" class="popup-explanation">{{ item.matchInfo.explanation }}</div>
-                                                    <div class="popup-section">
-                                                        <div class="popup-section-header">Merchant Pattern</div>
-                                                        <div class="popup-code">{{ item.matchInfo.pattern }}</div>
-                                                    </div>
-                                                    <div class="popup-section">
-                                                        <div class="popup-section-header">Assigned To</div>
-                                                        <div class="popup-row">
-                                                            <span class="popup-label">Merchant:</span>
-                                                            <span class="popup-value">{{ item.matchInfo.assignedMerchant }}</span>
+                                    <td class="merchant">
+                                        <div class="merchant-cell">
+                                            <span class="chevron">{{ isExpanded(item.id || idx) ? '▼' : '▶' }}</span>
+                                            <div class="merchant-body">
+                                                <span class="merchant-name">
+                                                    {{ item.displayName || item.merchant }}
+                                                </span>
+                                                <span class="merchant-actions" v-if="categoryMode">
+                                                    <span v-if="item.matchInfo || item.viewInfo" class="match-info-trigger"
+                                                          @click.stop="togglePopup($event)">info
+                                                <span class="match-info-popup" ref="popup" @click.stop>
+                                                    <button class="popup-close" @click="closePopup($event)">&times;</button>
+                                                    <div class="popup-header">Why This Matched</div>
+                                                    <template v-if="item.matchInfo">
+                                                        <div v-if="item.matchInfo.explanation" class="popup-explanation">{{ item.matchInfo.explanation }}</div>
+                                                        <div class="popup-section">
+                                                            <div class="popup-section-header">Merchant Pattern</div>
+                                                            <div class="popup-code">{{ item.matchInfo.pattern }}</div>
                                                         </div>
-                                                        <div class="popup-row">
-                                                            <span class="popup-label">Category:</span>
-                                                            <span class="popup-value">{{ item.matchInfo.assignedCategory }} / {{ item.matchInfo.assignedSubcategory }}</span>
+                                                        <div class="popup-section">
+                                                            <div class="popup-section-header">{{ item.matchInfo.ruleName ? 'Rule: [' + item.matchInfo.ruleName + ']' : 'Tag Rules Matched' }}</div>
+                                                            <div v-if="item.matchInfo.ruleName || (item.matchInfo.assignedCategory && item.matchInfo.assignedCategory !== 'Unknown')" class="popup-row">
+                                                                <span class="popup-label">Merchant:</span>
+                                                                <span class="popup-value">{{ item.matchInfo.assignedMerchant }}</span>
+                                                            </div>
+                                                            <div v-if="item.matchInfo.ruleName || (item.matchInfo.assignedCategory && item.matchInfo.assignedCategory !== 'Unknown')" class="popup-row">
+                                                                <span class="popup-label">Category:</span>
+                                                                <span class="popup-value">{{ item.matchInfo.assignedCategory }} / {{ item.matchInfo.assignedSubcategory }}</span>
+                                                            </div>
+                                                            <div v-for="(tag, tagIndex) in getTags(item)" :key="tag" class="popup-row popup-tag-row">
+                                                                <span class="popup-label">{{ tagIndex === 0 ? 'Tags:' : '' }}</span>
+                                                                <span class="popup-value">
+                                                                    <span class="tag-badge popup-tag-badge" :style="{ borderColor: tagColor(tag), color: tagColor(tag) }">{{ tag }}</span>
+                                                                    <span v-if="item.matchInfo.tagSources && item.matchInfo.tagSources[tag] && (!item.matchInfo.ruleName || item.matchInfo.tagSources[tag].rule !== item.matchInfo.ruleName)" class="popup-tag-source">
+                                                                        from [{{ item.matchInfo.tagSources[tag].rule }}]
+                                                                    </span>
+                                                                </span>
+                                                            </div>
                                                         </div>
-                                                        <div v-if="item.matchInfo.assignedTags && item.matchInfo.assignedTags.length" class="popup-row popup-tags-section">
-                                                            <span class="popup-label">Tags:</span>
-                                                            <span class="popup-value">
-                                                                <template v-if="item.matchInfo.tagSources && Object.keys(item.matchInfo.tagSources).length">
-                                                                    <div v-for="tag in item.matchInfo.assignedTags" :key="tag" class="popup-tag-item">
-                                                                        <span class="popup-tag-name">{{ tag }}</span>
-                                                                        <span v-if="item.matchInfo.tagSources[tag]" class="popup-tag-source">
-                                                                            from [{{ item.matchInfo.tagSources[tag].rule }}]
-                                                                        </span>
-                                                                    </div>
-                                                                </template>
-                                                                <template v-else>{{ item.matchInfo.assignedTags.join(', ') }}</template>
-                                                            </span>
+                                                    </template>
+                                                    <template v-if="item.viewInfo && item.viewInfo.filterExpr">
+                                                        <div class="popup-section popup-view-section">
+                                                            <div class="popup-section-header">View Filter ({{ item.viewInfo.viewName }})</div>
+                                                            <div v-if="item.viewInfo.explanation" class="popup-explanation" style="margin-top: 0.3em;">{{ item.viewInfo.explanation }}</div>
+                                                            <div class="popup-code">{{ item.viewInfo.filterExpr }}</div>
                                                         </div>
-                                                    </div>
-                                                </template>
-                                                <template v-if="item.viewInfo && item.viewInfo.filterExpr">
-                                                    <div class="popup-section">
-                                                        <div class="popup-section-header">View Filter ({{ item.viewInfo.viewName }})</div>
-                                                        <div v-if="item.viewInfo.explanation" class="popup-explanation" style="margin-top: 0.3em;">{{ item.viewInfo.explanation }}</div>
-                                                        <div class="popup-code">{{ item.viewInfo.filterExpr }}</div>
-                                                    </div>
-                                                </template>
-                                                <div v-if="item.matchInfo" class="popup-source">From: {{ item.matchInfo.source === 'user' ? 'merchants.rules' : item.matchInfo.source }}</div>
-                                            </span>
-                                        </span>
+                                                    </template>
+                                                    <div v-if="item.matchInfo" class="popup-source">From: {{ item.matchInfo.source === 'user' ? 'merchants.rules' : item.matchInfo.source }}</div>
+                                                </span>
+                                                    </span>
+                                                    <span v-if="item.matchInfo || item.viewInfo" class="merchant-action-sep">&middot;</span>
+                                                    <button type="button" class="merchant-filter-trigger" @click.stop="toggleMerchantFilter(item)">
+                                                        {{ isMerchantFiltered(item) ? 'clear' : 'filter' }}
+                                                    </button>
+                                                </span>
+                                            </div>
+                                        </div>
                                     </td>
                                     <td class="category" :class="{ clickable: categoryMode && !subcategoryMode }"
                                         @click.stop="categoryMode && !subcategoryMode && addFilter(item.subcategory, 'subcategory')">
@@ -261,13 +438,13 @@ const MerchantSection = defineComponent({
                                         <span v-else>{{ item.subcategory }}</span>
                                     </td>
                                     <!-- Category mode: Count then Tags; Other modes: Tags then Count -->
-                                    <td v-if="categoryMode" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
+                                    <td v-if="categoryMode" class="count-col" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
                                     <td class="tags-cell">
                                         <span v-for="tag in getTags(item)" :key="tag" class="tag-badge" data-testid="tag-badge"
                                               :style="{ borderColor: tagColor(tag), color: tagColor(tag) }"
                                               @click.stop="addFilter(tag, 'tag')">{{ tag }}</span>
                                     </td>
-                                    <td v-if="!categoryMode" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
+                                    <td v-if="!categoryMode" class="count-col" data-testid="merchant-count">{{ item.filteredCount || item.count }}</td>
                                     <td class="money" :class="getAmountClass(item)" data-testid="merchant-total">
                                         {{ formatAmount(item) }}
                                     </td>
@@ -299,8 +476,11 @@ const MerchantSection = defineComponent({
                                                     </div>
                                                 </span>
                                             </span>
-                                            <span class="txn-date">{{ formatDate(txn.date) }}</span>
-                                            <span class="txn-desc"><span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span> <span v-html="highlightDescription(txn.description)"></span></span>
+                                            <span class="txn-date">{{ formatDate(txn.date, txn.month) }}</span>
+                                            <span class="txn-account">
+                                                <span v-if="txn.source" class="txn-source" :class="txn.source.toLowerCase()">{{ txn.source }}</span>
+                                            </span>
+                                            <span class="txn-desc"><span v-html="highlightDescription(txn.description)"></span></span>
                                             <span class="txn-badges">
                                                 <span v-for="tag in [...(txn.tags || [])].sort()"
                                                       :key="tag"
@@ -316,6 +496,8 @@ const MerchantSection = defineComponent({
                                     </td>
                                 </tr>
                             </template>
+                        </tbody>
+                        <tfoot>
                             <tr class="total-row">
                                 <td :colspan="colSpan">{{ totalLabel }}</td>
                                 <td class="money" :class="{ 'credit-amount': creditMode }">
@@ -323,7 +505,7 @@ const MerchantSection = defineComponent({
                                 </td>
                                 <td v-if="categoryMode" class="pct">100%</td>
                             </tr>
-                        </tbody>
+                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -380,6 +562,20 @@ const MerchantSection = defineComponent({
                 tags = item.tags || [];
             }
             return [...tags].sort((a, b) => a.localeCompare(b));
+        },
+        getFilterDescriptor(item) {
+            const type = this.subcategoryMode ? 'subcategory' : 'merchant';
+            const text = this.subcategoryMode ? (item.subcategory || item.displayName || item.id) : (item.displayName || item.id);
+            const displayText = item.displayName || item.merchant || text;
+            return { text, type, displayText };
+        },
+        isMerchantFiltered(item) {
+            const { text, type } = this.getFilterDescriptor(item);
+            return this.isIncludeFilterActive(text, type);
+        },
+        toggleMerchantFilter(item) {
+            const { text, type, displayText } = this.getFilterDescriptor(item);
+            this.toggleIncludeFilter(text, type, displayText);
         },
         getTransactions(item) {
             const txns = item.filteredTxns || item.transactions || [];
@@ -454,6 +650,170 @@ const MerchantSection = defineComponent({
     }
 });
 
+// Drill-down calendar widget for the custom Start/End date inputs.
+// Three views: 'days' (Month + Year drill buttons + day grid), 'months'
+// (Year drill + 3x4 month grid), 'years' (paginated 3x4 year grid).
+// Ported from createDrillCalendar() in the datefilter.html prototype.
+const DrillCalendar = defineComponent({
+    name: 'DrillCalendar',
+    props: {
+        modelValue: { type: Object, default: null }, // { y, m, d } | null
+        testidPrefix: { type: String, default: 'cal' },
+        alignRight: { type: Boolean, default: false },
+        placeholder: { type: String, default: '' }
+    },
+    emits: ['update:modelValue'],
+    data() {
+        const now = new Date();
+        return {
+            view: 'days',
+            viewYear: now.getFullYear(),
+            viewMonth: now.getMonth() + 1,
+            yearPageStart: 1,
+            calOpen: false,
+            textValue: this.modelValue ? fmtDrillDate(this.modelValue) : '',
+            invalid: false
+        };
+    },
+    computed: {
+        selected() { return this.modelValue; },
+        dowLabels() { return ['S', 'M', 'T', 'W', 'T', 'F', 'S']; },
+        monthNamesShort() { return MONTH_NAMES_SHORT; },
+        monthNamesLong() { return MONTH_NAMES_LONG; },
+        dayCells() {
+            const y = this.viewYear, m = this.viewMonth;
+            const blanks = new Date(y, m - 1, 1).getDay();
+            const total = new Date(y, m, 0).getDate();
+            const t = new Date();
+            const cells = [];
+            for (let i = 0; i < blanks; i++) cells.push({ empty: true, key: 'b' + i });
+            for (let d = 1; d <= total; d++) {
+                cells.push({
+                    empty: false, day: d, key: 'd' + d,
+                    selected: this.selected && this.selected.y === y && this.selected.m === m && this.selected.d === d,
+                    today: t.getFullYear() === y && (t.getMonth() + 1) === m && t.getDate() === d
+                });
+            }
+            return cells;
+        },
+        yearPageCells() {
+            const cells = [];
+            for (let y = this.yearPageStart; y <= this.yearPageStart + 11; y++) cells.push(y);
+            return cells;
+        },
+        yearPageLabel() { return this.yearPageStart + '–' + (this.yearPageStart + 11); }
+    },
+    watch: {
+        modelValue(v) {
+            this.textValue = v ? fmtDrillDate(v) : '';
+            this.invalid = false;
+        }
+    },
+    methods: {
+        alignPage(y) { return Math.floor((y - 1) / 12) * 12 + 1; },
+        openCal() {
+            const now = new Date();
+            const base = this.selected || { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+            this.viewYear = base.y;
+            this.viewMonth = base.m;
+            this.yearPageStart = this.alignPage(this.viewYear);
+            this.view = 'days';
+            this.calOpen = true;
+        },
+        toggleCal() { if (this.calOpen) this.calOpen = false; else this.openCal(); },
+        onTextChange() {
+            const parsed = parseTypedDate(this.textValue);
+            if (parsed) {
+                this.textValue = fmtDrillDate(parsed);
+                this.invalid = false;
+                this.$emit('update:modelValue', parsed);
+            } else if (this.textValue.trim() === '') {
+                this.invalid = false;
+                this.$emit('update:modelValue', null);
+            } else {
+                this.invalid = true;
+            }
+        },
+        prevMonth() { this.viewMonth--; if (this.viewMonth < 1) { this.viewMonth = 12; this.viewYear--; } },
+        nextMonth() { this.viewMonth++; if (this.viewMonth > 12) { this.viewMonth = 1; this.viewYear++; } },
+        drillToMonths() { this.view = 'months'; },
+        drillToYears() { this.yearPageStart = this.alignPage(this.viewYear); this.view = 'years'; },
+        pickDay(d) {
+            const sel = { y: this.viewYear, m: this.viewMonth, d };
+            this.textValue = fmtDrillDate(sel);
+            this.invalid = false;
+            this.calOpen = false;
+            this.$emit('update:modelValue', sel);
+        },
+        pickMonth(i) { this.viewMonth = i + 1; this.view = 'days'; },
+        pickYear(y) { this.viewYear = y; this.view = 'months'; },
+        prevMonthsYear() { this.viewYear--; },
+        nextMonthsYear() { this.viewYear++; },
+        prevYearPage() { this.yearPageStart -= 12; },
+        nextYearPage() { this.yearPageStart += 12; },
+        onDocClick(e) {
+            if (this.calOpen && this.$el && !this.$el.contains(e.target)) this.calOpen = false;
+        }
+    },
+    mounted() { document.addEventListener('click', this.onDocClick); },
+    unmounted() { document.removeEventListener('click', this.onDocClick); },
+    template: `
+        <div class="drill-calendar" :class="{ 'align-right': alignRight }" @click.stop>
+            <div class="date-input">
+                <input type="text" :class="{ invalid }" v-model="textValue" @change="onTextChange"
+                       :data-testid="testidPrefix + '-text'" :placeholder="placeholder">
+                <button type="button" class="cal-btn" :data-testid="testidPrefix + '-cal-btn'" @click="toggleCal">📅</button>
+            </div>
+            <div class="cal-popover" v-if="calOpen" :data-testid="testidPrefix + '-cal'">
+                <template v-if="view === 'days'">
+                    <div class="cal-header">
+                        <button type="button" class="cal-nav" @click="prevMonth">‹</button>
+                        <div class="cal-title">
+                            <button type="button" class="cal-drill" @click="drillToMonths">{{ monthNamesLong[viewMonth - 1] }}</button>
+                            <button type="button" class="cal-drill" @click="drillToYears">{{ viewYear }}</button>
+                        </div>
+                        <button type="button" class="cal-nav" @click="nextMonth">›</button>
+                    </div>
+                    <div class="cal-dow"><span v-for="(d, i) in dowLabels" :key="i">{{ d }}</span></div>
+                    <div class="cal-days">
+                        <template v-for="cell in dayCells" :key="cell.key">
+                            <span v-if="cell.empty" class="cal-day empty"></span>
+                            <button v-else type="button" class="cal-day"
+                                    :class="{ selected: cell.selected, today: cell.today }"
+                                    :data-testid="testidPrefix + '-day-' + cell.day"
+                                    @click="pickDay(cell.day)">{{ cell.day }}</button>
+                        </template>
+                    </div>
+                </template>
+                <template v-else-if="view === 'months'">
+                    <div class="cal-header">
+                        <button type="button" class="cal-nav" @click="prevMonthsYear">‹</button>
+                        <div class="cal-title"><button type="button" class="cal-drill" @click="drillToYears">{{ viewYear }}</button></div>
+                        <button type="button" class="cal-nav" @click="nextMonthsYear">›</button>
+                    </div>
+                    <div class="cal-months">
+                        <button v-for="(name, i) in monthNamesShort" :key="i" type="button" class="cal-cell"
+                                :class="{ selected: selected && selected.y === viewYear && selected.m === i + 1 }"
+                                @click="pickMonth(i)">{{ name }}</button>
+                    </div>
+                </template>
+                <template v-else>
+                    <div class="cal-header">
+                        <button type="button" class="cal-nav" @click="prevYearPage">‹</button>
+                        <div class="cal-title">{{ yearPageLabel }}</div>
+                        <button type="button" class="cal-nav" @click="nextYearPage">›</button>
+                    </div>
+                    <div class="cal-years">
+                        <button v-for="y in yearPageCells" :key="y" type="button" class="cal-cell"
+                                :class="{ selected: selected && selected.y === y }"
+                                @click="pickYear(y)">{{ y }}</button>
+                    </div>
+                </template>
+            </div>
+        </div>
+    `
+});
+
 // Category colors for charts
 const CATEGORY_COLORS = [
     '#4facfe', '#00f2fe', '#4dffd2', '#ffa94d', '#f5af19',
@@ -461,12 +821,20 @@ const CATEGORY_COLORS = [
     '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 ];
 
+// Category charts show the top N categories; the rest roll up into "Other"
+// so totals still reflect all spending
+const TOP_CATEGORY_COUNT = 10;
+const OTHER_CATEGORY_LABEL = 'Other';
+const OTHER_CATEGORY_COLOR = '#6b7280';
+
 // Tag colors (distinct from category colors, warmer/earthier tones)
 const TAG_COLORS = [
     '#e879f9', '#c084fc', '#a78bfa', '#818cf8', '#6366f1',
     '#f472b6', '#fb7185', '#f87171', '#fb923c', '#fbbf24',
     '#a3e635', '#4ade80', '#34d399', '#2dd4bf', '#22d3ee'
 ];
+
+const UI_STATE_KEY = 'spending-report-ui-state-v1';
 
 createApp({
     setup() {
@@ -481,11 +849,18 @@ createApp({
         const isScrolled = ref(false);
         const isDarkTheme = ref(true);
         const chartsCollapsed = ref(false);
-        const helpCollapsed = ref(true);
+        const detailsCollapsed = ref(false);
         const currentView = ref('category'); // 'category' or 'section'
         const groupByMode = ref('merchant'); // 'merchant' or 'subcategory'
         const sortConfig = reactive({}); // { 'cat:Food': { column: 'total', dir: 'desc' } }
         const includeNegativeTotals = ref(false); // show categories with negative filteredTotal
+        const txColumnProfiles = reactive({ merchant: null, subcategory: null, section: null });
+        let isHydratingUiState = true;
+        let txMeasureHost = null;
+        let txMeasureDateEl = null;
+        let txMeasureAmountEl = null;
+        let txMeasureAccountEl = null;
+        let txResizeDebounceHandle = null;
 
         // Chart refs
         const monthlyChart = ref(null);
@@ -496,6 +871,9 @@ createApp({
         let monthlyChartInstance = null;
         let pieChartInstance = null;
         let categoryMonthChartInstance = null;
+        // Months actually plotted on the monthly trend chart; bar clicks index into
+        // this, not availableMonths, since empty months and date filters drop months
+        let monthlyChartMonths = [];
 
         // ========== COMPUTED ==========
 
@@ -503,12 +881,57 @@ createApp({
         const spendingData = computed(() => window.spendingData || { sections: {}, numMonths: 12 });
 
         // Report title and subtitle
-        const title = computed(() => spendingData.value.title || 'Financial Report');
+        // report.py always resolves this, so the fallback only covers a
+        // hand-edited spending_data.js. Keep it identical to the Python
+        // default - two different fallbacks is what made the mounted app
+        // rename a report that the loading shell had already titled.
+        const title = computed(() => spendingData.value.title || 'Tally Spending Analysis');
         const subtitle = computed(() => {
             const data = spendingData.value;
             const sources = data.sources || [];
             return sources.length > 0 ? `Data from ${sources.join(', ')}` : '';
         });
+
+        const allPersistableSectionKeys = computed(() => {
+            const keys = new Set();
+            Object.keys(spendingData.value.categoryView || {}).forEach(name => keys.add('cat:' + name));
+            Object.keys(spendingData.value.sections || {}).forEach(id => keys.add('sec:' + id));
+            return keys;
+        });
+
+        const allPersistableItemIds = computed(() => {
+            const ids = new Set();
+
+            for (const category of Object.values(spendingData.value.categoryView || {})) {
+                for (const [subName, subcat] of Object.entries(category.subcategories || {})) {
+                    ids.add(subName);
+                    for (const merchantId of Object.keys(subcat.merchants || {})) {
+                        ids.add(String(merchantId));
+                    }
+                }
+            }
+
+            for (const section of Object.values(spendingData.value.sections || {})) {
+                for (const merchantId of Object.keys(section.merchants || {})) {
+                    ids.add(String(merchantId));
+                }
+            }
+
+            return ids;
+        });
+
+        // Spending-only subtotal, on the same basis grossSpending uses: classify
+        // each transaction and keep the spending bucket, so income, investment
+        // and transfer amounts drop out instead of being raw-summed. Any
+        // percentage taken against grossSpending must use this rather than
+        // filteredTotal, or numerator and denominator disagree about what counts.
+        function spendingSubtotal(txns) {
+            let total = 0;
+            for (const t of txns || []) {
+                total += categorizeAmount(t.amount || 0, t.tags || []).spending;
+            }
+            return total;
+        }
 
         // Core filtering - returns sections with filtered merchants and transactions
         const filteredSections = computed(() => {
@@ -560,10 +983,12 @@ createApp({
             for (const [catName, category] of Object.entries(categoryView)) {
                 const filteredSubcategories = {};
                 let categoryTotal = 0;
+                let categorySpending = 0;
 
                 for (const [subcatName, subcat] of Object.entries(category.subcategories || {})) {
                     const filteredMerchants = {};
                     let subcatTotal = 0;
+                    let subcatSpending = 0;
 
                     for (const [merchantId, merchant] of Object.entries(subcat.merchants || {})) {
                         // Filter transactions
@@ -583,6 +1008,7 @@ createApp({
                                 filteredMonths: months.size
                             };
                             subcatTotal += filteredTotal;
+                            subcatSpending += spendingSubtotal(filteredTxns);
                         }
                     }
 
@@ -590,9 +1016,11 @@ createApp({
                         filteredSubcategories[subcatName] = {
                             ...subcat,
                             filteredMerchants,
-                            filteredTotal: subcatTotal
+                            filteredTotal: subcatTotal,
+                            filteredSpending: subcatSpending
                         };
                         categoryTotal += subcatTotal;
+                        categorySpending += subcatSpending;
                     }
                 }
 
@@ -600,7 +1028,8 @@ createApp({
                     result[catName] = {
                         ...category,
                         filteredSubcategories,
-                        filteredTotal: categoryTotal
+                        filteredTotal: categoryTotal,
+                        filteredSpending: categorySpending
                     };
                 }
             }
@@ -773,6 +1202,30 @@ createApp({
 
         // Credit merchants (negative totals, shown separately)
         // Excludes income and transfer tagged merchants
+        //
+        // Not rendered right now: the "Credits Applied" section that consumed this was
+        // dropped from spending_report.html in ad9477e, though docs/reference.html still
+        // documents it (refund tag -> shown in "Credits Applied", nets against spending).
+        //
+        // KNOWN BUG, fix before re-enabling: isExcludedFromSpending(merchant.tags) below is
+        // a whole-merchant decision made from merchant.tags, which analyzer.py builds as the
+        // UNION of every tag across that merchant's transactions. A single transfer-tagged
+        // txn therefore discards all of the merchant's refunds - on a real dataset Amazon's
+        // union is [monthly-bill, refund, transfer], so every Amazon credit vanishes.
+        // filteredViewTotals and chartAggregations classify per transaction (txn.tags); this
+        // must too. Two ways, and they mean different things:
+        //   1. Net-negative merchants - net each merchant's per-txn spending against its
+        //      per-txn credits, list it when net < 0. Preserves what the section means today
+        //      and stays a short list, but "Total Credits" still won't equal the Credits KPI:
+        //      a refund absorbed inside a net-positive merchant stays invisible. Only works
+        //      when refunds arrive under their own merchant name (e.g. "Amazon Refund").
+        //   2. Any merchant with credits - list it when sum(txn credits) > 0 and show that
+        //      sum. Gives the identity sum(creditAmount) === filteredViewTotals.credits under
+        //      every filter, so the section reconciles with the Credits KPI and Python's
+        //      credits_total. Costs a longer list: a merchant can appear both as spending and
+        //      as a credit (Amazon: $6,910 spent, refunds back).
+        //
+        // grandTotal below has the same merchant-union flaw and is likewise unrendered.
         const unsortedCreditMerchants = computed(() => {
             const credits = [];
             for (const [catName, category] of Object.entries(filteredCategoryView.value)) {
@@ -814,6 +1267,7 @@ createApp({
             for (const [sectionId, section] of Object.entries(sections)) {
                 const filteredMerchants = {};
                 let sectionTotal = 0;
+                let sectionSpending = 0;
 
                 for (const [merchantId, merchant] of Object.entries(section.merchants || {})) {
                     // Filter transactions
@@ -833,6 +1287,7 @@ createApp({
                             filteredMonths: months.size
                         };
                         sectionTotal += filteredTotal;
+                        sectionSpending += spendingSubtotal(filteredTxns);
                     }
                 }
 
@@ -840,7 +1295,8 @@ createApp({
                     result[sectionId] = {
                         ...section,
                         filteredMerchants,
-                        filteredTotal: sectionTotal
+                        filteredTotal: sectionTotal,
+                        filteredSpending: sectionSpending
                     };
                 }
             }
@@ -867,6 +1323,13 @@ createApp({
                 }
             }
             return result;
+        });
+
+        // Count of hidden negative-total items (categories or sections, depending on view)
+        // Used for the badge on the Include/Exclude Negatives toggle button
+        const negativeTotalsCount = computed(() => {
+            const source = currentView.value === 'section' ? filteredSectionView.value : filteredCategoryView.value;
+            return Object.values(source).filter(item => item.filteredTotal < 0).length;
         });
 
         // Totals per section
@@ -902,11 +1365,6 @@ createApp({
             return creditMerchants.value.reduce((sum, m) => sum + m.creditAmount, 0);
         });
 
-        // Gross spending (before credits)
-        const grossSpending = computed(() => {
-            return grandTotal.value + creditsTotal.value;
-        });
-
         // Filtered view totals - sum of ALL matching transactions
         // Simple: whatever matches the filters gets counted and categorized
         const filteredViewTotals = computed(() => {
@@ -925,12 +1383,14 @@ createApp({
             for (const cat of Object.values(filteredCategoryView.value)) {
                 for (const subcat of Object.values(cat.filteredSubcategories || cat.subcategories || {})) {
                     for (const merchant of Object.values(subcat.filteredMerchants || subcat.merchants || {})) {
-                        const tags = merchant.tags || [];
                         const txns = merchant.filteredTxns || merchant.transactions || [];
 
                         for (const txn of txns) {
-                            // Use centralized categorizeAmount() for consistent classification
-                            const c = categorizeAmount(txn.amount || 0, tags);
+                            // Classify with the transaction's OWN tags. merchant.tags is a
+                            // union of every tag across the merchant's transactions
+                            // (analyzer.py builds it that way), so using it here would let a
+                            // single income/transfer-tagged txn re-bucket all the others.
+                            const c = categorizeAmount(txn.amount || 0, txn.tags || []);
                             totals.income += c.income;
                             totals.investment += c.investment;
                             totals.transferIn += c.transferIn;
@@ -969,6 +1429,11 @@ createApp({
                 hasIncome: totals.income > 0  // For display formatting
             };
         });
+
+        // Gross spending (before credits). categorizeAmount() already separates positive
+        // spend from refunds per transaction, so this is the sum of spending-tagged
+        // amounts - no need to net merchants out and add their credits back in.
+        const grossSpending = computed(() => filteredViewTotals.value.spending);
 
         // Cash flow totals from data (excludes transfers and investments)
         const incomeTotal = computed(() => spendingData.value.incomeTotal || 0);
@@ -1068,27 +1533,38 @@ createApp({
         // Number of months in filter (for monthly averages)
         const numFilteredMonths = computed(() => {
             const monthFilters = activeFilters.value.filter(f =>
-                f.type === 'month' && f.mode === 'include'
+                filterCategory(f.type) === 'date' && f.mode === 'include'
             );
             if (monthFilters.length === 0) return spendingData.value.numMonths || 12;
 
             const months = new Set();
             monthFilters.forEach(f => {
-                if (f.text.includes('..')) {
-                    expandMonthRange(f.text).forEach(m => months.add(m));
-                } else {
-                    months.add(f.text);
-                }
+                expandFilterMonths(f).forEach(m => months.add(m));
             });
             return months.size || 1;
         });
 
+        // Expand a date filter chip (month, month-range, or daterange) into the
+        // set of whole-month keys it touches. daterange chips are approximated
+        // to whole months here (fine for averaging/chart bucketing; displayed
+        // totals stay day-accurate via passesFilters).
+        function expandFilterMonths(f) {
+            if (f.type === 'daterange') {
+                const [s, e] = f.text.split('..');
+                if (!s || !e) return [];   // Malformed (hand-edited hash): touches no months.
+                return expandMonthRange(s.slice(0, 7) + '..' + e.slice(0, 7));
+            }
+            if (f.text.includes('..')) return expandMonthRange(f.text);
+            return [f.text];
+        }
+
         // Chart data aggregations - always uses categoryView for consistent data
-        // Includes spending, income, and investment; excludes transfers (money moving between accounts)
+        // Includes spending, income, credits, and investment; excludes transfers (money moving between accounts)
         const chartAggregations = computed(() => {
             const spendingByMonth = {};
             const incomeByMonth = {};
             const investmentByMonth = {};
+            const creditsByMonth = {};
             const byCategory = {};  // Spending only (income doesn't have meaningful categories)
             const byCategoryByMonth = {};
 
@@ -1097,11 +1573,10 @@ createApp({
             for (const [catName, category] of Object.entries(categoryView)) {
                 for (const subcat of Object.values(category.filteredSubcategories || {})) {
                     for (const merchant of Object.values(subcat.filteredMerchants || {})) {
-                        const tags = merchant.tags || [];
-
                         for (const txn of merchant.filteredTxns || []) {
-                            // Use centralized categorization
-                            const c = categorizeAmount(txn.amount, tags);
+                            // Classify with the transaction's OWN tags, not merchant.tags
+                            // (a union across the merchant's txns) - see filteredViewTotals
+                            const c = categorizeAmount(txn.amount, txn.tags || []);
 
                             // Track spending by month and category
                             if (c.spending > 0) {
@@ -1122,13 +1597,18 @@ createApp({
                                 investmentByMonth[txn.month] = (investmentByMonth[txn.month] || 0) + c.investment;
                             }
 
+                            // Track credits by month (refunds are part of cash flow)
+                            if (c.credits > 0) {
+                                creditsByMonth[txn.month] = (creditsByMonth[txn.month] || 0) + c.credits;
+                            }
+
                             // Transfers excluded - they're just money moving between accounts
                         }
                     }
                 }
             }
 
-            return { spendingByMonth, incomeByMonth, investmentByMonth, byCategory, byCategoryByMonth };
+            return { spendingByMonth, incomeByMonth, investmentByMonth, creditsByMonth, byCategory, byCategoryByMonth };
         });
 
         // Map category names to colors (matches pie chart order)
@@ -1188,18 +1668,14 @@ createApp({
         // Filtered months for charts (respects month filters)
         const filteredMonthsForCharts = computed(() => {
             const monthFilters = activeFilters.value.filter(f =>
-                f.type === 'month' && f.mode === 'include'
+                filterCategory(f.type) === 'date' && f.mode === 'include'
             );
             if (monthFilters.length === 0) return availableMonths.value;
 
             // Build set of included months
             const includedMonths = new Set();
             monthFilters.forEach(f => {
-                if (f.text.includes('..')) {
-                    expandMonthRange(f.text).forEach(m => includedMonths.add(m));
-                } else {
-                    includedMonths.add(f.text);
-                }
+                expandFilterMonths(f).forEach(m => includedMonths.add(m));
             });
 
             return availableMonths.value.filter(m => includedMonths.has(m.key));
@@ -1294,7 +1770,8 @@ createApp({
         });
 
         function getDisplayText(type, filterText) {
-            if (type === 'month') return formatMonthLabel(filterText);
+            if (type === 'month') return monthChipDisplayText(filterText);
+            if (type === 'daterange') return dateRangeDisplayText(filterText);
             return displayTextLookup.value[`${type}:${filterText}`] || filterText;
         }
 
@@ -1327,29 +1804,19 @@ createApp({
             return matches;
         });
 
-        // Available months for date picker
+        // Available months for date picker.
+        // Sourced exclusively from categoryView, which is built from ALL
+        // merchants (report.py build_category_view) and is a strict superset of
+        // sections: a merchant matching zero views is absent from `sections` by
+        // design, so sourcing from `sections` silently drops its months.
         const availableMonths = computed(() => {
             const months = new Set();
-            const sections = spendingData.value.sections || {};
-
-            // Use sections if available, otherwise fall back to categoryView
-            if (Object.keys(sections).length > 0) {
-                for (const section of Object.values(sections)) {
-                    for (const merchant of Object.values(section.merchants || {})) {
+            const categoryView = spendingData.value.categoryView || {};
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    for (const merchant of Object.values(subcat.merchants || {})) {
                         for (const txn of merchant.transactions || []) {
                             months.add(txn.month);
-                        }
-                    }
-                }
-            } else {
-                // Fall back to categoryView when no views configured
-                const categoryView = spendingData.value.categoryView || {};
-                for (const category of Object.values(categoryView)) {
-                    for (const subcat of Object.values(category.subcategories || {})) {
-                        for (const merchant of Object.values(subcat.merchants || {})) {
-                            for (const txn of merchant.transactions || []) {
-                                months.add(txn.month);
-                            }
                         }
                     }
                 }
@@ -1371,20 +1838,28 @@ createApp({
                 if (matchesFilter(txn, merchant, f)) return false;
             }
 
-            // Group includes by type
+            // Group includes by filter category (month + daterange collapse to
+            // one 'date' category so they OR together rather than AND).
             const byType = {};
             includes.forEach(f => {
-                if (!byType[f.type]) byType[f.type] = [];
-                byType[f.type].push(f);
+                const cat = filterCategory(f.type);
+                if (!byType[cat]) byType[cat] = [];
+                byType[cat].push(f);
             });
 
-            // AND across types, OR within type
-            for (const [type, filters] of Object.entries(byType)) {
+            // AND across categories, OR within a category
+            for (const [cat, filters] of Object.entries(byType)) {
                 const anyMatch = filters.some(f => matchesFilter(txn, merchant, f));
                 if (!anyMatch) return false;
             }
 
             return true;
+        }
+
+        // Reconstruct a day-precision YYYY-MM-DD for a transaction, mirroring
+        // analyzer.py's CSV export: month (YYYY-MM) + day from date (MM/DD).
+        function txnFullDate(txn) {
+            return `${txn.month}-${(txn.date || '00/00').slice(3, 5)}`;
         }
 
         function matchesFilter(txn, merchant, filter) {
@@ -1399,6 +1874,11 @@ createApp({
                     return merchant.subcategory.toLowerCase() === text;
                 case 'month':
                     return monthMatches(txn.month, filter.text);
+                case 'daterange': {
+                    const [start, end] = filter.text.split('..');
+                    const full = txnFullDate(txn);
+                    return full >= start && full <= end;
+                }
                 case 'tag':
                     return (txn.tags || []).some(t => t.toLowerCase() === text);
                 case 'text':
@@ -1439,7 +1919,28 @@ createApp({
         }
 
         function removeFilter(index) {
+            const removed = activeFilters.value[index];
             activeFilters.value.splice(index, 1);
+            // Removing a custom-range chip must also reset the Start/End widget
+            // so reopening the popover doesn't silently re-add it on Apply.
+            if (removed && removed.type === 'daterange') clearCustomRange();
+        }
+
+        function toggleIncludeFilter(text, type, displayText = null) {
+            const index = activeFilters.value.findIndex(f =>
+                f.mode === 'include' && f.text === text && f.type === type
+            );
+            if (index >= 0) {
+                removeFilter(index);
+            } else {
+                addFilter(text, type, displayText);
+            }
+        }
+
+        function isIncludeFilterActive(text, type) {
+            return activeFilters.value.some(f =>
+                f.mode === 'include' && f.text === text && f.type === type
+            );
         }
 
         function toggleFilterMode(index) {
@@ -1449,10 +1950,151 @@ createApp({
 
         function clearFilters() {
             activeFilters.value = [];
+            pendingMonths.clear();
+            clearCustomRange();
         }
 
         function addMonthFilter(month) {
             if (month) addFilter(month, 'month', formatMonthLabel(month));
+        }
+
+        // ========== DATE FILTER POPOVER (Month / Quarter / Year / Custom) ==========
+        const datePopoverOpen = ref(false);
+        const pendingMonths = reactive(new Set());   // flat set of 'YYYY-MM' keys
+        const activeYearTab = ref(null);
+        const customStart = ref(null);               // { y, m, d } | null
+        const customEnd = ref(null);
+
+        // Distinct years present in the data, ascending.
+        const availableYears = computed(() => {
+            const years = new Set();
+            availableMonths.value.forEach(m => years.add(parseInt(m.key.slice(0, 4), 10)));
+            return Array.from(years).sort((a, b) => a - b);
+        });
+        // Year tabs: up to 3 most recent data years, oldest -> newest.
+        const yearTabs = computed(() => availableYears.value.slice(-3));
+
+        // Real-today info driving the This/Last preset rows.
+        const todayInfo = computed(() => {
+            const now = new Date();
+            const y = now.getFullYear();
+            const mo = now.getMonth() + 1;
+            return { y, mo, q: quarterOf(mo), monthKey: y + '-' + pad2(mo) };
+        });
+        const thisLastPresets = computed(() => {
+            const t = todayInfo.value;
+            let lm = t.mo - 1, lmy = t.y;
+            if (lm < 1) { lm = 12; lmy -= 1; }
+            let lq = t.q - 1, lqy = t.y;
+            if (lq < 1) { lq = 4; lqy -= 1; }
+            const ly = t.y - 1;
+            return {
+                thisRow: [
+                    { label: 'This Month', type: 'month', key: t.monthKey },
+                    { label: 'This Quarter', type: 'quarter', key: t.y + '-Q' + t.q },
+                    { label: 'This Year', type: 'year', key: String(t.y) }
+                ],
+                lastRow: [
+                    { label: 'Last Month', type: 'month', key: lmy + '-' + pad2(lm) },
+                    { label: 'Last Quarter', type: 'quarter', key: lqy + '-Q' + lq },
+                    { label: 'Last Year', type: 'year', key: String(ly) }
+                ]
+            };
+        });
+
+        // Months (with data) for the active year tab.
+        const activeYearMonths = computed(() =>
+            availableMonths.value.filter(m => m.key.slice(0, 4) === String(activeYearTab.value))
+        );
+
+        // A preset is "active" purely by coverage: every constituent month is
+        // currently pending. No separate quarter/year pending state.
+        function isDateItemActive(item) {
+            const months = monthsForItem(item);
+            return months.length > 0 && months.every(k => pendingMonths.has(k));
+        }
+        function toggleDateItem(item) {
+            const months = monthsForItem(item);
+            const active = isDateItemActive(item);
+            months.forEach(k => { if (active) pendingMonths.delete(k); else pendingMonths.add(k); });
+        }
+        function yearTabHasPending(year) {
+            for (const k of pendingMonths) if (k.slice(0, 4) === String(year)) return true;
+            return false;
+        }
+
+        function openDatePopover() {
+            // Expand currently-applied date chips (possibly aggregated into
+            // quarter/year ranges) back into flat pending months for editing.
+            pendingMonths.clear();
+            let rangeChip = null;
+            for (const f of activeFilters.value) {
+                // The popover edits include-mode date filters only. An excluded
+                // chip rehydrated here would come back out of applyDateFilters()
+                // as an inclusion, silently inverting what the user asked for.
+                if (f.mode !== 'include') continue;
+                if (f.type === 'month') {
+                    if (f.text.includes('..')) expandMonthRange(f.text).forEach(k => pendingMonths.add(k));
+                    else pendingMonths.add(f.text);
+                }
+                // daterange chips stay independent (never expanded to months),
+                // but the first one rehydrates the Start/End widget so an
+                // unedited Apply doesn't drop the applied range.
+                else if (f.type === 'daterange' && !rangeChip) rangeChip = f;
+            }
+            if (rangeChip) {
+                const [rawStart, rawEnd] = String(rangeChip.text).split('..');
+                const start = parseTypedDate(rawStart), end = parseTypedDate(rawEnd);
+                // Both halves must parse; a hand-edited hash must not wedge the widget.
+                if (start && end) { customStart.value = start; customEnd.value = end; }
+            }
+            const tabs = yearTabs.value;
+            const ty = todayInfo.value.y;
+            activeYearTab.value = tabs.includes(ty) ? ty : (tabs.length ? tabs[tabs.length - 1] : ty);
+            datePopoverOpen.value = true;
+        }
+        function toggleDatePopover() {
+            if (datePopoverOpen.value) datePopoverOpen.value = false;
+            else openDatePopover();
+        }
+        function closeDatePopover() { datePopoverOpen.value = false; }
+        function clearPendingMonths() { pendingMonths.clear(); }
+
+        function getCustomRangeChip() {
+            if (!customStart.value || !customEnd.value) return null;
+            let a = customStart.value, b = customEnd.value;
+            if (dateToKey(a) > dateToKey(b)) { const t = a; a = b; b = t; }
+            const text = dateToKey(a) + '..' + dateToKey(b);
+            return { text, type: 'daterange', mode: 'include', displayText: dateRangeDisplayText(text) };
+        }
+        function clearCustomRange() {
+            customStart.value = null;
+            customEnd.value = null;
+        }
+
+        // Apply: re-aggregate pending months into the fewest chips, then append
+        // the (independent) custom range. Existing date chips are replaced.
+        function applyDateFilters() {
+            // Replace the include-mode date chips this popover owns; excluded
+            // date chips are not editable here, so they survive untouched.
+            activeFilters.value = activeFilters.value.filter(f =>
+                filterCategory(f.type) !== 'date' || f.mode !== 'include'
+            );
+            aggregateMonthKeys([...pendingMonths]).forEach(entry =>
+                activeFilters.value.push(aggregateEntryToChip(entry))
+            );
+            const custom = getCustomRangeChip();
+            if (custom) activeFilters.value.push(custom);
+            datePopoverOpen.value = false;
+        }
+
+        // Footer "Clear all filters": destructive — wipes every filter, the
+        // pending set, and the custom-range widget, then closes.
+        function clearAllDateFilters() {
+            activeFilters.value = [];
+            pendingMonths.clear();
+            clearCustomRange();
+            datePopoverOpen.value = false;
         }
 
         function toggleExpand(merchantId) {
@@ -1470,6 +2112,51 @@ createApp({
                 collapsedSections.add(sectionId);
             }
         }
+
+        // Section keys currently visible in the active view (for collapse-all / expand-all)
+        const allSectionKeys = computed(() => {
+            if (currentView.value === 'section' && hasSections.value) {
+                return Object.keys(positiveSectionView.value).map(id => 'sec:' + id);
+            }
+            const view = groupByMode.value === 'subcategory' ? subcategoryGroupedView.value : positiveCategoryView.value;
+            return Object.keys(view).map(name => 'cat:' + name);
+        });
+        const allCollapsed = computed(() =>
+            allSectionKeys.value.length > 0 && allSectionKeys.value.every(k => collapsedSections.has(k))
+        );
+        // Collapse all: fold every category AND its open transaction lists ("the details")
+        function collapseAll() {
+            allSectionKeys.value.forEach(k => collapsedSections.add(k));
+            expandedMerchants.clear();
+        }
+        // Expand all: reopen top-level categories only (leave transaction lists folded)
+        function expandAll() {
+            collapsedSections.clear();
+        }
+        function toggleAllSections() {
+            if (allCollapsed.value) { expandAll(); } else { collapseAll(); }
+        }
+
+        // View-aware summary shown in the Transaction Details header
+        const pluralize = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+        const detailsSummary = computed(() => {
+            if (currentView.value === 'section' && hasSections.value) {
+                const views = positiveSectionView.value;
+                let merchants = 0;
+                Object.values(views).forEach(s => { merchants += Object.keys(s.filteredMerchants || {}).length; });
+                return `${pluralize(Object.keys(views).length, 'view', 'views')}, ${pluralize(merchants, 'merchant', 'merchants')}`;
+            }
+            if (groupByMode.value === 'subcategory') {
+                const cats = subcategoryGroupedView.value;
+                let subs = 0;
+                Object.values(cats).forEach(c => { subs += (c.sortedSubcategories || []).length; });
+                return `${pluralize(Object.keys(cats).length, 'category', 'categories')}, ${pluralize(subs, 'subcategory', 'subcategories')}`;
+            }
+            const cats = positiveCategoryView.value;
+            let merchants = 0;
+            Object.values(cats).forEach(c => { merchants += (c.sortedMerchants || []).length; });
+            return `${pluralize(Object.keys(cats).length, 'category', 'categories')}, ${pluralize(merchants, 'merchant', 'merchants')}`;
+        });
 
         // Sort merchants by configurable column and direction (for object-based sections)
         function sortMerchantEntries(merchants, column, dir) {
@@ -1545,17 +2232,177 @@ createApp({
             return currencyFormat.replace('{amount}', amount.toFixed(0));
         }
 
-        function formatDate(dateStr) {
+        function formatDate(dateStr, monthStr) {
             if (!dateStr) return '';
+            const yearSuffix = monthStr ? `, ${monthStr.slice(0, 4)}` : '';
             // Handle MM/DD format from Python
             if (dateStr.match(/^\d{1,2}\/\d{1,2}$/)) {
                 const [month, day] = dateStr.split('/');
                 const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                return `${months[parseInt(month)-1]} ${parseInt(day)}`;
+                return `${months[parseInt(month)-1]} ${parseInt(day)}${yearSuffix}`;
             }
             // Handle YYYY-MM-DD format
             const d = new Date(dateStr + 'T12:00:00');
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        function getTxnModeKey() {
+            if (currentView.value === 'section' && hasSections.value) return 'section';
+            return groupByMode.value === 'subcategory' ? 'subcategory' : 'merchant';
+        }
+
+        function getTxnItemsForMode(mode) {
+            const items = [];
+            if (mode === 'section') {
+                const sections = spendingData.value.sections || {};
+                for (const section of Object.values(sections)) {
+                    items.push(...Object.values(section.merchants || {}));
+                }
+                return items;
+            }
+            const categoryView = spendingData.value.categoryView || {};
+            for (const category of Object.values(categoryView)) {
+                for (const subcat of Object.values(category.subcategories || {})) {
+                    items.push(...Object.values(subcat.merchants || {}));
+                }
+            }
+            return items;
+        }
+
+        function ensureTxnMeasureElements() {
+            if (txMeasureHost) return;
+            txMeasureHost = document.createElement('div');
+            txMeasureHost.style.position = 'fixed';
+            txMeasureHost.style.left = '-10000px';
+            txMeasureHost.style.top = '-10000px';
+            txMeasureHost.style.visibility = 'hidden';
+            txMeasureHost.style.pointerEvents = 'none';
+            txMeasureHost.style.whiteSpace = 'nowrap';
+            txMeasureHost.style.fontSize = '0.85rem';
+
+            txMeasureDateEl = document.createElement('span');
+            txMeasureDateEl.className = 'txn-date';
+            txMeasureAmountEl = document.createElement('span');
+            txMeasureAmountEl.className = 'txn-amount';
+            txMeasureAccountEl = document.createElement('span');
+            txMeasureAccountEl.className = 'txn-source';
+
+            txMeasureHost.appendChild(txMeasureDateEl);
+            txMeasureHost.appendChild(txMeasureAmountEl);
+            txMeasureHost.appendChild(txMeasureAccountEl);
+            document.body.appendChild(txMeasureHost);
+        }
+
+        // Rendered width depends only on the string - the measuring spans carry
+        // fixed classes - and the same dates, accounts and amounts repeat across
+        // thousands of transactions and across all three profiles. Uncached,
+        // every transaction forced three synchronous layouts, which stalls large
+        // reports. Cleared per recompute so a resize re-measures.
+        const txMeasureCache = { date: new Map(), account: new Map(), amount: new Map() };
+
+        function measureCachedPx(kind, key, measure) {
+            const cache = txMeasureCache[kind];
+            let px = cache.get(key);
+            if (px === undefined) {
+                px = measure();
+                cache.set(key, px);
+            }
+            return px;
+        }
+
+        function clearTxnMeasureCache() {
+            txMeasureCache.date.clear();
+            txMeasureCache.account.clear();
+            txMeasureCache.amount.clear();
+        }
+
+        function measureTxnDatePx(label) {
+            return measureCachedPx('date', label || '', () => {
+                txMeasureDateEl.textContent = label || '';
+                return Math.ceil(txMeasureDateEl.getBoundingClientRect().width);
+            });
+        }
+
+        function measureTxnAmountPx(label) {
+            return measureCachedPx('amount', label || '', () => {
+                txMeasureAmountEl.textContent = label || '';
+                return Math.ceil(txMeasureAmountEl.getBoundingClientRect().width);
+            });
+        }
+
+        function measureTxnAccountPx(source) {
+            if (!source) return 0;
+            return measureCachedPx('account', source, () => {
+                txMeasureAccountEl.className = 'txn-source ' + source.toLowerCase();
+                txMeasureAccountEl.textContent = source;
+                return Math.ceil(txMeasureAccountEl.getBoundingClientRect().width);
+            });
+        }
+
+        function formatTxnAmountLabel(txn) {
+            const tags = txn.tags || [];
+            if (isIncome(tags)) {
+                return '+' + formatCurrency(Math.abs(txn.amount));
+            }
+            return formatCurrency(txn.amount);
+        }
+
+        function clampPx(value, min, max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
+        function measureTxnColumnsForMode(mode) {
+            ensureTxnMeasureElements();
+            const items = getTxnItemsForMode(mode);
+            let maxDate = 0;
+            let maxAccount = 0;
+            let maxAmount = 0;
+
+            for (const item of items) {
+                const txns = item.filteredTxns || item.transactions || [];
+
+                for (const txn of txns) {
+                    if (txn.date) {
+                        const dateLabel = formatDate(txn.date, txn.month);
+                        maxDate = Math.max(maxDate, measureTxnDatePx(dateLabel));
+                    }
+                    maxAccount = Math.max(maxAccount, measureTxnAccountPx(txn.source));
+                    maxAmount = Math.max(maxAmount, measureTxnAmountPx(formatTxnAmountLabel(txn)));
+                }
+            }
+
+            // Add small padding guardrails and clamp to desktop-appropriate bounds.
+            return {
+                date: clampPx(maxDate + 1, 70, 112),
+                account: clampPx(maxAccount + 10, 110, 260),
+                amount: clampPx(maxAmount + 4, 56, 160)
+            };
+        }
+
+        function applyTxnColumnProfile(mode = getTxnModeKey()) {
+            const profile = txColumnProfiles[mode];
+            if (!profile) return;
+            const rootStyle = document.documentElement.style;
+            rootStyle.setProperty('--txn-date-col', profile.date + 'px');
+            rootStyle.setProperty('--txn-account-col', profile.account + 'px');
+            rootStyle.setProperty('--txn-amount-col', profile.amount + 'px');
+        }
+
+        function recomputeTxnColumnProfiles() {
+            // Font metrics can change with the viewport, so start each pass cold;
+            // within the pass the three modes share every measurement.
+            clearTxnMeasureCache();
+            txColumnProfiles.merchant = measureTxnColumnsForMode('merchant');
+            txColumnProfiles.subcategory = measureTxnColumnsForMode('subcategory');
+            txColumnProfiles.section = hasSections.value ? measureTxnColumnsForMode('section') : txColumnProfiles.merchant;
+            applyTxnColumnProfile();
+        }
+
+        function recomputeTxnColumnsDebounced() {
+            if (txResizeDebounceHandle) clearTimeout(txResizeDebounceHandle);
+            txResizeDebounceHandle = setTimeout(() => {
+                recomputeTxnColumnProfiles();
+            }, 200);
         }
 
         function formatMonthLabel(key) {
@@ -1571,7 +2418,7 @@ createApp({
         }
 
         function filterTypeChar(type) {
-            return { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', tag: 't', text: 's' }[type] || '?';
+            return { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', daterange: 'dr', tag: 't', text: 's' }[type] || '?';
         }
 
         // Highlight search terms in transaction descriptions
@@ -1600,7 +2447,13 @@ createApp({
         }
 
         function expandMonthRange(rangeStr) {
-            const [start, end] = rangeStr.split('..');
+            const [start, end] = String(rangeStr).split('..');
+            // Both halves must be real YYYY-MM keys before we iterate. A
+            // hand-edited hash like '#+dr:garbage..garbage' otherwise walks
+            // 'garba' -> NaN-NaN, and 'NaN-NaN' <= 'garba' stays true forever,
+            // hanging the report while the array grows without bound.
+            const monthKey = /^\d{4}-(0[1-9]|1[0-2])$/;
+            if (!monthKey.test(start || '') || !monthKey.test(end || '')) return [];
             const months = [];
             let current = start;
             while (current <= end) {
@@ -1659,6 +2512,133 @@ createApp({
             }
         }
 
+        function toSortedArray(values) {
+            return [...values].map(v => String(v)).sort((a, b) => a.localeCompare(b));
+        }
+
+        function parseDetailsViewMode(currentViewMode, groupMode) {
+            if (currentViewMode === 'section') return 'section';
+            return groupMode === 'subcategory' ? 'subcategory' : 'merchant';
+        }
+
+        function applyDetailsViewMode(mode) {
+            if (mode === 'section' && hasSections.value) {
+                currentView.value = 'section';
+                return;
+            }
+            currentView.value = 'category';
+            groupByMode.value = mode === 'subcategory' ? 'subcategory' : 'merchant';
+        }
+
+        function saveUiState() {
+            if (isHydratingUiState) return;
+            try {
+                const state = {
+                    version: 1,
+                    detailsViewMode: parseDetailsViewMode(currentView.value, groupByMode.value),
+                    includeNegativeTotals: !!includeNegativeTotals.value,
+                    chartsCollapsed: !!chartsCollapsed.value,
+                    detailsCollapsed: !!detailsCollapsed.value,
+                    knownSectionKeys: toSortedArray(allPersistableSectionKeys.value),
+                    collapsedSectionKeys: toSortedArray(collapsedSections),
+                    knownItemIds: toSortedArray(allPersistableItemIds.value),
+                    expandedItemIds: toSortedArray(expandedMerchants),
+                    sortConfig: Object.fromEntries(
+                        Object.entries(sortConfig).map(([key, cfg]) => [key, {
+                            column: cfg?.column || 'total',
+                            dir: cfg?.dir === 'asc' ? 'asc' : 'desc'
+                        }])
+                    )
+                };
+                localStorage.setItem(UI_STATE_KEY, JSON.stringify(state));
+            } catch {
+                // Ignore localStorage failures (private mode/quota/security settings).
+            }
+        }
+
+        function normalizeUiStateForCurrentData() {
+            const validSectionKeys = allPersistableSectionKeys.value;
+            const validItemIds = allPersistableItemIds.value;
+
+            for (const key of [...collapsedSections]) {
+                if (!validSectionKeys.has(String(key))) collapsedSections.delete(key);
+            }
+            for (const id of [...expandedMerchants]) {
+                if (!validItemIds.has(String(id))) expandedMerchants.delete(id);
+            }
+            for (const key of Object.keys(sortConfig)) {
+                if (!validSectionKeys.has(String(key))) delete sortConfig[key];
+            }
+        }
+
+        function initUiState() {
+            const validSectionKeys = allPersistableSectionKeys.value;
+            const validItemIds = allPersistableItemIds.value;
+
+            collapsedSections.clear();
+            expandedMerchants.clear();
+            Object.keys(sortConfig).forEach(key => delete sortConfig[key]);
+
+            let state = null;
+            try {
+                const raw = localStorage.getItem(UI_STATE_KEY);
+                if (raw) state = JSON.parse(raw);
+            } catch {
+                state = null;
+            }
+
+            if (!state || typeof state !== 'object') {
+                validSectionKeys.forEach(key => collapsedSections.add(key));
+                applyDetailsViewMode('merchant');
+                includeNegativeTotals.value = false;
+                chartsCollapsed.value = false;
+                detailsCollapsed.value = false;
+                return;
+            }
+
+            const knownSectionKeys = new Set((state.knownSectionKeys || []).map(k => String(k)));
+            const savedCollapsedSectionKeys = new Set((state.collapsedSectionKeys || []).map(k => String(k)));
+
+            for (const key of validSectionKeys) {
+                if (!knownSectionKeys.has(key) || savedCollapsedSectionKeys.has(key)) {
+                    collapsedSections.add(key);
+                }
+            }
+
+            const knownItemIds = new Set((state.knownItemIds || []).map(id => String(id)));
+            const expandedItemIds = new Set((state.expandedItemIds || []).map(id => String(id)));
+            for (const id of validItemIds) {
+                if (knownItemIds.has(id) && expandedItemIds.has(id)) {
+                    expandedMerchants.add(id);
+                }
+            }
+
+            if (state.sortConfig && typeof state.sortConfig === 'object') {
+                for (const [key, cfg] of Object.entries(state.sortConfig)) {
+                    if (!validSectionKeys.has(String(key))) continue;
+                    const column = cfg?.column || 'total';
+                    const dir = cfg?.dir === 'asc' ? 'asc' : 'desc';
+                    sortConfig[key] = { column, dir };
+                }
+            }
+
+            applyDetailsViewMode(state.detailsViewMode);
+            includeNegativeTotals.value = !!state.includeNegativeTotals;
+            chartsCollapsed.value = !!state.chartsCollapsed;
+            detailsCollapsed.value = !!state.detailsCollapsed;
+            normalizeUiStateForCurrentData();
+        }
+
+        function resetUiSettings() {
+            try {
+                localStorage.removeItem(UI_STATE_KEY);
+            } catch {
+                // Ignore localStorage failures.
+            }
+            initUiState();
+            saveUiState();
+        }
+
         // ========== URL HASH ==========
 
         function filtersToHash() {
@@ -1666,7 +2646,7 @@ createApp({
                 history.replaceState(null, '', location.pathname);
                 return;
             }
-            const typeChar = { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', tag: 't', text: 's' };
+            const typeChar = { category: 'c', subcategory: 'sc', merchant: 'm', month: 'd', daterange: 'dr', tag: 't', text: 's' };
             const parts = activeFilters.value.map(f => {
                 const mode = f.mode === 'exclude' ? '-' : '+';
                 return `${mode}${typeChar[f.type]}:${encodeURIComponent(f.text)}`;
@@ -1677,7 +2657,7 @@ createApp({
         function hashToFilters() {
             const hash = location.hash.slice(1);
             if (!hash) return;
-            const typeMap = { c: 'category', sc: 'subcategory', m: 'merchant', d: 'month', t: 'tag', s: 'text' };
+            const typeMap = { c: 'category', sc: 'subcategory', m: 'merchant', d: 'month', dr: 'daterange', t: 'tag', s: 'text' };
             hash.split('&').forEach(part => {
                 const mode = part[0] === '-' ? 'exclude' : 'include';
                 const start = part[0] === '+' || part[0] === '-' ? 1 : 0;
@@ -1695,7 +2675,7 @@ createApp({
         // ========== CHARTS ==========
 
         function initCharts() {
-            // Monthly trend chart
+            // Cash flow trend chart (datasets are built per update so empty series drop out)
             if (monthlyChart.value) {
                 const ctx = monthlyChart.value.getContext('2d');
                 const labels = availableMonths.value.map(m => m.label);
@@ -1703,26 +2683,7 @@ createApp({
                     type: 'bar',
                     data: {
                         labels,
-                        datasets: [
-                            {
-                                label: 'Spending',
-                                data: [],
-                                backgroundColor: '#4facfe',
-                                borderRadius: 4
-                            },
-                            {
-                                label: 'Income',
-                                data: [],
-                                backgroundColor: '#00c9a7',
-                                borderRadius: 4
-                            },
-                            {
-                                label: 'Investment',
-                                data: [],
-                                backgroundColor: '#7c3aed',
-                                borderRadius: 4
-                            }
-                        ]
+                        datasets: []
                     },
                     options: {
                         responsive: true,
@@ -1742,7 +2703,7 @@ createApp({
                         onClick: (e, elements) => {
                             if (elements.length > 0) {
                                 const idx = elements[0].index;
-                                const month = availableMonths.value[idx];
+                                const month = monthlyChartMonths[idx];
                                 if (month) addFilter(month.key, 'month', month.label);
                             }
                         }
@@ -1759,7 +2720,7 @@ createApp({
                         labels: [],
                         datasets: [{
                             data: [],
-                            backgroundColor: CATEGORY_COLORS
+                            backgroundColor: []
                         }]
                     },
                     options: {
@@ -1769,13 +2730,6 @@ createApp({
                             legend: {
                                 position: 'right',
                                 labels: { boxWidth: 12, padding: 8 }
-                            }
-                        },
-                        onClick: (e, elements) => {
-                            if (elements.length > 0) {
-                                const idx = elements[0].index;
-                                const label = pieChartInstance.data.labels[idx];
-                                if (label) addFilter(label, 'category');
                             }
                         }
                     }
@@ -1798,18 +2752,7 @@ createApp({
                         plugins: {
                             legend: {
                                 position: 'top',
-                                labels: { boxWidth: 12, padding: 8 },
-                                onClick: (e, legendItem, legend) => {
-                                    // Add category filter when clicking legend
-                                    const category = legendItem.text;
-                                    if (category) addFilter(category, 'category');
-                                    // Also toggle visibility (default behavior)
-                                    const index = legendItem.datasetIndex;
-                                    const ci = legend.chart;
-                                    const meta = ci.getDatasetMeta(index);
-                                    meta.hidden = meta.hidden === null ? !ci.data.datasets[index].hidden : null;
-                                    ci.update();
-                                }
+                                labels: { boxWidth: 12, padding: 8 }
                             }
                         },
                         scales: {
@@ -1821,24 +2764,6 @@ createApp({
                                 ticks: {
                                     callback: v => formatCurrencyShort(v)
                                 }
-                            }
-                        },
-                        onClick: (e, elements) => {
-                            if (elements.length > 0) {
-                                const el = elements[0];
-                                const monthIndex = el.index;
-                                const datasetIndex = el.datasetIndex;
-
-                                // Get month from filtered months
-                                const monthsToShow = filteredMonthsForCharts.value;
-                                const month = monthsToShow[monthIndex];
-
-                                // Get category from dataset
-                                const category = categoryMonthChartInstance.data.datasets[datasetIndex]?.label;
-
-                                // Add both filters
-                                if (month) addFilter(month.key, 'month', month.label);
-                                if (category) addFilter(category, 'category');
                             }
                         }
                     }
@@ -1852,68 +2777,91 @@ createApp({
             const agg = chartAggregations.value;
             const monthsToShow = filteredMonthsForCharts.value;
 
-            // Update monthly trend (spending, income, and investment)
+            // Update cash flow trend. Months with nothing to plot (e.g. only transfers)
+            // are dropped so the axis doesn't carry empty columns, and series without
+            // data are left out entirely so they don't linger in the legend.
             if (monthlyChartInstance) {
-                const labels = monthsToShow.map(m => m.label);
-                const spendingData = monthsToShow.map(m => agg.spendingByMonth[m.key] || 0);
-                const incomeData = monthsToShow.map(m => agg.incomeByMonth[m.key] || 0);
-                const investmentData = monthsToShow.map(m => agg.investmentByMonth[m.key] || 0);
-                const maxVal = Math.max(...spendingData, ...incomeData, ...investmentData, 1);
-                monthlyChartInstance.data.labels = labels;
-                monthlyChartInstance.data.datasets[0].data = spendingData;
-                monthlyChartInstance.data.datasets[1].data = incomeData;
-                monthlyChartInstance.data.datasets[2].data = investmentData;
+                const CASH_FLOW_SERIES = [
+                    { label: 'Spending', byMonth: agg.spendingByMonth, color: '#4facfe' },
+                    { label: 'Income', byMonth: agg.incomeByMonth, color: '#00c9a7' },
+                    { label: 'Credits', byMonth: agg.creditsByMonth, color: '#ffa94d' },
+                    { label: 'Investment', byMonth: agg.investmentByMonth, color: '#7c3aed' }
+                ];
+
+                monthlyChartMonths = monthsToShow.filter(m =>
+                    CASH_FLOW_SERIES.some(s => (s.byMonth[m.key] || 0) > 0)
+                );
+
+                const datasets = [];
+                let maxVal = 1;
+                for (const series of CASH_FLOW_SERIES) {
+                    const data = monthlyChartMonths.map(m => series.byMonth[m.key] || 0);
+                    if (!data.some(v => v > 0)) continue;
+                    datasets.push({
+                        label: series.label,
+                        data,
+                        backgroundColor: series.color,
+                        borderRadius: 4
+                    });
+                    maxVal = Math.max(maxVal, ...data);
+                }
+
+                monthlyChartInstance.data.labels = monthlyChartMonths.map(m => m.label);
+                monthlyChartInstance.data.datasets = datasets;
                 monthlyChartInstance.options.scales.y.suggestedMax = maxVal * 1.1;
                 monthlyChartInstance.update();
             }
 
-            // Update category pie
+            // Both category charts share this ranking so their series and colors line up
+            const ranked = Object.entries(agg.byCategory)
+                .filter(([_, v]) => v > 0)
+                .sort((a, b) => b[1] - a[1])
+                .map(([name]) => name);
+            const topCategories = ranked.slice(0, TOP_CATEGORY_COUNT);
+            const otherCategories = ranked.slice(TOP_CATEGORY_COUNT);
+            const categoryColor = i => CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+
+            // Update category pie (top N + "Other")
             if (pieChartInstance) {
-                const entries = Object.entries(agg.byCategory)
-                    .filter(([_, v]) => v > 0)
-                    .sort((a, b) => b[1] - a[1]);
-                pieChartInstance.data.labels = entries.map(e => e[0]);
-                pieChartInstance.data.datasets[0].data = entries.map(e => e[1]);
+                const labels = topCategories.slice();
+                const data = topCategories.map(cat => agg.byCategory[cat]);
+                const colors = topCategories.map((_, i) => categoryColor(i));
+
+                if (otherCategories.length > 0) {
+                    labels.push(OTHER_CATEGORY_LABEL);
+                    data.push(otherCategories.reduce((sum, cat) => sum + agg.byCategory[cat], 0));
+                    colors.push(OTHER_CATEGORY_COLOR);
+                }
+
+                pieChartInstance.data.labels = labels;
+                pieChartInstance.data.datasets[0].data = data;
+                pieChartInstance.data.datasets[0].backgroundColor = colors;
                 pieChartInstance.update();
             }
 
-            // Update category by month (top 8 spending categories + income + investment)
+            // Update category by month (top N + "Other"). Months without spending
+            // are dropped so the axis doesn't carry empty columns.
             if (categoryMonthChartInstance) {
-                const labels = monthsToShow.map(m => m.label);
-                const categories = Object.keys(agg.byCategoryByMonth).sort((a, b) => {
-                    const totalA = Object.values(agg.byCategoryByMonth[a]).reduce((s, v) => s + v, 0);
-                    const totalB = Object.values(agg.byCategoryByMonth[b]).reduce((s, v) => s + v, 0);
-                    return totalB - totalA;
-                }).slice(0, 8); // Top 8 spending categories
-
-                const datasets = categories.map((cat, i) => ({
+                const spendingMonths = monthsToShow.filter(m => (agg.spendingByMonth[m.key] || 0) > 0);
+                const labels = spendingMonths.map(m => m.label);
+                const datasets = topCategories.map((cat, i) => ({
                     label: cat,
-                    data: monthsToShow.map(m => agg.byCategoryByMonth[cat][m.key] || 0),
-                    backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length]
+                    data: spendingMonths.map(m => agg.byCategoryByMonth[cat]?.[m.key] || 0),
+                    backgroundColor: categoryColor(i)
                 }));
 
-                // Add income as its own dataset (green, like monthly chart)
-                const incomeData = monthsToShow.map(m => agg.incomeByMonth[m.key] || 0);
-                if (incomeData.some(v => v > 0)) {
+                if (otherCategories.length > 0) {
                     datasets.push({
-                        label: 'Income',
-                        data: incomeData,
-                        backgroundColor: '#00c9a7'
-                    });
-                }
-
-                // Add investment as its own dataset (purple, like monthly chart)
-                const investmentData = monthsToShow.map(m => agg.investmentByMonth[m.key] || 0);
-                if (investmentData.some(v => v > 0)) {
-                    datasets.push({
-                        label: 'Investment',
-                        data: investmentData,
-                        backgroundColor: '#7c3aed'
+                        label: OTHER_CATEGORY_LABEL,
+                        data: spendingMonths.map(m => otherCategories.reduce(
+                            (sum, cat) => sum + (agg.byCategoryByMonth[cat]?.[m.key] || 0), 0
+                        )),
+                        backgroundColor: OTHER_CATEGORY_COLOR
                     });
                 }
 
                 // Calculate max for stacked bar (sum of all categories per month)
-                const monthTotals = monthsToShow.map((m, idx) =>
+                const monthTotals = spendingMonths.map((m, idx) =>
                     datasets.reduce((sum, ds) => sum + (ds.data[idx] || 0), 0)
                 );
                 const maxVal = Math.max(...monthTotals, 1); // At least 1 to avoid 0
@@ -1935,6 +2883,31 @@ createApp({
 
         watch(activeFilters, filtersToHash, { deep: true });
         watch(chartAggregations, updateCharts);
+        watch([currentView, groupByMode, hasSections], () => {
+            nextTick(() => applyTxnColumnProfile());
+        });
+        watch([currentView, groupByMode], saveUiState);
+        watch([chartsCollapsed, detailsCollapsed, includeNegativeTotals], saveUiState);
+        watch(
+            () => Array.from(collapsedSections).map(v => String(v)).sort(),
+            saveUiState
+        );
+        watch(
+            () => Array.from(expandedMerchants).map(v => String(v)).sort(),
+            saveUiState
+        );
+        watch(
+            () => JSON.stringify(sortConfig),
+            saveUiState
+        );
+        watch(allPersistableSectionKeys, () => {
+            normalizeUiStateForCurrentData();
+            saveUiState();
+        });
+        watch(allPersistableItemIds, () => {
+            normalizeUiStateForCurrentData();
+            saveUiState();
+        });
 
         // Track extra_field matches and auto-expand merchants
         watch(activeFilters, () => {
@@ -1963,16 +2936,27 @@ createApp({
         // ========== LIFECYCLE ==========
 
         onMounted(() => {
+            document.title = title.value;
             initTheme();
+            initUiState();
+            isHydratingUiState = false;
+            saveUiState();
 
             // Wait for next tick to ensure computed properties are ready
             nextTick(() => {
                 hashToFilters();
+                recomputeTxnColumnProfiles();
                 initCharts();
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        setAppReadyState();
+                    });
+                });
             });
 
             // Scroll handling
             window.addEventListener('scroll', handleScroll);
+            window.addEventListener('resize', recomputeTxnColumnsDebounced);
 
             // Close autocomplete on outside click
             document.addEventListener('click', e => {
@@ -1985,6 +2969,10 @@ createApp({
                     document.querySelectorAll('.match-info-popup.visible').forEach(p => {
                         p.classList.remove('visible');
                     });
+                }
+                // Close the date-filter popover on outside click
+                if (!e.target.closest('.date-filter-wrap')) {
+                    datePopoverOpen.value = false;
                 }
             });
 
@@ -2000,16 +2988,22 @@ createApp({
         return {
             // State
             activeFilters, expandedMerchants, extraFieldMatches, collapsedSections, searchQuery,
-            showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed, helpCollapsed,
-            currentView, groupByMode, sortConfig, includeNegativeTotals,
+            showAutocomplete, autocompleteIndex, isScrolled, isDarkTheme, chartsCollapsed,
+            currentView, groupByMode, sortConfig, includeNegativeTotals, detailsCollapsed, allCollapsed, detailsSummary,
             // Refs
             monthlyChart, categoryPieChart, categoryByMonthChart,
             // Computed
             spendingData, title, subtitle,
-            visibleSections, filteredCategoryView, positiveCategoryView, subcategoryGroupedView, creditMerchants, filteredSectionView, positiveSectionView, hasSections,
+            visibleSections, filteredCategoryView, positiveCategoryView, subcategoryGroupedView, creditMerchants, filteredSectionView, positiveSectionView, hasSections, negativeTotalsCount,
             sectionTotals, grandTotal, grossSpending, creditsTotal, uncategorizedTotal,
             numFilteredMonths, filteredAutocomplete, availableMonths,
             categoryColorMap, tagColor,
+            // Date filter popover
+            datePopoverOpen, pendingMonths, activeYearTab, customStart, customEnd,
+            yearTabs, thisLastPresets, activeYearMonths,
+            isDateItemActive, toggleDateItem, yearTabHasPending,
+            toggleDatePopover, closeDatePopover, clearPendingMonths,
+            applyDateFilters, clearAllDateFilters,
             // Cash flow, transfers, and investments
             incomeTotal, spendingTotal, dataCreditsTotal, cashFlow,
             transfersIn, transfersOut, transfersNet,
@@ -2020,14 +3014,15 @@ createApp({
             // All transactions section
             groupedTransactions, expandedTransactions,
             // Methods
-            addFilter, removeFilter, toggleFilterMode, clearFilters, addMonthFilter,
-            toggleExpand, toggleSection, toggleSort, sortedMerchants,
+            addFilter, removeFilter, toggleIncludeFilter, isIncludeFilterActive, toggleFilterMode, clearFilters, addMonthFilter,
+            toggleExpand, toggleSection, toggleSort, toggleAllSections, sortedMerchants,
             formatCurrency, formatDate, formatMonthLabel, formatPct, filterTypeChar,
             highlightDescription,
             onSearchInput, onSearchKeydown, selectAutocompleteItem,
-            toggleTheme
+            toggleTheme, resetUiSettings
         };
     }
 })
 .component('merchant-section', MerchantSection)
+.component('drill-calendar', DrillCalendar)
 .mount('#app');

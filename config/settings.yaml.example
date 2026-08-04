@@ -15,10 +15,15 @@ title: "Spending Analysis"
 
 # Data sources - list of transaction files to process
 # Paths are relative to the parent of the config directory
+# Supports glob patterns (*, ?, []) to match multiple files
 data_sources:
   - name: AMEX
-    file: data/amex-2025.csv
+    file: data/amex-2025.csv      # Single file
     type: amex
+  # Example with glob pattern to match multiple files:
+  # - name: AMEX
+  #   file: data/amex*.csv        # Matches amex-2024.csv, amex-2025.csv, etc.
+  #   type: amex
   - name: BOA
     file: data/boa-checking.txt
     type: boa
@@ -44,6 +49,21 @@ data_sources:
   #   format: "{date:%d.%m.%Y},{_},{txn_type},{vendor},{_},{amount}"
   #   columns:
   #     description: "{vendor} ({txn_type})"  # Combines columns into description
+
+  # Per-source report_fields override (when columns differ per account):
+  # - name: Wells Fargo Visa
+  #   file: data/visa.csv
+  #   format: "{date:%m/%d/%Y},{description},{memo},{amount}"
+  #   report_fields: [memo]
+
+# Capture columns to surface in the report's transaction details popup.
+# Any name here that a source's format string captures - e.g. {memo} - is shown
+# when non-blank; transactions without a value get no details badge. Names a
+# source does not capture are ignored, so a global list is safe with mixed
+# formats. A source-level report_fields replaces this list for that source.
+
+report_fields:
+  - memo
 
 # Output settings
 output_dir: output
