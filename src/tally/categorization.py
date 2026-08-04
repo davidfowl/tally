@@ -136,6 +136,47 @@ def _is_answered(row):
     return False
 
 
+# Every key a row may carry. Machine-owned display fields, the two review-only
+# fields, and the answer fields in PRESERVED_FIELDS.
+_ROW_FIELDS = frozenset(
+    ('id', 'key', 'source', 'date', 'merchant', 'amount') + PRESERVED_FIELDS
+)
+_REVIEW_ROW_FIELDS = _ROW_FIELDS | {'currently', 'file'}
+
+
+def _reject_unknown_fields(row, section, yaml_path):
+    """Fail on a field name this file does not define.
+
+    Only PRESERVED_FIELDS are carried across a regeneration, so a misspelled
+    answer - `useRules:` for `useRule:` - is not applied now and is silently
+    dropped the next time the file is rewritten. The answer disappears with no
+    indication it was ever there. inventory.yaml already rejects unknown keys
+    for exactly this reason; do the same here.
+    """
+    allowed = _REVIEW_ROW_FIELDS if section == 'reviews' else _ROW_FIELDS
+    unknown = sorted(set(row) - allowed)
+    if not unknown:
+        return
+    suggestions = {
+        'userule': 'useRule', 'userules': 'useRule', 'use_rule': 'useRule',
+        'newrule': 'newRule', 'newrules': 'newRule', 'new_rule': 'newRule',
+        'ainotes': 'aiNotes', 'ai_notes': 'aiNotes', 'notes': 'aiNotes',
+        'edit': 'edits',
+    }
+    lines = []
+    for name in unknown:
+        did_you_mean = suggestions.get(str(name).lower().replace(' ', ''))
+        lines.append(f"  {name}" + (f"  (did you mean '{did_you_mean}'?)" if did_you_mean else ''))
+    raise CategorizationError(
+        f"{yaml_path}: unrecognized field(s) in a '{section}' row"
+        f" (key {row.get('key')!r}):\n"
+        + '\n'.join(lines)
+        + "\n\nOnly " + ', '.join(sorted(allowed)) + " are recognized.\n"
+        "Fix the name and re-run 'tally up'. The file was not modified, so\n"
+        "nothing you typed has been lost."
+    )
+
+
 def _load_existing(yaml_path):
     """Read the previous categorization.yaml, keyed by row key.
 
@@ -180,8 +221,15 @@ def _load_existing(yaml_path):
     existing = {}
     for section in ('unknowns', 'reviews'):
         for row in data.get(section) or []:
-            if isinstance(row, dict) and row.get('key'):
-                existing[str(row['key'])] = row
+            if not isinstance(row, dict) or not row.get('key'):
+                continue
+            _reject_unknown_fields(row, section, yaml_path)
+            key = str(row['key'])
+            # A hand-edited file can still list one key twice. Whatever the
+            # cause, an empty row must never displace one holding an answer.
+            if key in existing and not _is_answered(row):
+                continue
+            existing[key] = row
     return existing
 
 
@@ -302,7 +350,13 @@ def _review_transactions(all_txns, config_dir):
     """
     from .inventory import is_reviewed, load_inventory
 
-    flagged = [t for t in all_txns if (t.get('match_info') or {}).get('review')]
+    # A tag-only review: rule can match a transaction that is still uncategorized.
+    # Such a row belongs in unknowns - an answer is what is being asked for - and
+    # listing it in both sections puts two rows under one key, where the blank
+    # review row can overwrite the answered unknown row on the next merge.
+    flagged = [t for t in all_txns
+               if (t.get('match_info') or {}).get('review')
+               and t.get('category') != 'Unknown']
     if not flagged:
         return []
 
@@ -389,7 +443,9 @@ def _render(rows, review_rows, state):
     """
     out = [HEADER.format(schema=SCHEMA_FILENAME, hints_file=HINTS_FILENAME)]
     out.extend(_render_state(state))
-    out.append("unknowns:")
+    # Explicit [] when empty: a bare "unknowns:" parses as None, not as an empty
+    # list, and _load_existing would reject the file this function just wrote.
+    out.append("unknowns: []" if not rows else "unknowns:")
 
     for row in rows:
         out.append(f"  - id: {row['id']}")
@@ -504,6 +560,25 @@ def generate_categorization(config, config_dir, all_txns, rules):
     status.awaiting_review = len(review_txns)
 
     if not unknown_txns and not review_txns:
+        # Everything is resolved. Returning here used to leave the previous file
+        # on disk, still listing rows that no longer exist - the opposite of the
+        # merge contract ("rows whose transactions now match a rule are
+        # dropped"), and an agent reading it would act on answered rows that
+        # have already been applied. Rewrite it empty instead. Never delete: the
+        # file is the user's, and an empty one states the position plainly.
+        if not os.path.exists(yaml_path):
+            return status
+        status.dropped_count = len(_load_existing(yaml_path))
+        state = {
+            'generated': datetime.now().replace(microsecond=0).isoformat(),
+            'totalSources': 0,
+            'totalUnknowns': 0,
+            'totalReviews': 0,
+        }
+        _write(yaml_path, _render([], [], state))
+        _write(hints_path, _render_hints([], state))
+        _write(schema_path, _build_schema_json(rules))
+        status.written = True
         return status
 
     existing = _load_existing(yaml_path)

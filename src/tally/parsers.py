@@ -79,6 +79,13 @@ def transaction_key(txn):
 
     Not unique on its own — exact duplicates collide by design. Use
     assign_transaction_keys() to get unique keys across a transaction list.
+
+    16 hex characters, not 8. At 32 bits the birthday bound puts a collision at
+    roughly 1% by 9,000 distinct transactions, and a collision here is invisible:
+    assign_transaction_keys() cannot tell it from a genuine duplicate, so it
+    ordinalizes the two rows, shifts their keys, and reattaches a stored answer
+    to the wrong transaction. 64 bits makes that negligible for any plausible
+    file.
     """
     date = txn.get('date')
     date_str = date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date)
@@ -91,7 +98,7 @@ def transaction_key(txn):
     # \x1f (unit separator) can't appear in CSV-derived text, so it can't be
     # forged to make two different transactions hash alike.
     digest = hashlib.sha1('\x1f'.join(parts).encode('utf-8')).hexdigest()
-    return digest[:8]
+    return digest[:16]
 
 
 def assign_transaction_keys(transactions):

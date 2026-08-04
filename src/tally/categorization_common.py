@@ -5,6 +5,7 @@ Split out from `categorization` so the schema builder and the generator can both
 depend on the rule-label format without importing each other.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -71,13 +72,27 @@ def rule_labels(rules):
         rules: list of 7-tuples from `merchant_utils.get_all_rules`,
             ``(pattern, merchant, category, subcategory, parsed, source, tags)``
 
+    Two rules can agree on merchant, category, subcategory and tags while
+    matching different things. Their labels are then identical, and de-duplicating
+    would leave `useRule` naming a rule the agent cannot identify - it would have
+    to guess which one to widen. Where that happens, and only there, the match
+    expression is appended to tell them apart.
+
     Returns:
         Sorted list of unique label strings, case-insensitive by merchant name.
     """
-    labels = {
-        format_rule_label(name, category, subcategory, tags)
-        for _pattern, name, category, subcategory, _parsed, _source, tags in rules
-    }
+    by_label = defaultdict(list)
+    for pattern, name, category, subcategory, _parsed, _source, tags in rules:
+        by_label[format_rule_label(name, category, subcategory, tags)].append(pattern)
+
+    labels = set()
+    for label, patterns in by_label.items():
+        distinct = sorted(set(patterns))
+        if len(distinct) < 2:
+            labels.add(label)
+            continue
+        for pattern in distinct:
+            labels.add(f"{label} | match: {pattern}")
     return sorted(labels, key=str.lower)
 
 

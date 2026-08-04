@@ -98,7 +98,20 @@ class TestReviewRows:
 
         status = generate_categorization(CONFIG, str(cfg), [txn], RULES)
         assert status.awaiting_review == 0, "stamping closes it"
-        assert status.written is False
+
+        # The file is rewritten empty rather than left holding the closed row:
+        # an agent reading a stale row would act on an answer already applied.
+        # It is never deleted - it is the user's file.
+        assert status.written is True
+        assert status.dropped_count == 1
+        data = load(cfg)
+        assert data['unknowns'] == [], "explicit [], so the file can be re-read"
+        assert not data.get('reviews')
+        assert data['state']['totalReviews'] == 0
+
+        # Re-reading its own output must not raise.
+        status = generate_categorization(CONFIG, str(cfg), [txn], RULES)
+        assert status.dropped_count == 0
 
     def test_unsetting_review_complete_reopens_the_file(self, tmp_path):
         """Documented workflow for when a CSV gains new rows."""
@@ -186,3 +199,135 @@ class TestAggregateSafety:
         assert before['spending_total'] == after['spending_total']
         assert after['spending_total'] > 0, "a stamped file still counts"
 
+
+class TestReviewFlagScope:
+    """review: comes from the rules that applied, not from every rule that matched."""
+
+    def _rule(self, name, expr, review=False, category='Shopping', subcategory=''):
+        from tally.merchant_engine import MerchantRule
+        return MerchantRule(
+            name=name, match_expr=expr, category=category,
+            subcategory=subcategory, tags=[], review=review,
+        )
+
+    def test_broad_review_rule_does_not_leak_onto_a_specific_match(self):
+        """The specific/general pattern in docs/guide.html, working as documented.
+
+        A broad catch-all flagged review: also matches, but it lost the
+        specificity contest and set nothing, so it has no say in whether the
+        transaction needs confirming.
+        """
+        from tally.merchant_engine import MatchResult
+        from tally.merchant_utils import _review_flag
+
+        specific = self._rule('Amazon Books', 'contains("books")', subcategory='Books')
+        broad = self._rule('Amazon', 'contains("amazon")', review=True)
+
+        result = MatchResult(matched=True)
+        result.matched_rule = specific
+        result.merchant_rule = specific
+        result.subcategory_rule = specific
+        result.all_matching_rules = [specific, broad]
+        result.tag_rules = []
+
+        assert _review_flag(result) is False
+
+    def test_the_winning_rule_being_flagged_still_surfaces(self):
+        from tally.merchant_engine import MatchResult
+        from tally.merchant_utils import _review_flag
+
+        winner = self._rule('Amazon Books', 'contains("books")', review=True)
+        result = MatchResult(matched=True)
+        result.matched_rule = winner
+        result.all_matching_rules = [winner]
+        result.tag_rules = []
+
+        assert _review_flag(result) is True
+
+    def test_a_tag_contributing_rule_being_flagged_still_surfaces(self):
+        """A tag rule did apply, even though it set no category."""
+        from tally.merchant_engine import MatchResult
+        from tally.merchant_utils import _review_flag
+
+        categoriser = self._rule('Amazon Books', 'contains("books")')
+        tagger = self._rule('Gifts', 'contains("amazon")', review=True)
+
+        result = MatchResult(matched=True)
+        result.matched_rule = categoriser
+        result.all_matching_rules = [categoriser, tagger]
+        result.tag_rules = [tagger]
+
+        assert _review_flag(result) is True
+
+
+class TestRowFieldValidation:
+    """A misspelled answer field must not be silently dropped."""
+
+    def test_misspelled_answer_field_is_rejected(self, tmp_path):
+        from tally.categorization import generate_categorization
+        from tally.categorization_common import CategorizationError
+        import pytest
+
+        cfg = config_dir(tmp_path)
+        txn = make_txn(cfg, category='Unknown')
+        generate_categorization(CONFIG, str(cfg), [txn], RULES)
+
+        path = cfg / 'categorization.yaml'
+        path.write_text(
+            path.read_text(encoding='utf-8').replace('useRule:', 'useRules:'),
+            encoding='utf-8')
+
+        with pytest.raises(CategorizationError) as excinfo:
+            generate_categorization(CONFIG, str(cfg), [txn], RULES)
+        assert 'useRules' in str(excinfo.value)
+        assert "did you mean 'useRule'" in str(excinfo.value)
+
+    def test_a_review_only_field_is_allowed_in_a_review_row(self, tmp_path):
+        """currently/file are legitimate in reviews and must not be rejected."""
+        cfg = config_dir(tmp_path)
+        txn = make_txn(cfg, review=True)
+        generate_categorization(CONFIG, str(cfg), [txn], RULES)
+
+        status = generate_categorization(CONFIG, str(cfg), [txn], RULES)
+        assert status.awaiting_review == 1
+
+
+class TestUnknownAndReviewAreDisjoint:
+    def test_an_uncategorized_flagged_transaction_is_only_an_unknown(self, tmp_path):
+        """A tag-only review: rule can match a still-uncategorized transaction.
+
+        Listing it in both sections puts two rows under one key, and the blank
+        review row can overwrite the answered unknown row on the next merge.
+        """
+        cfg = config_dir(tmp_path)
+        txn = make_txn(cfg, review=True, category='Unknown')
+
+        status = generate_categorization(CONFIG, str(cfg), [txn], RULES)
+
+        assert status.unknown_count == 1
+        assert status.awaiting_review == 0
+        data = load(cfg)
+        assert len(data['unknowns']) == 1
+        assert not data.get('reviews')
+
+    def test_an_answer_is_not_clobbered_by_a_duplicate_blank_row(self, tmp_path):
+        """Belt and braces: a hand-edited file listing one key twice."""
+        from tally.categorization import _load_existing
+
+        cfg = config_dir(tmp_path)
+        path = cfg / 'categorization.yaml'
+        path.write_text(
+            'state:\n'
+            '  generated: "2026-08-04T00:00:00"\n'
+            'unknowns:\n'
+            '  - id: 1\n'
+            '    key: "abc123"\n'
+            '    useRule: "[Amazon] Shopping"\n'
+            'reviews:\n'
+            '  - id: 2\n'
+            '    key: "abc123"\n'
+            '    useRule:\n',
+            encoding='utf-8')
+
+        existing = _load_existing(str(path))
+        assert existing['abc123']['useRule'] == '[Amazon] Shopping'

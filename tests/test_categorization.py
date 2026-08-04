@@ -76,6 +76,19 @@ class TestIdentity:
         assert transaction_key(make_txn(amount=1.0)) != transaction_key(base)
         assert transaction_key(make_txn(desc='OTHER')) != transaction_key(base)
 
+    def test_identity_is_64_bits_wide(self):
+        """A collision is indistinguishable from a genuine duplicate.
+
+        At 8 hex characters the birthday bound reaches ~1% by 9,000 distinct
+        transactions; assign_transaction_keys() would then ordinalize two
+        unrelated rows and reattach a stored answer to the wrong one.
+        """
+        assert len(transaction_key(make_txn())) == 16
+
+    def test_no_collisions_across_many_distinct_transactions(self):
+        txns = [make_txn(desc=f'MERCHANT {i}', amount=float(i)) for i in range(20000)]
+        assert len({transaction_key(t) for t in txns}) == len(txns)
+
     def test_true_duplicates_get_ordinals(self):
         txns = [make_txn(), make_txn(), make_txn()]
         assign_transaction_keys(txns)

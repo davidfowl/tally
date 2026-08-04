@@ -501,6 +501,28 @@ def extract_merchant_name(description):
     return 'Unknown'
 
 
+def _review_flag(result):
+    """True when a rule that actually applied to this transaction is flagged review:.
+
+    Deliberately not `result.all_matching_rules`: that list holds every rule whose
+    expression matched, including ones that lost the specificity contest and
+    contributed nothing to the outcome. Counting those leaks review: from a broad
+    catch-all onto every transaction a more specific rule already categorized -
+    which is the specific-beats-general pattern in docs/guide.html working exactly
+    as documented, so the broad rule should have no say in it.
+
+    A rule "applied" if it won category, merchant or subcategory, or contributed
+    a tag.
+    """
+    applied = (
+        result.matched_rule,
+        result.merchant_rule,
+        result.subcategory_rule,
+        *result.tag_rules,
+    )
+    return any(rule is not None and rule.review for rule in applied)
+
+
 def normalize_merchant(
     description: str,
     rules: list,
@@ -564,9 +586,11 @@ def normalize_merchant(
                 'rule_name': result.matched_rule.name if result.matched_rule else None,
                 'source': 'user',
                 'tags': list(result.tags),
-                # True when any matching rule is flagged review:, so the
-                # transaction surfaces for confirmation until its file is stamped.
-                'review': any(r.review for r in result.all_matching_rules),
+                # True when a rule that actually applied is flagged review:, so
+                # the transaction surfaces for confirmation until its file is
+                # stamped. See _review_flag for why "applied" is narrower than
+                # "matched".
+                'review': _review_flag(result),
             }
             if result.tag_sources:
                 match_info['tag_sources'] = result.tag_sources
@@ -589,7 +613,7 @@ def normalize_merchant(
                 'rule_name': first_tag_rule.name if first_tag_rule else None,
                 'source': 'user' if first_tag_rule else 'auto',
                 'tags': list(result.tags),
-                'review': any(r.review for r in result.all_matching_rules),
+                'review': _review_flag(result),
             }
             if result.tag_sources:
                 match_info['tag_sources'] = result.tag_sources

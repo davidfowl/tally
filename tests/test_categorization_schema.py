@@ -211,3 +211,35 @@ class TestCategoryFreeForm:
         schema = build_schema(make_rules())
         category_schema = schema['properties']['unknowns']['items']['properties']['edits']['properties']['category']
         assert 'string' in category_schema['type']
+
+class TestAmbiguousRuleLabels:
+    """Two rules can agree on every labelled field but match different things."""
+
+    def _rules(self):
+        return [
+            ('contains("amazon") and contains("book")', 'Amazon', 'Shopping', 'Books',
+             None, 'user', ['gift']),
+            ('contains("amzn") and contains("book")', 'Amazon', 'Shopping', 'Books',
+             None, 'user', ['gift']),
+            ('contains("netflix")', 'Netflix', 'Subscriptions', 'Streaming',
+             None, 'user', []),
+        ]
+
+    def test_colliding_labels_are_disambiguated_by_match_expression(self):
+        labels = rule_labels(self._rules())
+
+        base = format_rule_label('Amazon', 'Shopping', 'Books', ['gift'])
+        assert base not in labels, "the bare label cannot identify either rule"
+        assert f'{base} | match: contains("amazon") and contains("book")' in labels
+        assert f'{base} | match: contains("amzn") and contains("book")' in labels
+
+    def test_a_unique_label_is_left_alone(self):
+        labels = rule_labels(self._rules())
+        assert format_rule_label('Netflix', 'Subscriptions', 'Streaming', []) in labels
+
+    def test_identical_rules_still_collapse_to_one_label(self):
+        """Same label and same expression is a genuine duplicate, not ambiguity."""
+        rule = ('contains("netflix")', 'Netflix', 'Subscriptions', 'Streaming',
+                None, 'user', [])
+        labels = rule_labels([rule, rule])
+        assert labels == [format_rule_label('Netflix', 'Subscriptions', 'Streaming', [])]
