@@ -50,13 +50,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       # Handed to pr-build-comment.yml, which cannot see this run's outputs.
-      # For a fork PR the workflow_run event's `pull_requests` array is empty,
-      # so the PR number has to travel as an artifact.
+      # For a fork PR the workflow_run event's `pull_requests` array is empty
+      # and the commit is not associated with the PR from the base repo's side,
+      # so the PR number has to travel as an artifact. It is not trusted on
+      # arrival - pr-build-comment.yml verifies it against the head SHA GitHub
+      # recorded for this run before using its write token.
       - name: Save PR metadata
         run: |
           mkdir -p pr-meta
           echo "${{ steps.pr.outputs.number }}" > pr-meta/pr_number
-          echo "${{ steps.pr.outputs.short_sha }}" > pr-meta/short_sha
 
       - name: Upload PR metadata
         uses: actions/upload-artifact@v7

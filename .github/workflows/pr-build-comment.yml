@@ -2,8 +2,9 @@ name: PR Build Comment
 
 # The privileged half of PR Build. Runs on `workflow_run`, so it has the base
 # repository's token and `pull-requests: write` - and therefore never checks
-# out, builds, or executes any PR code. Its only inputs are two small values
-# read out of an artifact, and both are validated before use.
+# out, builds, or executes any PR code. Its only input is a PR number read out
+# of an artifact, and that number is both shape-checked and proven to belong to
+# the run that triggered this workflow before any write happens.
 
 on:
   workflow_run:
@@ -32,26 +33,38 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - name: Read and validate PR metadata
+      - name: Read and verify PR metadata
         id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          TRUSTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
         run: |
           PR_NUMBER=$(cat pr-meta/pr_number)
-          SHORT_SHA=$(cat pr-meta/short_sha)
 
-          # This artifact was produced by a run over untrusted PR code, so treat
-          # its contents as untrusted input: accept only the exact shapes we
-          # expect, and never interpolate them into a shell or API call unchecked.
+          # `pull_request` resolves workflow files from the PR head, so a fork
+          # controls what its own run writes here. Shape-check first, so the
+          # value is safe to put in an API path at all.
           if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
             echo "Refusing malformed pr_number: $PR_NUMBER"
             exit 1
           fi
-          if ! [[ "$SHORT_SHA" =~ ^[0-9a-f]{7}$ ]]; then
-            echo "Refusing malformed short_sha: $SHORT_SHA"
+
+          # Shape is not ownership: a fork could write someone else's PR number
+          # and steer this privileged run at an unrelated PR. Ask the API what
+          # that PR's head actually is, and require it to match the head SHA
+          # GitHub itself recorded for the triggering run.
+          PR_HEAD_SHA=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
+
+          if [ "$RUN_EVENT" = "pull_request" ] && [ "$PR_HEAD_SHA" != "$TRUSTED_HEAD_SHA" ]; then
+            echo "Refusing pr_number ${PR_NUMBER}: head ${PR_HEAD_SHA} does not match triggering run ${TRUSTED_HEAD_SHA}"
             exit 1
           fi
 
+          # Derived from the API, never from the artifact.
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=${PR_HEAD_SHA:0:7}" >> $GITHUB_OUTPUT
 
       - name: Build comment body
         run: |
@@ -96,7 +109,7 @@ jobs:
           cat comment.md
 
       - name: Find existing comment
-        uses: peter-evans/find-comment@v3
+        uses: peter-evans/find-comment@v4
         id: find
         with:
           issue-number: ${{ steps.meta.outputs.pr_number }}
@@ -104,7 +117,7 @@ jobs:
           body-includes: '## PR Build Available'
 
       - name: Create or update comment
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@v5
         with:
           comment-id: ${{ steps.find.outputs.comment-id }}
           issue-number: ${{ steps.meta.outputs.pr_number }}

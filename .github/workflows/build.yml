@@ -22,9 +22,6 @@ on:
         type: number
         default: 1
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   build:
     strategy:
