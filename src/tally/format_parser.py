@@ -25,6 +25,7 @@ class FormatSpec:
     negate_amount: bool = False  # If True, flip the sign of amounts (use {-amount} in format)
     abs_amount: bool = False  # If True, take absolute value of amounts (use {+amount} in format)
     delimiter: Optional[str] = None  # Column delimiter: None=comma, 'tab', 'whitespace', or regex pattern
+    report_fields: Optional[list] = None  # Capture names surfaced in the report (see report_fields setting)
 
 
 # Reserved field names that cannot be used for custom captures

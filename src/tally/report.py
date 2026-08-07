@@ -4,6 +4,8 @@ HTML Report Generation - Generate spending analysis HTML reports.
 This module handles generation of interactive HTML reports from analyzed transaction data.
 """
 
+import base64
+import html
 import json
 import sys
 from collections import defaultdict
@@ -116,14 +118,32 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     by_merchant = stats.get('by_merchant', {})
 
     # Helper function to create merchant IDs
-    def make_merchant_id(name):
-        return name.replace("'", "").replace('"', '').replace(' ', '_')
+    def make_merchant_id(name, category='', subcategory=''):
+        merchant_identity = json.dumps(
+            [name, category, subcategory],
+            ensure_ascii=False,
+            separators=(',', ':'),
+        ).encode('utf-8')
+        encoded_identity = base64.urlsafe_b64encode(merchant_identity).decode('ascii').rstrip('=')
+        return f"merchant_{encoded_identity}"
+
+    def get_merchant_display_name(merchant_key, merchant_data):
+        merchant_name = merchant_data.get('name')
+        if merchant_name:
+            return merchant_name
+        if isinstance(merchant_key, tuple) and merchant_key:
+            return merchant_key[0]
+        return str(merchant_key)
 
     # Build section merchants data
     def build_section_merchants(merchant_dict):
         merchants = {}
-        for merchant_name, data in merchant_dict.items():
-            merchant_id = make_merchant_id(merchant_name)
+        for merchant_key, data in merchant_dict.items():
+            # Display name comes from data['name'] when available; fall back to the key
+            merchant_name = get_merchant_display_name(merchant_key, data)
+            category = data.get('category', merchant_key[1] if isinstance(merchant_key, tuple) and len(merchant_key) > 1 else '')
+            subcategory = data.get('subcategory', merchant_key[2] if isinstance(merchant_key, tuple) and len(merchant_key) > 2 else '')
+            merchant_id = make_merchant_id(merchant_name, category, subcategory)
 
             # Build transactions array with unique IDs
             txns = []
@@ -154,11 +174,12 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
                 pattern = match_info.get('pattern', '')
                 match_info_json = {
                     'pattern': pattern,
+                    'ruleName': match_info.get('rule_name', ''),
                     'source': match_info.get('source', ''),
                     'explanation': explain_pattern(pattern),
                     'assignedMerchant': merchant_name,
-                    'assignedCategory': data.get('category', ''),
-                    'assignedSubcategory': data.get('subcategory', ''),
+                    'assignedCategory': category,
+                    'assignedSubcategory': subcategory,
                     'assignedTags': sorted(match_info.get('tags', [])),
                     'tagSources': match_info.get('tag_sources', {}),
                 }
@@ -166,12 +187,15 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
             merchants[merchant_id] = {
                 'id': merchant_id,
                 'displayName': merchant_name,
-                'category': data.get('category', 'Other'),
-                'subcategory': data.get('subcategory', 'Uncategorized'),
-                'categoryPath': f"{data.get('category', 'Other')}/{data.get('subcategory', 'Uncategorized')}".lower(),
+                'category': category or 'Other',
+                'subcategory': subcategory or 'Uncategorized',
+                'categoryPath': f"{category or 'Other'}/{subcategory or 'Uncategorized'}".lower(),
                 'calcType': data.get('calc_type', '/12'),
                 'monthsActive': data.get('months_active', 0),
                 'isConsistent': data.get('is_consistent', False),
+                'cv': data.get('cv', 0),
+                'recurrence': data.get('recurrence'),
+                'recurringMonthlyCost': data.get('recurring_monthly_cost', 0),
                 'ytd': data.get('total', 0),
                 'monthly': data.get('avg_when_active') or (data.get('total', 0) / num_months if num_months > 0 else 0),
                 'count': data.get('count', len(txns)),
@@ -204,7 +228,14 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
                 continue
 
             # Convert list of (name, data) tuples to dict format
-            merchant_dict = {name: data for name, data in merchants_list}
+            # Use a composite key to avoid collisions when the same merchant name
+            # appears with different categories in the same section
+            merchant_dict = {}
+            for merch_name, data in merchants_list:
+                cat = data.get('category', '')
+                subcat = data.get('subcategory', '')
+                unique_key = (merch_name, cat, subcat) if (cat or subcat) else merch_name
+                merchant_dict[unique_key] = data
             merchants = build_section_merchants(merchant_dict)
 
             # Add view info to each merchant
@@ -239,9 +270,13 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         # Build from by_merchant which contains ALL merchants (not filtered by sections)
         all_merchants = {}
         by_merchant = stats.get('by_merchant', {})
-        for merchant_name, data in by_merchant.items():
-            merchant_id = make_merchant_id(merchant_name)
-            all_merchants[merchant_id] = build_section_merchants({merchant_name: data})[merchant_id]
+        for merchant_key, data in by_merchant.items():
+            merchant_name = get_merchant_display_name(merchant_key, data)
+            category = data.get('category', '')
+            subcategory = data.get('subcategory', '')
+            unique_key = (merchant_name, category, subcategory) if (category or subcategory) else merchant_name
+            sub_result = build_section_merchants({unique_key: data})
+            all_merchants.update(sub_result)
 
         # Group by category -> subcategory
         categories = {}
@@ -331,8 +366,21 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
         'investmentTotal': stats.get('investment_total', 0),
     }
 
-    # Assemble final HTML
-    data_script = f'window.spendingData = {json.dumps(spending_data)};'
+    # Assemble final HTML.
+    # Resolve the title once, here, and store it back so the static loading
+    # shell and the mounted Vue app cannot disagree about what the report is
+    # called. YAML hands us whatever the user typed - `title: 2025` arrives as
+    # an int - so coerce before it reaches str.replace().
+    resolved_title = str(title) if title not in (None, '') else 'Tally Spending Analysis'
+    spending_data['title'] = resolved_title
+    # The shell interpolates the title into markup, so it must be escaped;
+    # the Vue path gets the raw value and escapes it at render time.
+    shell_title = html.escape(resolved_title, quote=True)
+    # A '</' in any string value would close the <script> element this gets
+    # embedded in. '\/' is a valid JSON escape for '/', so the payload still
+    # parses to the identical value while being inert to the HTML tokenizer.
+    data_json = json.dumps(spending_data).replace('</', '<\\/')
+    data_script = f'window.spendingData = {data_json};'
 
     if not embedded_html:
         # Write separate files for easier development
@@ -353,6 +401,8 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
 
         # Create HTML with external references
         final_html = html_template.replace(
+            '__REPORT_TITLE__', shell_title
+        ).replace(
             '<style>/* CSS_PLACEHOLDER */</style>',
             '<link rel="stylesheet" href="spending_report.css">'
         ).replace(
@@ -365,6 +415,8 @@ def write_summary_file_vue(stats, filepath, year=None, currency_format="${amount
     else:
         # Embed everything inline (default)
         final_html = html_template.replace(
+            '__REPORT_TITLE__', shell_title
+        ).replace(
             '/* CSS_PLACEHOLDER */', css_content
         ).replace(
             '/* DATA_PLACEHOLDER */', data_script

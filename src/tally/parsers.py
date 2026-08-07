@@ -5,7 +5,9 @@ This module handles parsing of CSV files and other transaction formats.
 """
 
 import csv
+import hashlib
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, NamedTuple
@@ -66,6 +68,57 @@ def parse_amount(amount_str, decimal_separator='.'):
     return -result if negative else result
 
 
+def transaction_key(txn):
+    """Compute a stable 8-character identity for a transaction.
+
+    Hashes source, date, amount, and raw description only. Custom captures such
+    as a tagging or memo column are deliberately excluded: an agent writing
+    "CATEGORY: ..." into the user's tagging column must not change a row's
+    identity. Such a row leaves the review file because it now matches a rule,
+    not because it became a different row.
+
+    Not unique on its own — exact duplicates collide by design. Use
+    assign_transaction_keys() to get unique keys across a transaction list.
+
+    16 hex characters, not 8. At 32 bits the birthday bound puts a collision at
+    roughly 1% by 9,000 distinct transactions, and a collision here is invisible:
+    assign_transaction_keys() cannot tell it from a genuine duplicate, so it
+    ordinalizes the two rows, shifts their keys, and reattaches a stored answer
+    to the wrong transaction. 64 bits makes that negligible for any plausible
+    file.
+    """
+    date = txn.get('date')
+    date_str = date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date)
+    parts = (
+        str(txn.get('source', '')),
+        date_str,
+        f"{txn.get('amount', 0):.2f}",
+        txn.get('raw_description', txn.get('description', '')),
+    )
+    # \x1f (unit separator) can't appear in CSV-derived text, so it can't be
+    # forged to make two different transactions hash alike.
+    digest = hashlib.sha1('\x1f'.join(parts).encode('utf-8')).hexdigest()
+    return digest[:16]
+
+
+def assign_transaction_keys(transactions):
+    """Stamp a unique 'key' on each transaction, disambiguating true duplicates.
+
+    Transactions identical in source, date, amount, and description share a base
+    hash; each occurrence after the first gets a '#N' ordinal suffix. Ordinals
+    follow parse order, which is stable for a given set of input files.
+
+    Mutates the dicts in place and returns the list for chaining.
+    """
+    seen = Counter()
+    for txn in transactions:
+        base = transaction_key(txn)
+        seen[base] += 1
+        occurrence = seen[base]
+        txn['key'] = base if occurrence == 1 else f"{base}#{occurrence}"
+    return transactions
+
+
 def parse_amex(filepath, rules):
     """Parse AMEX CSV file and return list of transactions.
 
@@ -96,6 +149,7 @@ def parse_amex(filepath, rules):
                     'category': category,
                     'subcategory': subcategory,
                     'source': 'AMEX',
+                    'filepath': filepath,
                     'match_info': match_info,
                     'tags': match_info.get('tags', []) if match_info else [],
                 })
@@ -145,6 +199,7 @@ def parse_boa(filepath, rules):
                     'category': category,
                     'subcategory': subcategory,
                     'source': 'BOA',
+                    'filepath': filepath,
                     'tags': match_info.get('tags', []) if match_info else [],
                 })
             except ValueError:
@@ -401,6 +456,7 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
                 'category': category,
                 'subcategory': subcategory,
                 'source': format_spec.source_name or source_name,
+                'filepath': filepath,
                 'is_credit': is_credit,
                 'match_info': match_info,
                 'tags': match_info.get('tags', []) if match_info else [],
@@ -415,9 +471,20 @@ def parse_generic_csv(filepath, format_spec, rules, source_name='CSV',
             if match_info and match_info.get('raw_values'):
                 for key, value in match_info['raw_values'].items():
                     txn[key] = value
-            # Add extra_fields from field: directives in .rules files
+            # Surface CSV captures named in report_fields, skipping blanks so a
+            # transaction without the field shows no detail badge at all
+            extra_fields = {}
+            if format_spec.report_fields:
+                extra_fields = {
+                    name: captures[name]
+                    for name in format_spec.report_fields
+                    if captures.get(name)
+                }
+            # Add extra_fields from field: directives in .rules files (these win)
             if match_info and match_info.get('extra_fields'):
-                txn['extra_fields'] = match_info['extra_fields']
+                extra_fields.update(match_info['extra_fields'])
+            if extra_fields:
+                txn['extra_fields'] = extra_fields
             # Apply transform_description if set
             if match_info and match_info.get('transform_description'):
                 txn['original_description'] = txn.get('raw_description', txn.get('description', ''))

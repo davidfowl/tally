@@ -34,6 +34,7 @@ def cmd_reference(args):
   {C.CYAN}category:{C.RESET} <Category>     {C.DIM}# Required: primary grouping{C.RESET}
   {C.CYAN}subcategory:{C.RESET} <Sub>       {C.DIM}# Optional: secondary grouping{C.RESET}
   {C.CYAN}tags:{C.RESET} tag1, tag2         {C.DIM}# Optional: labels for filtering{C.RESET}
+  {C.CYAN}review:{C.RESET} true            {C.DIM}# Optional: surface matches for confirmation{C.RESET}
 """)
 
         section("Match Functions")
@@ -115,6 +116,30 @@ def cmd_reference(args):
 
   Use {C.GREEN}exists(field.name){C.RESET} to safely check if a field exists:
   {C.DIM}match: exists(field.memo) and contains(field.memo, "REF"){C.RESET}
+
+  Captured fields power rule expressions only. To also show one in the report's
+  transaction details popup, name it in {C.GREEN}report_fields{C.RESET}:
+
+  {C.DIM}# In settings.yaml (applies to every source):{C.RESET}
+  {C.CYAN}report_fields:{C.RESET}
+  {C.CYAN}  - memo{C.RESET}
+
+  {C.DIM}# Or per source, when columns differ per account:{C.RESET}
+  {C.CYAN}data_sources:{C.RESET}
+  {C.CYAN}  - name: Visa{C.RESET}
+  {C.CYAN}    format: "{{date}},{{description}},{{memo}},{{amount}}"{C.RESET}
+  {C.CYAN}    report_fields: [memo]{C.RESET}
+
+  Blank values are omitted, so transactions without a memo show no details badge.
+  A global {C.GREEN}report_fields{C.RESET} entry that a source does not capture is ignored.
+
+  {C.BOLD}report_fields vs. field:{C.RESET} Both fill the details popup.
+    {C.GREEN}report_fields{C.RESET}  shows a captured column as-is, on every transaction
+    {C.GREEN}field:{C.RESET}         computes a value, only on transactions matching that rule
+
+  A passthrough like {C.DIM}field: memo = field.memo{C.RESET} is redundant once memo is in
+  report_fields. Neither is needed to read a field in {C.GREEN}match:{C.RESET} - captured
+  columns are always available there. On a key collision, {C.GREEN}field:{C.RESET} wins.
 """)
 
         section("Extraction Functions")
@@ -204,6 +229,12 @@ def cmd_reference(args):
 
   {C.CYAN}investment{C.RESET}   Retirement contributions (401K, IRA, HSA)
                {C.DIM}→ Tracked separately in Investment card and charts{C.RESET}
+
+  {C.CYAN}fixed{C.RESET}        Force merchant into fixed/recurring spend charts
+               {C.DIM}→ Overrides recurrence inference{C.RESET}
+
+  {C.CYAN}variable{C.RESET}     Force merchant out of fixed/recurring spend charts
+               {C.DIM}→ Overrides recurrence inference{C.RESET}
 
   {C.CYAN}refund{C.RESET}       Returns and credits on purchases
                {C.DIM}→ Shown in "Credits Applied" section, nets against spending{C.RESET}

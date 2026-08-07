@@ -435,7 +435,14 @@ def cmd_diag(args):
                 # Show special tag usage
                 print()
                 print(f"  {C.BOLD}Special Tags:{C.RESET} (affect spending analysis)")
-                for tag, desc in [('income', 'exclude deposits/salary'), ('refund', 'net against merchant'), ('transfer', 'exclude account transfers')]:
+                for tag, desc in [
+                    ('income', 'exclude deposits/salary'),
+                    ('refund', 'net against merchant'),
+                    ('transfer', 'exclude account transfers'),
+                    ('investment', 'track separately from spending'),
+                    ('fixed', 'force into fixed/recurring charts'),
+                    ('variable', 'force out of fixed/recurring charts'),
+                ]:
                     if tag in special_tags_used:
                         print(f"    {C.GREEN}✓{C.RESET} {C.CYAN}{tag}{C.RESET}: {C.DIM}{desc}{C.RESET}")
                     else:

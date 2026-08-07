@@ -44,6 +44,7 @@ class MerchantRule:
     let_bindings: List[Tuple[str, str]] = field(default_factory=list)  # [(var_name, expr), ...]
     fields: Dict[str, str] = field(default_factory=dict)  # {field_name: expr} extra fields to add
     transform: str = ""  # Expression to transform the description
+    review: bool = False  # Surface matches for confirmation until the file is reviewed
 
     def __post_init__(self):
         if not self.merchant:
@@ -255,6 +256,21 @@ class MerchantEngine:
                     current_rule['merchant'] = value
                 elif key == 'transform':
                     current_rule['transform'] = value
+                elif key == 'review':
+                    # Bare boolean, deliberately with no conditions: granularity
+                    # belongs in the rule's own match:, so a Best-Buy-in-December
+                    # rule carries the flag and the general Best Buy rule doesn't.
+                    lowered = value.lower()
+                    if lowered not in ('true', 'false'):
+                        raise MerchantParseError(
+                            f"Invalid review value: {value or '(empty)'} "
+                            f"(must be true or false)\n"
+                            f"  review: takes no conditions — to review only some "
+                            f"transactions, put the condition in a separate rule's "
+                            f"match: and flag that rule instead.",
+                            line_num, line
+                        )
+                    current_rule['review'] = lowered == 'true'
                 elif key == 'tags':
                     # Parse comma-separated tags, but don't split inside parentheses
                     tags = set()
@@ -364,6 +380,7 @@ class MerchantEngine:
             let_bindings=let_bindings,
             fields=fields,
             transform=rule_data.get('transform', ''),
+            review=rule_data.get('review', False),
         )
         self.rules.append(rule)
 
@@ -421,7 +438,10 @@ class MerchantEngine:
     ) -> Dict[str, Any]:
         """Evaluate field expressions for a matching rule.
 
-        Returns dict of field_name -> evaluated_value.
+        Returns dict of field_name -> evaluated_value. Fields evaluating to an
+        empty value are omitted, so a transaction lacking the underlying data
+        carries no field at all rather than a blank one. Zero and False are
+        retained - only None and empty strings/lists/dicts are dropped.
         """
         evaluated = {}
         for field_name, expr in rule.fields.items():
@@ -429,6 +449,8 @@ class MerchantEngine:
                 result = expr_parser.evaluate_transaction(
                     expr, transaction, variables=variables, data_sources=data_sources
                 )
+                if result is None or (isinstance(result, (str, list, dict)) and not result):
+                    continue
                 evaluated[field_name] = result
             except expr_parser.ExpressionError:
                 # If field evaluation fails, skip it

@@ -7,6 +7,7 @@ Analyzes transactions using merchant categorization rules.
 import json
 from collections import defaultdict
 from datetime import datetime
+import math
 
 from . import section_engine
 from .colors import C
@@ -41,10 +42,21 @@ from .report import (
 # ============================================================================
 
 
+def _get_merchant_display_name(merchant_key, data):
+    """Return the logical merchant name for string or tuple by_merchant keys."""
+    merchant_name = data.get('name')
+    if merchant_name:
+        return merchant_name
+    if isinstance(merchant_key, tuple) and merchant_key:
+        return merchant_key[0]
+    return str(merchant_key)
+
+
 def analyze_transactions(transactions):
     """Analyze transactions and return summary statistics."""
     by_category = defaultdict(lambda: {'count': 0, 'total': 0})
     by_merchant = defaultdict(lambda: {
+        'name': '',
         'count': 0,
         'total': 0,
         'category': '',
@@ -88,14 +100,17 @@ def analyze_transactions(transactions):
 
         month_key = txn['date'].strftime('%Y-%m')
 
-        # Track by merchant
-        by_merchant[txn['merchant']]['count'] += 1
-        by_merchant[txn['merchant']]['total'] += effective_amount
-        by_merchant[txn['merchant']]['category'] = txn['category']
-        by_merchant[txn['merchant']]['subcategory'] = txn['subcategory']
-        by_merchant[txn['merchant']]['months'].add(month_key)
-        by_merchant[txn['merchant']]['monthly_amounts'][month_key] += effective_amount
-        by_merchant[txn['merchant']]['payments'].append(effective_amount)
+        # Track by merchant - use composite key (merchant, category, subcategory)
+        # so same-named merchants with different categories appear as separate rows
+        merchant_key = (txn['merchant'], txn['category'], txn['subcategory'])
+        by_merchant[merchant_key]['name'] = txn['merchant']
+        by_merchant[merchant_key]['count'] += 1
+        by_merchant[merchant_key]['total'] += effective_amount
+        by_merchant[merchant_key]['category'] = txn['category']
+        by_merchant[merchant_key]['subcategory'] = txn['subcategory']
+        by_merchant[merchant_key]['months'].add(month_key)
+        by_merchant[merchant_key]['monthly_amounts'][month_key] += effective_amount
+        by_merchant[merchant_key]['payments'].append(effective_amount)
         txn_data = {
             'date': txn['date'].strftime('%m/%d'),
             'month': month_key,
@@ -111,24 +126,77 @@ def analyze_transactions(transactions):
         # Include original_description if transform was applied
         if txn.get('original_description'):
             txn_data['original_description'] = txn['original_description']
-        by_merchant[txn['merchant']]['transactions'].append(txn_data)
+        by_merchant[merchant_key]['transactions'].append(txn_data)
         # Track max payment
-        if effective_amount > by_merchant[txn['merchant']]['max_payment']:
-            by_merchant[txn['merchant']]['max_payment'] = effective_amount
+        if effective_amount > by_merchant[merchant_key]['max_payment']:
+            by_merchant[merchant_key]['max_payment'] = effective_amount
         # Store match info (pattern that matched) - first transaction sets this
-        if 'match_info' not in by_merchant[txn['merchant']] and txn.get('match_info'):
-            by_merchant[txn['merchant']]['match_info'] = txn['match_info']
+        if 'match_info' not in by_merchant[merchant_key] and txn.get('match_info'):
+            by_merchant[merchant_key]['match_info'] = txn['match_info']
         # Collect tags from all transactions
-        by_merchant[txn['merchant']]['tags'].update(txn.get('tags', []))
+        by_merchant[merchant_key]['tags'].update(txn.get('tags', []))
         # Track raw description variations
         raw_desc = txn.get('raw_description', txn.get('description', ''))
-        by_merchant[txn['merchant']]['raw_descriptions'][raw_desc] += 1
+        by_merchant[merchant_key]['raw_descriptions'][raw_desc] += 1
 
         by_month[month_key] += effective_amount
 
     # Calculate months active and monthly average for each merchant
     all_months = set(by_month.keys())
     num_months = len(all_months) if all_months else 12
+
+    def month_span(months):
+        """Calendar months from a merchant's first charge to its last, inclusive.
+
+        months_active counts how many months a merchant appears in, which says
+        nothing about how far apart they are: a merchant billed every January
+        for three years has three active months spread over a twenty-five month
+        span. Comparing the two is what separates that from three consecutive
+        months.
+        """
+        if not months:
+            return 0
+        keys = sorted(months)
+        start_year, start_month = (int(part) for part in keys[0].split('-')[:2])
+        end_year, end_month = (int(part) for part in keys[-1].split('-')[:2])
+        return (end_year - start_year) * 12 + (end_month - start_month) + 1
+
+    def infer_annual_amount(txns):
+        """Infer annual recurrence when payments recur ~12 months apart."""
+        month_amounts = defaultdict(list)
+        for txn in txns or []:
+            month_key = txn.get('month')
+            amount = float(txn.get('amount', 0) or 0)
+            if not month_key or amount <= 0:
+                continue
+            try:
+                year_str, month_str = month_key.split('-', 1)
+                month_index = int(year_str) * 12 + int(month_str)
+            except (ValueError, TypeError):
+                continue
+            month_amounts[month_index].append(amount)
+
+        if len(month_amounts) < 2:
+            return None
+
+        matches = []
+        for month_idx, amounts in month_amounts.items():
+            for offset in range(10, 15):
+                prior = month_amounts.get(month_idx - offset)
+                if not prior:
+                    continue
+                for amount in amounts:
+                    for other_amount in prior:
+                        avg = (amount + other_amount) / 2
+                        if avg <= 0:
+                            continue
+                        if abs(amount - other_amount) / avg <= 0.2:
+                            matches.extend([amount, other_amount])
+
+        if len(matches) >= 2:
+            return sum(matches) / len(matches)
+
+        return None
 
     for merchant, data in by_merchant.items():
         data['months_active'] = len(data['months'])
@@ -146,6 +214,36 @@ def analyze_transactions(transactions):
         else:
             data['cv'] = 0
             data['is_consistent'] = True
+
+        tags_lower = {str(tag).lower() for tag in data.get('tags', set())}
+        recurrence = None
+        recurring_monthly_cost = 0.0
+
+        if 'fixed' in tags_lower:
+            recurrence = 'monthly'
+            recurring_monthly_cost = data['avg_when_active']
+        elif 'variable' in tags_lower:
+            recurrence = None
+        # Two coverage tests, because either alone misreads a merchant.
+        # Against num_months: is it active across enough of the reporting
+        # period to still be a live cost? Against its own span: are its charges
+        # dense enough to be monthly at all? Without the second, a merchant
+        # billed once a year looks monthly whenever the data set is as sparse
+        # as the merchant - three Januaries in a January-only export cleared
+        # the first test and had its annual charge booked as a monthly one.
+        elif (data['months_active'] >= max(3, math.ceil(num_months * 0.5))
+                and data['months_active'] >= math.ceil(month_span(data['months']) * 0.5)
+                and data['cv'] < 0.3):
+            recurrence = 'monthly'
+            recurring_monthly_cost = data['avg_when_active']
+        else:
+            annual_amount = infer_annual_amount(data.get('transactions'))
+            if annual_amount is not None:
+                recurrence = 'annual'
+                recurring_monthly_cost = annual_amount / 12
+
+        data['recurrence'] = recurrence
+        data['recurring_monthly_cost'] = recurring_monthly_cost
 
         data['months'] = sorted(list(data['months']))
 
@@ -207,7 +305,7 @@ def classify_by_sections(by_merchant, sections_config, num_months=12):
     Classify merchants into user-defined sections.
 
     Args:
-        by_merchant: Dict of merchant_name -> merchant data (from analyze_transactions)
+        by_merchant: Dict of string or tuple merchant keys -> merchant data
         sections_config: SectionConfig from section_engine
         num_months: Number of months in the data period
 
@@ -223,7 +321,8 @@ def classify_by_sections(by_merchant, sections_config, num_months=12):
 
     # Convert by_merchant to the format expected by section_engine
     merchant_groups = []
-    for merchant_name, data in by_merchant.items():
+    for merchant_key, data in by_merchant.items():
+        merchant_name = _get_merchant_display_name(merchant_key, data)
 
         # Build transactions list for the section filter
         # The 'transactions' key already has the individual transactions
@@ -363,9 +462,9 @@ def build_merchant_json(merchant_name, data, verbose=0):
     # Add pattern match info if available
     match_info = data.get('match_info')
     if match_info:
-        pattern_tags = match_info.get('tags', [])
-        if isinstance(pattern_tags, set):
-            pattern_tags = sorted(pattern_tags)
+        # Sort unconditionally - tags originate from a set, so a list built from
+        # one carries arbitrary order into the JSON and breaks reproducibility
+        pattern_tags = sorted(match_info.get('tags', []))
         result['pattern'] = {
             'matched': match_info.get('pattern', ''),
             'source': match_info.get('source', 'unknown'),
@@ -430,21 +529,26 @@ def export_json(stats, verbose=0, category_filter=None, merchant_filter=None):
             if data['total'] > 0
         ],
         'credits': [
-            {'merchant': name, 'category': data.get('category', ''), 'amount': round(abs(data['total']), 2)}
-            for name, data in by_merchant.items() if data['total'] < 0
+            {
+                'merchant': _get_merchant_display_name(merchant_key, data),
+                'category': data.get('category', ''),
+                'amount': round(abs(data['total']), 2)
+            }
+            for merchant_key, data in by_merchant.items() if data['total'] < 0
         ],
         'merchants': []
     }
 
     merchants = []
-    for name, data in by_merchant.items():
+    for merchant_key, data in by_merchant.items():
+        merchant_name = _get_merchant_display_name(merchant_key, data)
         # Apply filters
         if category_filter and data.get('category') != category_filter:
             continue
-        if merchant_filter and name not in merchant_filter:
+        if merchant_filter and merchant_name not in merchant_filter:
             continue
 
-        merchants.append(build_merchant_json(name, data, verbose))
+        merchants.append(build_merchant_json(merchant_name, data, verbose))
 
     # Sort by monthly value descending
     merchants.sort(key=lambda x: x['monthly_value'], reverse=True)
@@ -521,7 +625,10 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
         lines.append('')
 
     # Credits/Refunds
-    credit_merchants = [(m, d) for m, d in by_merchant.items() if d['total'] < 0]
+    credit_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] < 0
+    ]
     if credit_merchants:
         lines.append('## Credits/Refunds\n')
         lines.append('| Merchant | Category | Amount |')
@@ -545,7 +652,10 @@ def export_markdown(stats, verbose=0, category_filter=None, merchant_filter=None
     lines.append("## Merchants\n")
 
     # Sort by monthly value (positive merchants only)
-    positive_merchants = [(m, d) for m, d in by_merchant.items() if d['total'] > 0]
+    positive_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] > 0
+    ]
     sorted_merchants = sorted(
         positive_merchants,
         key=lambda x: x[1].get('monthly_value', 0),
@@ -605,7 +715,8 @@ def export_csv(stats, category_filter=None, merchant_filter=None):
     all_transactions = []
     extra_field_names = set()
 
-    for merchant_name, data in by_merchant.items():
+    for merchant_key, data in by_merchant.items():
+        merchant_name = _get_merchant_display_name(merchant_key, data)
         # Apply filters
         if category_filter and data.get('category') != category_filter:
             continue
@@ -722,7 +833,10 @@ def print_summary(stats, title=None, filter_category=None, currency_format="${am
     # =========================================================================
     # CREDITS/REFUNDS (if any negative totals)
     # =========================================================================
-    credit_merchants = [(m, d) for m, d in by_merchant.items() if d['total'] < 0]
+    credit_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] < 0
+    ]
     if credit_merchants:
         print("\n" + "=" * 80)
         print("CREDITS/REFUNDS")
@@ -761,7 +875,10 @@ def print_summary(stats, title=None, filter_category=None, currency_format="${am
     print("-" * 80)
 
     # Only show positive-total merchants here (credits shown separately)
-    positive_merchants = [(m, d) for m, d in by_merchant.items() if d['total'] > 0]
+    positive_merchants = [
+        (_get_merchant_display_name(merchant_key, data), data)
+        for merchant_key, data in by_merchant.items() if data['total'] > 0
+    ]
     sorted_merchants = sorted(
         positive_merchants,
         key=lambda x: x[1].get('total', 0),
@@ -806,13 +923,13 @@ def print_summary(stats, title=None, filter_category=None, currency_format="${am
 
         # Build category -> merchants mapping
         cat_merchants = {}
-        for merchant, data in by_merchant.items():
+        for _merchant_key, data in by_merchant.items():
             if data['total'] <= 0:
                 continue
             cat = data.get('category', 'Unknown')
             if cat not in cat_merchants:
                 cat_merchants[cat] = []
-            cat_merchants[cat].append((merchant, data))
+            cat_merchants[cat].append((_get_merchant_display_name(_merchant_key, data), data))
 
         # Sort categories by total
         sorted_cats = sorted(
