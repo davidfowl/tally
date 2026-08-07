@@ -183,34 +183,49 @@ class TestTags:
     def test_tags_enum_matches_rule_facets(self):
         from tally.categorization_common import rule_facets
         rules = make_rules()
-        _categories, _subcategories, expected_tags = rule_facets(rules)
+        _categories, expected_tags = rule_facets(rules)
         schema = build_schema(rules)
         tags_schema = schema['properties']['unknowns']['items']['properties']['edits']['properties']['tags']
         assert tags_schema['items']['enum'] == expected_tags
 
 
-class TestCategoryFreeForm:
-    """edits.category suggests known categories but accepts new values."""
+class TestCategorySuggestions:
+    """edits.category completes from known categories but accepts new ones."""
 
-    def test_category_has_no_restrictive_enum(self):
+    def test_category_refs_the_shared_definition(self):
         schema = build_schema(make_rules())
-        category_schema = schema['properties']['unknowns']['items']['properties']['edits']['properties']['category']
-        assert 'enum' not in category_schema, (
-            "edits.category must not use 'enum' - it would reject brand-new categories"
-        )
+        # category is a $ref like useRule, defined once and shared by both rows.
+        for section in ('unknowns', 'reviews'):
+            category_prop = schema['properties'][section]['items']['properties']['edits']['properties']['category']
+            assert category_prop == {"$ref": "#/definitions/categoryValue"}
 
-    def test_category_offers_suggestions_via_examples(self):
+    def test_known_categories_are_an_enum_so_ctrl_space_has_completions(self):
         from tally.categorization_common import rule_facets
         rules = make_rules()
-        categories, _subcategories, _tags = rule_facets(rules)
-        schema = build_schema(rules)
-        category_schema = schema['properties']['unknowns']['items']['properties']['edits']['properties']['category']
-        assert category_schema['examples'] == categories
+        categories, _tags = rule_facets(rules)
+        enum_branch = build_schema(rules)['definitions']['categoryValue']['anyOf'][0]
+        assert enum_branch['enum'] == [None] + categories
+        # The bare "category: " parses as null, and this is the only branch that
+        # accepts null — that is what narrows the server onto the enum.
+        assert enum_branch['type'] == ['string', 'null']
 
-    def test_category_type_still_allows_any_string(self):
-        schema = build_schema(make_rules())
-        category_schema = schema['properties']['unknowns']['items']['properties']['edits']['properties']['category']
-        assert 'string' in category_schema['type']
+    def test_an_unknown_category_is_still_valid(self):
+        """A brand-new category must not be flagged — the open branch allows it."""
+        branches = build_schema(make_rules())['definitions']['categoryValue']['anyOf']
+        assert {"type": "string"} in branches, (
+            "without an unrestricted string branch, a category not yet in "
+            "merchants.rules would be reported as invalid"
+        )
+
+    def test_categories_offer_both_the_path_and_the_bare_category(self):
+        """Subcategory is optional in merchants.rules, so both forms are valid."""
+        from tally.categorization_common import rule_facets
+        categories, _tags = rule_facets(make_rules())
+        assert 'Shopping / Books' in categories
+        assert 'Auto / Maintenance' in categories
+        assert 'Shopping' in categories
+        assert 'Auto' in categories
+
 
 class TestAmbiguousRuleLabels:
     """Two rules can agree on every labelled field but match different things."""

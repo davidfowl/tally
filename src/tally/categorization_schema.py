@@ -21,7 +21,7 @@ def build_schema(rules):
     Returns:
         A JSON-serializable dict — the full schema document.
     """
-    categories, _subcategories, tags = rule_facets(rules)
+    categories, tags = rule_facets(rules)
     # No "" entry: an unanswered useRule is written bare, which parses as null,
     # and Ctrl+Space completes better from there than from inside a quote pair.
     # Adding "" would also put a blank row in the completion list.
@@ -38,9 +38,9 @@ def build_schema(rules):
         "type": "object",
         # The useRule enum is duplicated across every row in the equivalent
         # hand-rolled schema this replaces (it accounted for most of that
-        # file's 1,747 lines). Defining it once under definitions and $ref-ing it
-        # from the single place it is used keeps the document a fraction of
-        # the size and gives one place to look when the rule list changes.
+        # file's 1,747 lines). Defining each enum once here and $ref-ing it from
+        # the unknown and review rows keeps the document a fraction of the size
+        # and gives one place to look when the rule list changes.
         "definitions": {
             "useRuleValue": {
                 "type": ["string", "null"],
@@ -55,6 +55,29 @@ def build_schema(rules):
                     "the agent widens that rule's match expression to also cover this "
                     "transaction and applies any CATEGORY:/TAG: tagging the rule "
                     "expects."
+                ),
+            },
+            # The user may be introducing a category that isn't in
+            # merchants.rules yet, so this field cannot be a plain enum — that
+            # would flag a brand-new category as invalid. But "examples", the
+            # keyword that documents likely values without restricting them,
+            # is not a completion source in the redhat YAML language server, so
+            # Ctrl+Space finds nothing to offer.
+            #
+            # anyOf gets both: the enum branch is the only one that accepts the
+            # null a bare "category: " parses as, so the server narrows to it
+            # and completes from its enum, while the open string branch keeps
+            # any other value valid.
+            "categoryValue": {
+                "anyOf": [
+                    {"type": ["string", "null"], "enum": [None] + categories},
+                    {"type": "string"},
+                ],
+                "description": (
+                    "Category / Subcategory to apply to just this transaction "
+                    "(e.g. \"Shopping / Books\"). Ctrl+Space suggests existing "
+                    "categories, but any value is accepted — type a new one if "
+                    "you're introducing a category that doesn't exist yet."
                 ),
             },
         },
@@ -201,12 +224,7 @@ def build_schema(rules):
                             ),
                             "properties": {
                                 "category": {
-                                    "type": ["string", "null"],
-                                    "examples": categories,
-                                    "description": (
-                                        "Corrected Category / Subcategory. Any "
-                                        "value is accepted."
-                                    ),
+                                    "$ref": "#/definitions/categoryValue"
                                 },
                                 "tags": {
                                     "type": "array",
@@ -340,25 +358,7 @@ def build_schema(rules):
                             ),
                             "properties": {
                                 "category": {
-                                    "type": ["string", "null"],
-                                    # A plain "enum" here would reject any category not
-                                    # already in merchants.rules, but the user may be
-                                    # introducing a brand-new category. "examples" is
-                                    # the JSON-Schema keyword editors (the VS Code/
-                                    # redhat YAML language server included) use to
-                                    # populate Ctrl+Space suggestions WITHOUT
-                                    # restricting the value like "enum" would — it
-                                    # documents likely values without validating
-                                    # against them, so any string still passes.
-                                    "examples": categories,
-                                    "description": (
-                                        "Category / Subcategory to apply to just "
-                                        "this transaction (e.g. \"Shopping / "
-                                        "Books\"). Ctrl+Space suggests existing "
-                                        "categories, but any value is accepted "
-                                        "— type a new one if you're introducing "
-                                        "a category that doesn't exist yet."
-                                    ),
+                                    "$ref": "#/definitions/categoryValue"
                                 },
                                 "tags": {
                                     "type": "array",

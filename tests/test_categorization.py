@@ -154,7 +154,7 @@ class TestGeneration:
         assert row['useRule'] is None
         assert row['aiNotes'] == ''
         assert row['newRule'] == ''
-        assert row['edits'] == {'category': '', 'tags': [], 'memo': ''}
+        assert row['edits'] == {'category': None, 'tags': [], 'memo': ''}
 
     def test_unanswered_fields_use_their_typed_empty_form(self, tmp_path):
         """The literal text matters, not just the parsed value."""
@@ -163,10 +163,11 @@ class TestGeneration:
 
         assert '    aiNotes: ""' in text
         assert '    newRule: ""' in text
-        assert '      category: ""' in text
+        assert '      category: \n' in text, "category is bare with trailing space for Ctrl+Space"
+        assert '      category: ""' not in text
         assert '      memo: ""' in text
         assert '      tags: []' in text, "tags is an array; its empty form is []"
-        assert '    useRule:\n' in text, "useRule is bare so Ctrl+Space works"
+        assert '    useRule: \n' in text, "useRule is bare with trailing space for Ctrl+Space"
         assert '    useRule: ""' not in text
 
     def test_empty_tags_is_an_array_not_null(self, tmp_path):

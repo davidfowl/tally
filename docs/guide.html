@@ -329,7 +329,7 @@ field.description = regex_replace(field.description, "^APLPAY\\s+", "")</code></
         <ul>
             <li><code>categorization.yaml</code> — one row per uncategorized transaction. This is the only file you edit.</li>
             <li><code>categorization.hints.yaml</code> — deterministic match data tally computed by comparing each transaction against your own <code>merchants.rules</code>. No AI, no network; safe to delete, regenerated every run.</li>
-            <li><code>categorization-schema.json</code> — drives autocomplete and hover text while you edit <code>categorization.yaml</code>. You never open this one directly.</li>
+            <li><code>categorization-schema.json</code> — drives autocomplete and hover text while you edit <code>categorization.yaml</code>. You never open this one directly. VS Code caches it, so after a run that added rules, Ctrl+Shift+P → "Developer: Reload Window" to pick up the new suggestions.</li>
         </ul>
         <p>Fill in <code>useRule</code>, <code>newRule</code>, or <code>edits</code> for whichever rows you want to answer, save, then tell your agent to process the file.</p>
 

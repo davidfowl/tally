@@ -97,22 +97,24 @@ def rule_labels(rules):
 
 
 def rule_facets(rules):
-    """Distinct categories, subcategories, and tags across all rules.
+    """Distinct category paths and tags across all rules.
 
     Used for the `edits.category` / `edits.tags` schema enums.
 
     Returns:
-        Tuple of (categories, subcategories, tags), each a sorted list.
+        Tuple of (category_paths, tags), each a sorted list.
+        category_paths contains "Category / Subcategory" combinations plus the
+        bare category, since Subcategory is its own column in merchants.rules
+        and is allowed to be empty.
     """
-    categories, subcategories, tags = set(), set(), set()
+    category_paths, tags = set(), set()
     for _pattern, _name, category, subcategory, _parsed, _source, rule_tags in rules:
         if category:
-            categories.add(category)
-        if subcategory:
-            subcategories.add(subcategory)
+            category_paths.add(category)
+            if subcategory:
+                category_paths.add(f"{category} / {subcategory}")
         tags.update(t for t in (rule_tags or []) if t)
     return (
-        sorted(categories, key=str.lower),
-        sorted(subcategories, key=str.lower),
+        sorted(category_paths, key=str.lower),
         sorted(tags, key=str.lower),
     )

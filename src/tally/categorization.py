@@ -62,36 +62,28 @@ def _is_substantial_match(candidate, name):
 HEADER = """\
 # yaml-language-server: $schema={schema}
 #
-# Answer the rows below, then tell your agent to process the file.
-# Editing this file IS the interface — hand-editing is expected.
+# ─── What You Edit ───
+# 1. You only modify useRule, newRule, and any values under edits.
+# 2. Ctrl+Space shows available options for useRule, edits.category, and edits.tags.
+#    The editor caches the schema, so a run that added rules can still complete
+#    from the previous list. Ctrl+Shift+P → "Developer: Reload Window" picks up
+#    the new one.
+# 3. edits.category accepts free-form text — type a category that doesn't exist
+#    yet and it is still applied.
+# 4. Leaving a row blank makes it reappear next generation.
 #
-# This file is a convenience, not a requirement. Categorizing by talking to your
-# agent in prose works exactly as it always has; use whichever you prefer, or
-# both.
-#
-# Machine-owned fields are rewritten on every run; edits to them are discarded:
-#   id, key, source, date, merchant, amount
-# Your fields, carried forward until the row is categorized:
-#   useRule, newRule, edits
-# Your agent's field, never written by tally:
-#   aiNotes
+# ─── What Each Answer Does ───
+# useRule only      → widens that rule's match expression to cover this transaction.
+# newRule only      → free-form prose describing the rule you want created.
+# useRule & newRule → useRule names the target rule, newRule says what to do with it.
+# edits.category    → tags this transaction's CSV row with CATEGORY: X / Y.
+# edits.tags        → adds TAG: markers to this transaction's CSV row.
+# edits.memo        → adds text to this transaction's memo column.
 #
 # ─── Navigation ───
 # 1. Copy "useRule: " to the clipboard.
 # 2. Ctrl+F "useRule:", then F3 to jump between items.
 # 3. Paste (replacing the same text) and press Ctrl+Space for autocomplete.
-#
-# ─── Getting help on a row ───
-# "aiNotes" is your agent's to fill, not yours — a blank one is not a question
-# waiting on you. Say "annotate" to have your agent write its best guess and
-# reasoning there, then answer from that. Tally never writes it and never
-# overwrites it. Scope it: "annotate", "annotate 5-12", "annotate the Amazons".
-#
-# "id" is a display label only — it is renumbered every run, so "process 7, 9, 13"
-# always means this file as it looks right now.
-#
-# Deterministic match data for these rows lives in {hints_file};
-# it is regenerated every run and safe to delete.
 """
 
 HINTS_HEADER = """\
@@ -417,17 +409,15 @@ def _render_state(state):
 def _render_answer_fields(out, row, include_edits=True):
     """Emit the block of fields the user or agent owns."""
     out.append(_field_line('aiNotes', row.get('aiNotes'), indent=4))
-    # useRule is left bare rather than `""`. It is the one enum-backed field, and
-    # Ctrl+Space completes better from an empty value than from inside a quote
-    # pair — the quotes would have to be added to the enum and would then show up
-    # as an entry in the completion list.
+    # Enum-backed fields are left bare rather than `""` — Ctrl+Space completes
+    # better from an empty value than from inside a quote pair.
     out.append(_field_line('useRule', row.get('useRule'), indent=4, empty=None))
     out.append(_field_line('newRule', row.get('newRule'), indent=4))
     if not include_edits:
         return
     edits = row.get('edits') if isinstance(row.get('edits'), dict) else {}
     out.append("    edits:")
-    out.append(_field_line('category', edits.get('category'), indent=6))
+    out.append(_field_line('category', edits.get('category'), indent=6, empty=None))
     # tags is an array in the schema, so its empty form is [] rather than "".
     out.append(_field_line('tags', edits.get('tags'), indent=6, empty='[]'))
     out.append(_field_line('memo', edits.get('memo'), indent=6))
@@ -441,7 +431,7 @@ def _render(rows, review_rows, state):
     header comment survives. Every value goes through _q(), so quoting is still
     handled by a real serializer.
     """
-    out = [HEADER.format(schema=SCHEMA_FILENAME, hints_file=HINTS_FILENAME)]
+    out = [HEADER.format(schema=SCHEMA_FILENAME)]
     out.extend(_render_state(state))
     # Explicit [] when empty: a bare "unknowns:" parses as None, not as an empty
     # list, and _load_existing would reject the file this function just wrote.
@@ -511,12 +501,14 @@ def _field_line(name, value, indent, empty='""'):
 
     Free-text fields are written as `""` rather than left blank, so it is obvious
     at a glance which fields are the user's to fill and the cursor lands inside
-    the quotes. Arrays pass `[]`; pass ``empty=None`` for a bare `name:`, which
-    parses as null.
+    the quotes. Arrays pass `[]`; pass ``empty=None`` for a bare `name: `, which
+    parses as null. The trailing space is deliberate — it puts the cursor at the
+    value position for the redhat YAML server's Ctrl+Space. An editor that trims
+    it leaves the file no worse off than omitting it would.
     """
     pad = ' ' * indent
     if value is None or value == '' or value == []:
-        return f"{pad}{name}:" if empty is None else f"{pad}{name}: {empty}"
+        return f"{pad}{name}: " if empty is None else f"{pad}{name}: {empty}"
     return f"{pad}{name}: {_q(value)}"
 
 
